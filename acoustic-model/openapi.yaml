@@ -1,0 +1,88 @@
+openapi: 3.1.0
+info:
+  title: Mzazi Care Acoustic Model - Internal Contract (Draft)
+  version: '0.1'
+  description: |
+    A draft of the internal HTTP contract between the `api` service and the `acoustic-model`
+    service, written from the `api` side as part of defining the backend API contract (Linear
+    HEZ-12), since `api`'s audio endpoints need to know what they're calling.
+
+    This is explicitly a draft, not a settled contract: `acoustic-model/` has no implementation
+    yet, and its language/framework is still undecided (Linear HEZ-43). Linear HEZ-44, "Define the
+    internal HTTP contract" (milestone "4. Acoustic ML Service"), is where this gets finalized once
+    that decision is made and the service is actually scaffolded - update this file then rather
+    than treating it as frozen.
+
+    Reachable only via ECS Service Connect from the `api` service, inside the VPC - no public
+    exposure, no ALB, per architecture.md. Network-level isolation (private subnet, no public
+    exposure, Service Connect namespace scoping) is this API's security boundary; there's no
+    app-level authentication here, unlike the public `api` service's Cognito-JWT bearer auth.
+
+servers:
+  - url: http://acoustic-model.mzazi-care.internal
+    description: |
+      Placeholder Service Connect DNS name - the real hostname depends on decisions the AWS CDK
+      infra milestone hasn't made yet (namespace name, per-environment naming). Update once HEZ-21
+      (ECS Fargate cluster + Service Connect) settles it.
+
+security: []
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Backing Linear HEZ-49. Used for the ECS task's own health check, not called by `api`.
+      operationId: health
+      responses:
+        '200':
+          description: Healthy.
+
+  /score:
+    post:
+      summary: Score a visit's recorded audio for cognitive risk
+      description: |
+        Called by `api`'s `POST /v1/visit-schedules/{visitScheduleId}/audio` handler after
+        confirming the recording is in S3, and only when the dependant has
+        `cognitive_monitoring_enabled: true` and `audio_cognitive_monitoring` consent on file -
+        `api` is responsible for that gating, not this service.
+
+        Audio is passed by S3 reference, not as a request body payload - both services run in the
+        same VPC with S3 Gateway Endpoint access, so there's no reason to proxy the audio bytes
+        over this internal HTTP call as well as through S3.
+      operationId: score
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [s3Bucket, s3Key]
+              properties:
+                s3Bucket:
+                  type: string
+                  example: mzazi-care-visit-audio
+                s3Key:
+                  type: string
+                visitScheduleId:
+                  type: string
+                  format: uuid
+                  description: For correlation in logs only - not used in scoring.
+      responses:
+        '200':
+          description: Scored successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [riskScore, modelVersion]
+                properties:
+                  riskScore:
+                    type: number
+                    format: double
+                    minimum: 0
+                    maximum: 1
+                    description: Continuous [0, 1] probability score, confirmed by the project owner 2026-09-09 (see docs/project-state.md). Matches `audio_records.risk_score`'s `numeric(5,4) CHECK (risk_score BETWEEN 0 AND 1)`.
+                  modelVersion:
+                    type: string
+        '422':
+          description: The audio couldn't be scored (e.g. too short, unintelligible, wrong format) - `api` should still write the `audio_records` row, leaving `risk_score`/`model_version` null.

@@ -19,7 +19,8 @@
     "db:generate": "drizzle-kit generate",
     "db:generate:custom": "drizzle-kit generate --custom",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "openapi:lint": "redocly lint openapi.yaml --config .redocly.yaml"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@redocly/cli": "^2.51.2",
     "@types/express": "^5.0.6",
     "@types/node": "^26.5.0",
     "@types/pg": "^8.23.1",

@@ -1,0 +1,5 @@
+# Lint config for openapi.yaml (`npx @redocly/cli lint openapi.yaml --config .redocly.yaml`).
+# Same reasoning as backend/.redocly.yaml.
+rules:
+  operation-4xx-response: off
+  info-license: off
