@@ -23,4 +23,4 @@ npm run dev
 `npm run db:studio` (from `backend/`) opens a browser-based database viewer.
 `npm test` runs the unit tests; the DB-enforcement integration tests in that same run need `TEST_DATABASE_URL` (in `.env.example`) and skip themselves cleanly if it isn't set.
 
-See `backend/drizzle/README.md` for what lives in the hand-written migrations and how to re-verify them, and `backend/openapi.yaml` for the API contract.
+See `backend/drizzle/README.md` for migrations and how to re-verify them, check `backend/openapi.yaml` for the API contract.
