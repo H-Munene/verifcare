@@ -1,0 +1,10 @@
+/docs
+
+# Node.js / TypeScript (applies to any package in this repo: backend/, infra/, frontend/web/)
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
