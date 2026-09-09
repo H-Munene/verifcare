@@ -5,8 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1788943299908,
-      "tag": "0000_dapper_swordsman",
+      "when": 1788943662336,
+      "tag": "0000_extensions_and_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788943668575,
+      "tag": "0001_brave_agent_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788943675172,
+      "tag": "0002_triggers_and_exclusions",
       "breakpoints": true
     }
   ]
