@@ -8,6 +8,10 @@ Backend compute runs on three AWS Lambda functions (`api`, `acoustic-model`, `mi
 
 This diagram omits the Region/VPC/public-private subnet boundaries (diagramming tool and space constraints) - worth stating explicitly since it can't be inferred from the image alone: `api` and `missed-visit-sweep` are both VPC-attached in a private subnet (so they can reach RDS directly); `acoustic-model` is not (it only touches S3). All outbound calls from the two VPC-attached functions to other AWS services - Secrets Manager, Rekognition, SNS, CloudWatch, and `api`'s invocation of `acoustic-model` - go through a single NAT Gateway.
 
+## Cost Estimate
+
+![Mzazi Care AWS cost estimate](assets/mzazi_care_cost_estimate.PNG)
+
 ## Local development
 
 Requires Docker.
