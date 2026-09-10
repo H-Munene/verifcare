@@ -751,11 +751,12 @@ paths:
       summary: Confirm uploaded audio and trigger cognitive-risk scoring
       description: |
         Called after the client has PUT the recording to the presigned URL. Creates the
-        `audio_records` row, then calls the internal `acoustic-model` service over ECS Service
-        Connect (see `acoustic-model/openapi.yaml` for that internal contract) and writes the
-        returned `risk_score`/`model_version` back onto the row. Only runs when the dependant has
-        `cognitive_monitoring_enabled: true` and consent (`consent_type: audio_cognitive_monitoring`)
-        is on file - both checked before the acoustic-model call is made.
+        `audio_records` row, then directly invokes the internal `acoustic-model` Lambda function
+        (AWS SDK `Invoke`, synchronous - see `acoustic-model/openapi.yaml` for that internal
+        contract) and writes the returned `risk_score`/`model_version` back onto the row. Only
+        runs when the dependant has `cognitive_monitoring_enabled: true` and consent
+        (`consent_type: audio_cognitive_monitoring`) is on file - both checked before the
+        acoustic-model call is made.
       operationId: createAudioRecord
       requestBody:
         required: true
