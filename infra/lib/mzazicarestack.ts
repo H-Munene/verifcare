@@ -2,15 +2,36 @@ import * as cdk from "aws-cdk-lib/core";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cognito from "aws-cdk-lib/aws-cognito";
+import * as rds from "aws-cdk-lib/aws-rds";
+import * as kms from "aws-cdk-lib/aws-kms";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class MzaziCareStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const vpc = new ec2.Vpc(this, "Vpc", {
+    // RDS DB subnet groups require subnets spanning at least 2 AZs, even for a
+    // Single-AZ instance - so the VPC needs a second AZ's subnets to exist,
+    // even though actual compute (RDS, later the api/missed-visit-sweep
+    // Lambdas) stays pinned to eu-west-1c via an explicit AZ property. Only
+    // one NAT Gateway is still created (natGateways: 1) - the second AZ's
+    // private subnet routes cross-AZ to it, at a small per-GB data transfer
+    // cost, rather than paying for a second NAT Gateway.
+    //
+    // Construct id deliberately changed from "Vpc" to "Vpc2": adding a second
+    // AZ to an already-deployed single-AZ Vpc construct forces CDK to
+    // recalculate every subnet's CIDR block, and CloudFormation has no way to
+    // sequence "delete the old, now-relocated subnet" before "create the new
+    // subnet that wants its freed CIDR" - the two collide as a real, repeatable
+    // deploy failure ("CIDR conflicts with another subnet"), not a transient
+    // one. Renaming the id forces a clean full replacement (new VPC created
+    // fresh with the correct 2-AZ layout, old one deleted after) instead of a
+    // doomed in-place patch. Safe here since nothing has ever successfully
+    // landed inside this VPC yet - every prior RDS attempt failed and rolled
+    // back before anything attached to it.
+    const vpc = new ec2.Vpc(this, "Vpc2", {
       ipAddresses: ec2.IpAddresses.cidr("10.0.0.0/16"),
-      availabilityZones: ["eu-west-1c"],
+      availabilityZones: ["eu-west-1c", "eu-west-1a"],
       natGateways: 1,
       subnetConfiguration: [
         { name: "Public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
@@ -47,6 +68,57 @@ export class MzaziCareStack extends cdk.Stack {
     new cdk.CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new cdk.CfnOutput(this, "UserPoolClientId", {
       value: userPoolClient.userPoolClientId,
+    });
+
+    const rdsEncryptionKey = new kms.Key(this, "RdsEncryptionKey", {
+      alias: "mzazi-care/rds",
+      description: "Encrypts the Mzazi Care RDS PostgreSQL instance",
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    const rdsSecretEncryptionKey = new kms.Key(this, "RdsSecretEncryptionKey", {
+      alias: "mzazi-care/rds-secret",
+      description: "Encrypts the Secrets Manager secret holding RDS credentials",
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    const databaseSecret = new rds.DatabaseSecret(this, "DatabaseSecret", {
+      username: "mzazi_care_admin",
+      encryptionKey: rdsSecretEncryptionKey,
+    });
+    databaseSecret.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+
+    const database = new rds.DatabaseInstance(this, "Database", {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      availabilityZone: "eu-west-1c",
+      engine: rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.VER_18_3,
+      }),
+      instanceType: ec2.InstanceType.of(
+        ec2.InstanceClass.T4G,
+        ec2.InstanceSize.MICRO,
+      ),
+      allocatedStorage: 20,
+      storageType: rds.StorageType.GP3,
+      multiAz: false,
+      storageEncrypted: true,
+      storageEncryptionKey: rdsEncryptionKey,
+      credentials: rds.Credentials.fromSecret(databaseSecret),
+      databaseName: "mzazi_care",
+      deletionProtection: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    database.addRotationSingleUser({
+      automaticallyAfter: cdk.Duration.days(30),
+    });
+
+    new cdk.CfnOutput(this, "DatabaseSecretArn", {
+      value: databaseSecret.secretArn,
+    });
+    new cdk.CfnOutput(this, "DatabaseEndpoint", {
+      value: database.dbInstanceEndpointAddress,
     });
   }
 }
