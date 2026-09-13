@@ -3,7 +3,7 @@ info:
   title: Mzazi Care API
   version: '1.0'
   description: |
-    The public-facing API for the Mzazi Care `api` ECS/Fargate service (Linear HEZ-12).
+    The public-facing API for the Mzazi Care `api` AWS Lambda function (Linear HEZ-12).
 
     Consumed by three separate client apps: the admin/supervisor web app, the caregiver mobile
     app, and the family member mobile app. Authentication is via AWS Cognito - clients obtain a
