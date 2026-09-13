@@ -4,6 +4,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as kms from "aws-cdk-lib/aws-kms";
+import * as s3 from "aws-cdk-lib/aws-s3";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class MzaziCareStack extends cdk.Stack {
@@ -119,6 +120,55 @@ export class MzaziCareStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "DatabaseEndpoint", {
       value: database.dbInstanceEndpointAddress,
+    });
+
+    const biometricEnrollmentsKey = new kms.Key(this, "BiometricEnrollmentsKey", {
+      alias: "mzazi-care/biometric-enrollments",
+      description: "Encrypts the biometric-enrollments S3 bucket",
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    const visitAudioKey = new kms.Key(this, "VisitAudioKey", {
+      alias: "mzazi-care/visit-audio",
+      description: "Encrypts the visit-audio S3 bucket",
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // No bucketName set: S3 bucket names are globally unique across all AWS
+    // accounts, not just this one, so a literal "biometric-enrollments" would
+    // very likely collide with an unrelated bucket somewhere else and fail to
+    // deploy. Letting CloudFormation generate the physical name (derived from
+    // the stack/logical id) guarantees uniqueness; architecture.md's bucket
+    // "names" are the construct ids/labels below, not literal S3 bucket names.
+    const biometricEnrollmentsBucket = new s3.Bucket(this, "BiometricEnrollmentsBucket", {
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: biometricEnrollmentsKey,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      // No lifecycle rule - per architecture.md's Retention section, deletion
+      // here is application-triggered on caregiver/dependant offboarding, not
+      // a calendar-based S3 rule (unlike visit-audio below).
+    });
+
+    const visitAudioBucket = new s3.Bucket(this, "VisitAudioBucket", {
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: visitAudioKey,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          expiration: cdk.Duration.days(90),
+        },
+      ],
+    });
+
+    new cdk.CfnOutput(this, "BiometricEnrollmentsBucketName", {
+      value: biometricEnrollmentsBucket.bucketName,
+    });
+    new cdk.CfnOutput(this, "VisitAudioBucketName", {
+      value: visitAudioBucket.bucketName,
     });
   }
 }
