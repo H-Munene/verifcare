@@ -12,6 +12,16 @@ import { CognitoJwtVerifier } from 'aws-jwt-verify';
 export type UserRole = 'supervisor' | 'caregiver' | 'family_member';
 const USER_ROLES: readonly UserRole[] = ['supervisor', 'caregiver', 'family_member'];
 
+// A verified identity that may not have a role yet - the case for a genuinely new Cognito
+// self-signup, before POST /users has assigned one (see routes/users.ts and infra/lib/auth.ts's
+// custom:role write-access fix). Every AuthenticatedUser is also a VerifiedIdentity; the reverse
+// is not true.
+export interface VerifiedIdentity {
+  sub: string;
+  role: UserRole | undefined;
+  email: string | undefined;
+}
+
 export interface AuthenticatedUser {
   sub: string;
   role: UserRole;
@@ -36,22 +46,41 @@ export function createIdTokenVerifier(userPoolId: string, clientId: string): IdT
   };
 }
 
-// Throws (does not return undefined/null) on a missing or malformed sub/custom:role claim, so
-// callers can treat "verified signature but unusable payload" the same way as "verification
-// failed" - both are a 401, not a crash deeper in route code.
-export function extractUser(payload: Record<string, unknown>): AuthenticatedUser {
+// Throws (does not return undefined) only on a missing sub claim, or a custom:role claim that is
+// present but not one of the three known roles (a tampered or otherwise malformed token) - both
+// callers (extractUser and requireVerifiedIdentity) need "verified signature but unusable
+// payload" to be indistinguishable from "verification failed", i.e. a 401, not a crash deeper in
+// route code. A genuinely ABSENT custom:role claim is not an error here - that is the expected
+// shape for a brand-new Cognito self-signup that has not been assigned a role yet.
+export function extractIdentity(payload: Record<string, unknown>): VerifiedIdentity {
   const sub = payload.sub;
   if (typeof sub !== 'string' || sub === '') {
     throw new Error('ID token payload is missing a sub claim.');
   }
 
-  const role = payload['custom:role'];
-  if (typeof role !== 'string' || !USER_ROLES.includes(role as UserRole)) {
-    throw new Error(
-      `ID token payload has a missing or invalid custom:role claim: ${JSON.stringify(role)}.`,
-    );
+  const rawRole = payload['custom:role'];
+  let role: UserRole | undefined;
+  if (rawRole !== undefined && rawRole !== null) {
+    if (typeof rawRole !== 'string' || !USER_ROLES.includes(rawRole as UserRole)) {
+      throw new Error(
+        `ID token payload has an invalid custom:role claim: ${JSON.stringify(rawRole)}.`,
+      );
+    }
+    role = rawRole as UserRole;
   }
 
   const email = payload.email;
-  return { sub, role: role as UserRole, email: typeof email === 'string' ? email : undefined };
+  return { sub, role, email: typeof email === 'string' ? email : undefined };
+}
+
+// Same as extractIdentity, but additionally requires a role to be present - what every route
+// except POST /users' self-signup path needs.
+export function extractUser(payload: Record<string, unknown>): AuthenticatedUser {
+  const identity = extractIdentity(payload);
+  if (!identity.role) {
+    throw new Error(
+      'ID token payload has no custom:role claim - this identity has not been assigned a role yet.',
+    );
+  }
+  return { sub: identity.sub, role: identity.role, email: identity.email };
 }

@@ -1,10 +1,12 @@
 import type { ErrorRequestHandler } from 'express';
 import serverlessHttp from 'serverless-http';
 import { createApp } from './app.js';
-import { createRequireAuth } from './auth/middleware.js';
+import { createCognitoAdmin } from './auth/cognitoAdmin.js';
+import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
-import { getLambdaDb, invalidateLambdaDb, isPostgresAuthError } from './db/lambdaDb.js';
+import { getLambdaDb, invalidateLambdaDb } from './db/lambdaDb.js';
+import { isPostgresAuthError } from './db/postgresErrors.js';
 import { errorHandler } from './errors.js';
 import { logger } from './logger.js';
 
@@ -20,8 +22,10 @@ if (!config.databaseSecretArn) {
 // first verify() call (then caches it), so this is safe to construct once per cold start here.
 const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientId);
 const requireAuth = createRequireAuth(verifier);
+const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
+const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 
-const app = createApp({ requireAuth });
+const app = createApp({ requireAuth, requireVerifiedIdentity, cognitoAdmin });
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,
 // overlapping it with cold-start latency.
@@ -30,8 +34,9 @@ void getLambdaDb().catch(() => {});
 // Attaches the DB client to every request when it's available, but never fails a request just
 // because it isn't: a request that doesn't touch the database (e.g. /health) must keep working
 // even if Secrets Manager is having a transient problem. Routes that do need the database check
-// for its absence themselves (see app.ts's /health/db) and report their own 503, the same way
-// server.ts's local-dev path would if db were ever missing there.
+// for its absence themselves (see routes/users.ts and routes/caregivers.ts's getDb() helper) and
+// report their own 503, the same way server.ts's local-dev path would if db were ever missing
+// there.
 app.use(async (req, _res, next) => {
   try {
     req.app.locals.db = await getLambdaDb();

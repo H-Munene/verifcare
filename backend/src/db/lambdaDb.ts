@@ -55,19 +55,3 @@ export function getLambdaDb(builder: () => Promise<Db> = buildLambdaDb): Promise
 export function invalidateLambdaDb(): void {
   cached = undefined;
 }
-
-// Postgres error codes for authentication failures (invalid_password, invalid_authorization_specification).
-// See https://www.postgresql.org/docs/current/errcodes-appendix.html
-const POSTGRES_AUTH_ERROR_CODES = new Set(['28P01', '28000']);
-
-export function isPostgresAuthError(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) {
-    return false;
-  }
-  const cause = (err as { cause?: unknown }).cause;
-  if (typeof cause !== 'object' || cause === null) {
-    return false;
-  }
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' && POSTGRES_AUTH_ERROR_CODES.has(code);
-}

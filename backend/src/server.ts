@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { createApp } from './app.js';
-import { createRequireAuth } from './auth/middleware.js';
+import { createCognitoAdmin } from './auth/cognitoAdmin.js';
+import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db/client.js';
@@ -22,11 +23,14 @@ const pool = new Pool({ connectionString: config.databaseUrl });
 const db = createDb(pool);
 
 // No local Cognito emulator in this project's stack - local dev verifies against the same real,
-// deployed User Pool the Lambda uses (see .env.example).
+// deployed User Pool the Lambda uses (see .env.example), including AdminUpdateUserAttributes
+// calls, which need the same AWS credentials this machine already has configured for the AWS CLI.
 const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientId);
 const requireAuth = createRequireAuth(verifier);
+const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
+const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 
-const app = createApp({ db, requireAuth });
+const app = createApp({ db, requireAuth, requireVerifiedIdentity, cognitoAdmin });
 app.use(errorHandler);
 
 app.listen(config.port, () => {

@@ -24,6 +24,7 @@
     "openapi:lint": "redocly lint openapi.yaml --config .redocly.yaml"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1131.0",
     "@aws-sdk/client-secrets-manager": "^3.1131.0",
     "aws-jwt-verify": "^5.2.1",
     "drizzle-orm": "^0.45.2",
@@ -32,6 +33,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "serverless-http": "^3.2.0",
+    "uuid": "^14.0.2",
     "zod": "^4.6.4"
   },
   "devDependencies": {

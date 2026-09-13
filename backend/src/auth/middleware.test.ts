@@ -1,12 +1,13 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { createRequireAuth, requireRole } from './middleware.js';
+import { createRequireAuth, createRequireVerifiedIdentity, requireRole } from './middleware.js';
 import type { IdTokenVerifier } from './verifier.js';
 
 function buildTestApp(verifier: IdTokenVerifier) {
   const app = express();
   const requireAuth = createRequireAuth(verifier);
+  const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
 
   app.get(
     '/whoami',
@@ -18,6 +19,9 @@ function buildTestApp(verifier: IdTokenVerifier) {
   );
   app.get('/supervisor-only', requireAuth, requireRole('supervisor'), (req, res) => {
     res.status(200).json(req.auth);
+  });
+  app.get('/identity-only', requireVerifiedIdentity, (req, res) => {
+    res.status(200).json(req.identity);
   });
 
   return app;
@@ -106,5 +110,65 @@ describe('requireRole', () => {
       .set('Authorization', 'Bearer some.jwt.token');
 
     expect(response.status).toBe(200);
+  });
+});
+
+describe('createRequireVerifiedIdentity', () => {
+  it('returns 401 when the Authorization header is missing, same as requireAuth', async () => {
+    const verifier: IdTokenVerifier = { verify: vi.fn() };
+
+    const response = await request(buildTestApp(verifier)).get('/identity-only');
+
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 401 when verification rejects', async () => {
+    const verifier: IdTokenVerifier = {
+      verify: vi.fn().mockRejectedValue(new Error('bad signature')),
+    };
+
+    const response = await request(buildTestApp(verifier))
+      .get('/identity-only')
+      .set('Authorization', 'Bearer some.jwt.token');
+
+    expect(response.status).toBe(401);
+  });
+
+  it('proceeds with role undefined for a verified token with no custom:role claim - the whole point of this middleware', async () => {
+    const verifier: IdTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: 'brand-new-user' }),
+    };
+
+    const response = await request(buildTestApp(verifier))
+      .get('/identity-only')
+      .set('Authorization', 'Bearer some.jwt.token');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ sub: 'brand-new-user' });
+  });
+
+  it('proceeds with the role attached when the token already has one', async () => {
+    const verifier: IdTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: 'abc-123', 'custom:role': 'supervisor' }),
+    };
+
+    const response = await request(buildTestApp(verifier))
+      .get('/identity-only')
+      .set('Authorization', 'Bearer some.jwt.token');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ sub: 'abc-123', role: 'supervisor' });
+  });
+
+  it('still returns 401 for a tampered token whose custom:role is not a known role', async () => {
+    const verifier: IdTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: 'abc-123', 'custom:role': 'admin' }),
+    };
+
+    const response = await request(buildTestApp(verifier))
+      .get('/identity-only')
+      .set('Authorization', 'Bearer some.jwt.token');
+
+    expect(response.status).toBe(401);
   });
 });
