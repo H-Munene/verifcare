@@ -6,6 +6,9 @@ import * as rds from "aws-cdk-lib/aws-rds";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ecr from "aws-cdk-lib/aws-ecr";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import * as path from "node:path";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class MzaziCareStack extends cdk.Stack {
@@ -189,6 +192,62 @@ export class MzaziCareStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "AcousticModelRepositoryUri", {
       value: acousticModelRepository.repositoryUri,
+    });
+
+    // acoustic-model's Lambda function is deliberately not created yet: it's a
+    // container-image Lambda, and the ECR repository above has no image in it
+    // yet (the real acoustic-model implementation is later work, Linear
+    // HEZ-43 onward) - CDK cannot create a container-image Lambda against an
+    // empty repository. api's function is created now since the Express app
+    // it wraps already exists and is tested (HEZ-7), even though it currently
+    // only has a health-check route.
+    const apiFunction = new NodejsFunction(this, "ApiFunction", {
+      // An explicit absolute path, not a bare relative string: NodejsFunction
+      // normally infers the entry's base directory from the call site via
+      // the JS stack trace, but that inference failed under tsx (the app's
+      // runtime here, per cdk.json) with "Cannot find entry file" even though
+      // the relative path was mathematically correct - a tsx-specific quirk,
+      // not a real path error. __dirname is unambiguous regardless of which
+      // runtime executes this file.
+      entry: path.join(__dirname, "../../backend/src/lambda.ts"),
+      // NodejsFunction also requires the entry to live under its
+      // "projectRoot" (which it otherwise defaults to infra/ itself) - since
+      // backend/ is a sibling directory with its own package.json/lockfile,
+      // not nested inside infra/, both must be pointed at backend/ explicitly.
+      projectRoot: path.join(__dirname, "../../backend"),
+      depsLockFilePath: path.join(__dirname, "../../backend/package-lock.json"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      vpc,
+      // Restricted to eu-west-1c specifically, not just PRIVATE_WITH_EGRESS -
+      // that alone selects the private subnet in *every* AZ (both eu-west-1c
+      // and the structural-only eu-west-1a one from HEZ-18), which would
+      // contradict the single-AZ compute intent this project has kept
+      // everywhere else (RDS included).
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        subnetFilters: [ec2.SubnetFilter.availabilityZones(["eu-west-1c"])],
+      },
+      environment: {
+        DATABASE_SECRET_ARN: databaseSecret.secretArn,
+        USER_POOL_ID: userPool.userPoolId,
+        USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
+        BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
+        VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
+      },
+    });
+
+    // Network-level access only (the security group rule letting api reach
+    // RDS's port) - matches architecture.md's "Networking (VPC layout)"
+    // section, which is settled. IAM grants for what api's code actually
+    // reads/writes (the secret, the two buckets, Rekognition) are Linear
+    // HEZ-24's explicit scope, not this one - the current app only serves a
+    // health check and doesn't touch any of them yet.
+    database.connections.allowDefaultPortFrom(apiFunction);
+
+    new cdk.CfnOutput(this, "ApiFunctionName", {
+      value: apiFunction.functionName,
     });
   }
 }
