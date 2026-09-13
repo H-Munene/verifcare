@@ -5,6 +5,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ecr from "aws-cdk-lib/aws-ecr";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class MzaziCareStack extends cdk.Stack {
@@ -169,6 +170,25 @@ export class MzaziCareStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "VisitAudioBucketName", {
       value: visitAudioBucket.bucketName,
+    });
+
+    // acoustic-model only - api stays a plain zip-based Lambda, no ECR
+    // involvement, per architecture.md's "Container registry" row.
+    const acousticModelRepository = new ecr.Repository(this, "AcousticModelRepository", {
+      repositoryName: "acoustic-model",
+      imageScanOnPush: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          description: "Expire untagged images after 14 days",
+          tagStatus: ecr.TagStatus.UNTAGGED,
+          maxImageAge: cdk.Duration.days(14),
+        },
+      ],
+    });
+
+    new cdk.CfnOutput(this, "AcousticModelRepositoryUri", {
+      value: acousticModelRepository.repositoryUri,
     });
   }
 }
