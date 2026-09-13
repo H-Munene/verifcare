@@ -14,6 +14,8 @@ import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as events from "aws-cdk-lib/aws-events";
 import * as eventsTargets from "aws-cdk-lib/aws-events-targets";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class MzaziCareStack extends cdk.Stack {
@@ -400,5 +402,99 @@ export class MzaziCareStack extends cdk.Stack {
       value: missedVisitSweepFunction.functionName,
     });
     new cdk.CfnOutput(this, "AlertsTopicArn", { value: alertsTopic.topicArn });
+
+    // Deliberately a separate topic from AlertsTopic - architecture.md's
+    // Observability row says CloudWatch alarms are "distinct from the
+    // business-facing SNS alerts" (missed-visit/cognitive-risk, sent to the
+    // supervisor). This one is for operational/system health, not product
+    // alerts. No email subscription yet, same reasoning as AlertsTopic - no
+    // real recipient address is settled anywhere.
+    const opsAlertsTopic = new sns.Topic(this, "OpsAlertsTopic", {
+      topicName: "mzazi-care-ops-alerts",
+    });
+    const opsAlarmAction = new cloudwatchActions.SnsAction(opsAlertsTopic);
+
+    // 5 alarms, 1 dashboard - matches the confirmed cost estimate ($0.51/
+    // month). Errors only, one per current resource, not error+latency per
+    // Lambda function as architecture.md's fuller text describes - confirmed
+    // with the user 2026-09-13, since the literal text doesn't fit in 5 with
+    // 2 functions + API Gateway + RDS all needing coverage. Latency alarms
+    // and acoustic-model's own alarm are left for later, once there's a
+    // concrete need to revisit the count.
+    const apiFunctionErrorsAlarm = new cloudwatch.Alarm(this, "ApiFunctionErrorsAlarm", {
+      alarmDescription: "api Lambda function errors",
+      metric: apiFunction.metricErrors({ period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    });
+    apiFunctionErrorsAlarm.addAlarmAction(opsAlarmAction);
+
+    const missedVisitSweepErrorsAlarm = new cloudwatch.Alarm(this, "MissedVisitSweepErrorsAlarm", {
+      alarmDescription: "missed-visit-sweep Lambda function errors",
+      metric: missedVisitSweepFunction.metricErrors({ period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    });
+    missedVisitSweepErrorsAlarm.addAlarmAction(opsAlarmAction);
+
+    const apiGatewayErrorsAlarm = new cloudwatch.Alarm(this, "ApiGatewayErrorsAlarm", {
+      alarmDescription: "REST API 5xx server errors",
+      metric: restApi.metricServerError({ period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    });
+    apiGatewayErrorsAlarm.addAlarmAction(opsAlarmAction);
+
+    const databaseCpuAlarm = new cloudwatch.Alarm(this, "DatabaseCpuAlarm", {
+      alarmDescription: "RDS CPU utilization high",
+      metric: database.metricCPUUtilization({ period: cdk.Duration.minutes(5) }),
+      threshold: 80,
+      evaluationPeriods: 3,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    });
+    databaseCpuAlarm.addAlarmAction(opsAlarmAction);
+
+    const databaseStorageAlarm = new cloudwatch.Alarm(this, "DatabaseStorageAlarm", {
+      alarmDescription: "RDS free storage space low",
+      metric: database.metricFreeStorageSpace({ period: cdk.Duration.minutes(5) }),
+      threshold: 2 * 1024 * 1024 * 1024, // 2 GiB, in bytes
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_OR_EQUAL_TO_THRESHOLD,
+    });
+    databaseStorageAlarm.addAlarmAction(opsAlarmAction);
+
+    new cloudwatch.Dashboard(this, "Dashboard", {
+      dashboardName: "mzazi-care",
+      widgets: [
+        [
+          new cloudwatch.GraphWidget({
+            title: "Lambda errors",
+            left: [
+              apiFunction.metricErrors({ label: "api" }),
+              missedVisitSweepFunction.metricErrors({ label: "missed-visit-sweep" }),
+            ],
+          }),
+          new cloudwatch.GraphWidget({
+            title: "API Gateway 5xx errors",
+            left: [restApi.metricServerError()],
+          }),
+        ],
+        [
+          new cloudwatch.GraphWidget({
+            title: "RDS CPU utilization",
+            left: [database.metricCPUUtilization()],
+          }),
+          new cloudwatch.GraphWidget({
+            title: "RDS free storage space",
+            left: [database.metricFreeStorageSpace()],
+          }),
+        ],
+      ],
+    });
+
+    new cdk.CfnOutput(this, "OpsAlertsTopicArn", { value: opsAlertsTopic.topicArn });
   }
 }
