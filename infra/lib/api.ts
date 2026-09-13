@@ -91,6 +91,12 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // KMS key, not a wildcard grant.
   databaseSecret.grantRead(apiFunction);
 
+  // Lets api's POST /users complete a genuinely new self-signup by assigning
+  // custom:role server-side (HEZ-29) - the only way that attribute can be
+  // set at all now that the app client's own write access to it was removed
+  // (see infra/lib/auth.ts). Scoped to this user pool only, not a wildcard.
+  userPool.grant(apiFunction, "cognito-idp:AdminUpdateUserAttributes");
+
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,
   });
