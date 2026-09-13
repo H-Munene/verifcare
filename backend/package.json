@@ -24,6 +24,7 @@
     "openapi:lint": "redocly lint openapi.yaml --config .redocly.yaml"
   },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1131.0",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "pg": "^8.23.0",
