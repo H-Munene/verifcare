@@ -52,8 +52,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: infra/package-lock.json
+          cache-dependency-path: |
+            infra/package-lock.json
+            backend/package-lock.json
       - run: npm ci
+      # cdk synth bundles ApiFunction and MissedVisitSweepFunction via esbuild,
+      # run from inside backend/ (NodejsFunction's projectRoot) - it needs
+      # backend/node_modules to exist too, not just infra/'s.
+      - run: npm ci
+        working-directory: backend
       - run: npx tsc --noEmit
       - run: npx cdk synth
 
