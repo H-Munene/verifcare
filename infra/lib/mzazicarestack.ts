@@ -16,6 +16,7 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as eventsTargets from "aws-cdk-lib/aws-events-targets";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as iam from "aws-cdk-lib/aws-iam";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class MzaziCareStack extends cdk.Stack {
@@ -496,5 +497,37 @@ export class MzaziCareStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, "OpsAlertsTopicArn", { value: opsAlertsTopic.topicArn });
+
+    // GitHub Actions OIDC federation for CI/CD (HEZ-26), not static AWS
+    // access keys stored as GitHub secrets. The trust condition scopes this
+    // role to exactly this repo's main branch - nothing else can assume it.
+    // Its only permission is assuming the four roles `cdk bootstrap` already
+    // created (HEZ-15) - those already have everything needed to deploy, so
+    // this role just needs the ability to hop into them, not broad
+    // permissions of its own.
+    const githubOidcProvider = new iam.OpenIdConnectProvider(this, "GitHubOidcProvider", {
+      url: "https://token.actions.githubusercontent.com",
+      clientIds: ["sts.amazonaws.com"],
+    });
+
+    const githubDeployRole = new iam.Role(this, "GitHubDeployRole", {
+      roleName: "mzazi-care-github-deploy",
+      assumedBy: new iam.OpenIdConnectPrincipal(githubOidcProvider, {
+        StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+        StringLike: { "token.actions.githubusercontent.com:sub": "repo:H-Munene/mzazi_care:ref:refs/heads/main" },
+      }),
+    });
+
+    githubDeployRole.addToPolicy(new iam.PolicyStatement({
+      actions: ["sts:AssumeRole"],
+      resources: [
+        `arn:aws:iam::${this.account}:role/cdk-hnb659fds-cfn-exec-role-${this.account}-${this.region}`,
+        `arn:aws:iam::${this.account}:role/cdk-hnb659fds-file-publishing-role-${this.account}-${this.region}`,
+        `arn:aws:iam::${this.account}:role/cdk-hnb659fds-image-publishing-role-${this.account}-${this.region}`,
+        `arn:aws:iam::${this.account}:role/cdk-hnb659fds-lookup-role-${this.account}-${this.region}`,
+      ],
+    }));
+
+    new cdk.CfnOutput(this, "GitHubDeployRoleArn", { value: githubDeployRole.roleArn });
   }
 }

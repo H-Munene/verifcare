@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mzazi_care_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run build
+      - run: npm run openapi:lint
+      - run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mzazi_care_test
+
+  infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            infra/package-lock.json
+            backend/package-lock.json
+      - run: npm ci
+      # cdk synth bundles ApiFunction and MissedVisitSweepFunction via esbuild,
+      # run from inside backend/ (NodejsFunction's projectRoot) - it needs
+      # backend/node_modules to exist too, not just infra/'s.
+      - run: npm ci
+        working-directory: backend
+      - run: npx tsc --noEmit
+      - run: npx cdk synth
+
+  acoustic-model-openapi:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: acoustic-model
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx --yes @redocly/cli lint openapi.yaml --config .redocly.yaml
