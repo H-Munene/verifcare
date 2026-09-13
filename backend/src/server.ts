@@ -1,6 +1,9 @@
 import { Pool } from 'pg';
 import { createApp } from './app.js';
+import { loadConfig } from './config.js';
 import { createDb } from './db/client.js';
+import { errorHandler } from './errors.js';
+import { logger } from './logger.js';
 
 try {
   process.loadEnvFile();
@@ -8,16 +11,17 @@ try {
   // No .env file present - fine, DATABASE_URL is presumably set some other way.
 }
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
+const config = loadConfig();
+if (!config.databaseUrl) {
   throw new Error('DATABASE_URL is not set - see backend/.env.example.');
 }
 
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = new Pool({ connectionString: config.databaseUrl });
 const db = createDb(pool);
 
-const port = Number(process.env.PORT ?? 3000);
+const app = createApp({ db });
+app.use(errorHandler);
 
-createApp({ db }).listen(port, () => {
-  console.log(`backend listening on port ${port}`);
+app.listen(config.port, () => {
+  logger.info({ port: config.port }, 'backend listening');
 });
