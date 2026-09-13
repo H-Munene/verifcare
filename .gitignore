@@ -10,3 +10,4 @@ coverage/
 !.env.example
 /temp_aws_images
 CLAUDE.md
+/.claude

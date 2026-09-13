@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
 import { createApp } from './app.js';
+import { createRequireAuth } from './auth/middleware.js';
+import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db/client.js';
 import { errorHandler } from './errors.js';
@@ -19,7 +21,12 @@ if (!config.databaseUrl) {
 const pool = new Pool({ connectionString: config.databaseUrl });
 const db = createDb(pool);
 
-const app = createApp({ db });
+// No local Cognito emulator in this project's stack - local dev verifies against the same real,
+// deployed User Pool the Lambda uses (see .env.example).
+const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientId);
+const requireAuth = createRequireAuth(verifier);
+
+const app = createApp({ db, requireAuth });
 app.use(errorHandler);
 
 app.listen(config.port, () => {

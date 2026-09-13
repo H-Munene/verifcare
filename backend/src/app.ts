@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
-import express, { type Express } from 'express';
+import express, { type Express, type RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
+import { requireRole } from './auth/middleware.js';
 import type { Db } from './db/client.js';
 import { sendProblem } from './errors.js';
 import { logger } from './logger.js';
@@ -20,12 +21,14 @@ declare global {
 
 export interface AppDependencies {
   db?: Db;
+  // The auth/middleware.ts createRequireAuth(verifier) result. Optional for the same reason db
+  // is: app.test.ts and any route that doesn't need auth must keep working without it configured.
+  requireAuth?: RequestHandler;
 }
 
-// db is optional: app.test.ts and the DB-independent parts of lambda.ts construct the app with no
-// db yet, and /health doesn't need one. Whichever caller has a db (server.ts, lambda.ts) attaches
-// it to app.locals so any route can read req.app.locals.db - the seam for the first real
-// DB-touching route.
+// db and requireAuth are both optional: app.test.ts constructs the app with neither, and /health
+// needs neither. Whichever caller has them (server.ts, lambda.ts) passes them in - db is attached
+// to app.locals for any route to read; requireAuth is used directly as route middleware below.
 //
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
 // be attached last, by each entry point, after any of its own error-handling middleware
@@ -37,8 +40,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   app.use(
     pinoHttp({
       logger,
-      // Bearer tokens (Cognito JWTs, once HEZ-28 lands) and session cookies must never be logged
-      // in full.
+      // Bearer tokens (Cognito JWTs) and session cookies must never be logged in full.
       redact: ['req.headers.authorization', 'req.headers.cookie'],
       customProps: (req) => ({ awsRequestId: req.apiGateway?.context?.awsRequestId }),
     }),
@@ -65,6 +67,22 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     await db.execute(sql`SELECT 1`);
     res.status(200).json({ status: 'ok' });
   });
+
+  // Temporary diagnostic route, same purpose as /health/db but for the auth pipeline: proves JWT
+  // verification and role extraction work end-to-end before any real protected route exists.
+  // requireRole() with all three roles listed accepts any authenticated user - this route only
+  // checks that authentication itself works, not any particular permission. Remove this once a
+  // real protected route exists.
+  if (dependencies.requireAuth) {
+    app.get(
+      '/auth/whoami',
+      dependencies.requireAuth,
+      requireRole('supervisor', 'caregiver', 'family_member'),
+      (req, res) => {
+        res.status(200).json(req.auth);
+      },
+    );
+  }
 
   // No route matched. Must come after every real route, before any error-handling middleware.
   app.use((req, res) => {

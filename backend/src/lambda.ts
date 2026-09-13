@@ -1,6 +1,8 @@
 import type { ErrorRequestHandler } from 'express';
 import serverlessHttp from 'serverless-http';
 import { createApp } from './app.js';
+import { createRequireAuth } from './auth/middleware.js';
+import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
 import { getLambdaDb, invalidateLambdaDb, isPostgresAuthError } from './db/lambdaDb.js';
 import { errorHandler } from './errors.js';
@@ -14,7 +16,12 @@ if (!config.databaseSecretArn) {
   throw new Error('DATABASE_SECRET_ARN is not set - see infra/lib/api.ts.');
 }
 
-const app = createApp();
+// Cheap and synchronous - CognitoJwtVerifier.create() does not fetch the JWKS eagerly, only on
+// first verify() call (then caches it), so this is safe to construct once per cold start here.
+const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientId);
+const requireAuth = createRequireAuth(verifier);
+
+const app = createApp({ requireAuth });
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,
 // overlapping it with cold-start latency.

@@ -14,6 +14,11 @@ const envSchema = z
     // DATABASE_SECRET_ARN - never both in the same running process.
     DATABASE_URL: z.string().min(1).optional(),
     DATABASE_SECRET_ARN: z.string().min(1).optional(),
+    // The Cognito User Pool JWTs are verified against (auth/verifier.ts). There is no local
+    // Cognito emulator in this project's stack, so both server.ts and lambda.ts point at the same
+    // real, deployed user pool.
+    USER_POOL_ID: z.string().min(1),
+    USER_POOL_CLIENT_ID: z.string().min(1),
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.DATABASE_SECRET_ARN !== undefined, {
     message: 'Either DATABASE_URL (local dev) or DATABASE_SECRET_ARN (Lambda) must be set.',
@@ -23,6 +28,8 @@ export interface Config {
   port: number;
   databaseUrl: string | undefined;
   databaseSecretArn: string | undefined;
+  userPoolId: string;
+  userPoolClientId: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -37,5 +44,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: result.data.PORT,
     databaseUrl: result.data.DATABASE_URL,
     databaseSecretArn: result.data.DATABASE_SECRET_ARN,
+    userPoolId: result.data.USER_POOL_ID,
+    userPoolClientId: result.data.USER_POOL_CLIENT_ID,
   };
 }
