@@ -1,10 +1,13 @@
-// Server-side role assignment for a genuinely new Cognito self-signup (HEZ-29). The only way
-// custom:role can be set at all now, since infra/lib/auth.ts removed the app client's own write
-// access to it - a self-signing-up user's own session can never set this directly, closing the
-// privilege-escalation gap that write access left open (a self-signup could otherwise set
-// custom:role to "supervisor" with zero backend involvement).
+// Server-side role assignment for a genuinely new Cognito self-signup (HEZ-29), and server-side
+// creation of a brand-new Cognito identity for a dependant's family contact who has never touched
+// Cognito at all (2026-09-14, extending HEZ-30/HEZ-56). The only way custom:role can be set at
+// all now, since infra/lib/auth.ts removed the app client's own write access to it - a
+// self-signing-up user's own session can never set this directly, closing the privilege-
+// escalation gap that write access left open (a self-signup could otherwise set custom:role to
+// "supervisor" with zero backend involvement).
 
 import {
+  AdminCreateUserCommand,
   AdminUpdateUserAttributesCommand,
   CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
@@ -15,6 +18,16 @@ export interface CognitoAdmin {
   // literal in tests without eslint's unbound-method check treating it as a class-style method -
   // same reasoning as auth/verifier.ts's IdTokenVerifier.
   assignRole: (sub: string, role: UserRole) => Promise<void>;
+  // Creates a brand-new Cognito identity (for someone who has never signed up or been created
+  // before) and returns its Cognito-generated sub. Sends a real invitation email with a Cognito-
+  // generated temporary password - the new person completes sign-in via the NEW_PASSWORD_REQUIRED
+  // flow the login page already handles (see auth/cognito.ts).
+  createUser: (params: {
+    email: string;
+    phoneNumber: string;
+    fullName: string;
+    role: UserRole;
+  }) => Promise<string>;
 }
 
 // Classifies an AdminUpdateUserAttributes rejection caused by a cognitoSub that doesn't
@@ -32,6 +45,19 @@ export function isCognitoUserNotFoundError(err: unknown): boolean {
   );
 }
 
+// Classifies an AdminCreateUser rejection caused by the email already being registered in
+// Cognito - either as the Username itself (UsernameExistsException, since createUser below uses
+// the email as Username) or as an alias on a different user (AliasExistsException, possible if
+// that email was registered with a different Username at some point). Both mean the same thing to
+// a caller: this person already has a Cognito identity, use the search/link flow instead of create.
+export function isCognitoUserAlreadyExistsError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+  const name = (err as { name?: unknown }).name;
+  return name === 'UsernameExistsException' || name === 'AliasExistsException';
+}
+
 export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
   const client = new CognitoIdentityProviderClient({});
   return {
@@ -47,6 +73,38 @@ export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
           UserAttributes: [{ Name: 'custom:role', Value: role }],
         }),
       );
+    },
+    createUser: async ({ email, phoneNumber, fullName, role }): Promise<string> => {
+      // Username: required by the API even though this pool has no real username sign-in
+      // attribute (email/phone are aliases, not UsernameAttributes) - verified against AWS's
+      // AdminCreateUser documentation: "You can only provide a value if usernames are a valid
+      // sign-in attribute for your user pool" - Cognito accepts an opaque value here regardless,
+      // so the email is used for readability in the Cognito console's user list. The real,
+      // permanent identifier is the Cognito-generated `sub` this function returns, never
+      // `Username` - everything else in this app already keys off sub, not Username.
+      const response = await client.send(
+        new AdminCreateUserCommand({
+          UserPoolId: userPoolId,
+          Username: email,
+          UserAttributes: [
+            { Name: 'email', Value: email },
+            { Name: 'phone_number', Value: phoneNumber },
+            { Name: 'name', Value: fullName },
+            { Name: 'custom:role', Value: role },
+          ],
+          // Explicit, not left to AWS's default: AdminCreateUser defaults DesiredDeliveryMediums
+          // to SMS when unspecified (confirmed against AWS's own docs), which would silently
+          // trigger the still-unresolved SNS/SMS-pricing-to-Kenya cost question flagged since
+          // HEZ-17. Email sidesteps that entirely. TemporaryPassword is deliberately omitted -
+          // Cognito generates one and delivers it in the invitation email.
+          DesiredDeliveryMediums: ['EMAIL'],
+        }),
+      );
+      const sub = response.User?.Attributes?.find((attr) => attr.Name === 'sub')?.Value;
+      if (!sub) {
+        throw new Error('AdminCreateUser response did not include a sub attribute.');
+      }
+      return sub;
     },
   };
 }

@@ -42,6 +42,10 @@ export interface UsersRouterDependencies {
 
 interface UserResponse {
   id: string;
+  // Not secret - already visible to the caller via their own decoded JWT for a self-view, and
+  // needed by a supervisor's search-by-email/phone flow (2026-09-14, extending HEZ-55/56) to link
+  // an existing identity without needing it typed in manually.
+  cognitoSub: string;
   email: string | null;
   phoneNumber: string | null;
   fullName: string;
@@ -54,6 +58,7 @@ interface UserResponse {
 function toUserResponse(row: typeof schema.users.$inferSelect): UserResponse {
   return {
     id: row.id,
+    cognitoSub: row.cognitoSub,
     email: row.email,
     phoneNumber: row.phoneNumber,
     fullName: row.fullName,
@@ -91,6 +96,14 @@ const updateUserRequestSchema = z.object({
 const listUsersQuerySchema = z.object({
   role: z.enum(['supervisor', 'caregiver', 'family_member']).optional(),
   status: z.enum(['active', 'suspended', 'deactivated']).optional(),
+  // Exact-match filters, not search/prefix - added 2026-09-14 so a supervisor can look up an
+  // existing user by phone/email (e.g. when registering a dependant's primary contact) instead of
+  // needing their internal id or Cognito sub already. Both columns are UNIQUE in the DB, so either
+  // filter alone returns at most one result. No new privilege: this route is already
+  // supervisor-only, and a supervisor can already see every user's email/phone via the unfiltered
+  // list - this only adds a convenient way to find one, not a new exposure.
+  email: z.string().email().optional(),
+  phoneNumber: z.string().min(1).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -212,6 +225,12 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
       }
       if (query.status) {
         conditions.push(eq(schema.users.status, query.status));
+      }
+      if (query.email) {
+        conditions.push(eq(schema.users.email, query.email));
+      }
+      if (query.phoneNumber) {
+        conditions.push(eq(schema.users.phoneNumber, query.phoneNumber));
       }
       if (query.cursor) {
         let cursor;

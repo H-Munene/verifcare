@@ -90,7 +90,10 @@ describe.skipIf(!hasTestDb)(
 
     beforeEach(async () => {
       await truncateAllTables();
-      cognitoAdmin = { assignRole: vi.fn().mockResolvedValue(undefined) };
+      cognitoAdmin = {
+        assignRole: vi.fn().mockResolvedValue(undefined),
+        createUser: vi.fn().mockResolvedValue('unused-sub'),
+      };
       app = buildTestApp(cognitoAdmin);
     });
 

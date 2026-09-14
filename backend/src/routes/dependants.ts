@@ -48,7 +48,11 @@ import { and, asc, eq } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
-import { isCognitoUserNotFoundError, type CognitoAdmin } from '../auth/cognitoAdmin.js';
+import {
+  isCognitoUserAlreadyExistsError,
+  isCognitoUserNotFoundError,
+  type CognitoAdmin,
+} from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
@@ -142,13 +146,26 @@ function dependantColumns() {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-const addFamilyMemberRequestSchema = z.object({
-  cognitoSub: z.string().min(1),
-  phoneNumber: z.string().min(1),
-  fullName: z.string().min(1),
-  relationship: z.string().min(1).optional(),
-  isPrimaryContact: z.boolean().default(false),
-});
+// Exactly one of cognitoSub/email identifies the family member - cognitoSub links an identity
+// that already exists in Cognito (resolved by the frontend's search-by-phone/email against our
+// own users table, or supplied directly by any other caller that already knows it); email creates
+// a brand-new Cognito identity from scratch for someone who has never touched Cognito at all
+// (2026-09-14, extending the original cognitoSub-only design - see resolveFamilyMemberIdentity
+// below for the full resolution rules for each).
+const addFamilyMemberRequestSchema = z
+  .object({
+    cognitoSub: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phoneNumber: z.string().min(1),
+    fullName: z.string().min(1),
+    relationship: z.string().min(1).optional(),
+    isPrimaryContact: z.boolean().default(false),
+  })
+  .refine((data) => Boolean(data.cognitoSub) !== Boolean(data.email), {
+    message:
+      'Provide exactly one of cognitoSub (link an existing identity) or email (create a new one).',
+    path: ['cognitoSub'],
+  });
 type AddFamilyMemberBody = z.infer<typeof addFamilyMemberRequestSchema>;
 
 const createDependantRequestSchema = z.object({
@@ -233,49 +250,128 @@ async function findFamilyMemberLink(
   return link ? { callerRow, link } : undefined;
 }
 
+async function getUserByEmail(
+  db: Db,
+  email: string,
+): Promise<typeof schema.users.$inferSelect | undefined> {
+  const [row] = await db.select().from(schema.users).where(eq(schema.users.email, email));
+  return row;
+}
+
 type ResolvedFamilyMember =
-  { kind: 'existing'; userId: string } | { kind: 'new'; body: AddFamilyMemberBody };
+  | { kind: 'existing'; userId: string }
+  | { kind: 'new'; cognitoSub: string; body: AddFamilyMemberBody };
 
 // Shared by POST /dependants (primaryFamilyMember) and POST /dependants/{id}/family-members (the
-// request body itself) - see the file header comment for the full resolution rules. Sends the
-// appropriate 400/409 response itself and returns undefined on failure, matching
-// validation.ts/auth/middleware.ts's established "send the response, return undefined" pattern.
+// request body itself). Sends the appropriate 400/409 response itself and returns undefined on
+// failure, matching validation.ts/auth/middleware.ts's established "send the response, return
+// undefined" pattern. Two resolution paths, per the schema's cognitoSub-xor-email requirement:
+//
+// cognitoSub given (link an existing Cognito identity):
+// - An existing users row with a role other than family_member: reject with 409 - a
+//   supervisor/caregiver account can't also be linked as a dependant's family contact.
+// - An existing users row with role family_member: reuse it as-is. The request's phoneNumber/
+//   fullName are only used when creating a brand-new row - an unrelated linking action must not
+//   be able to silently overwrite someone else's own profile (editable only via that person's own
+//   PATCH /users/{id}), which would reopen the same class of gap HEZ-29's privilege-escalation fix
+//   closed.
+// - No existing users row for that cognitoSub: assign the Cognito custom:role attribute
+//   (cognitoAdmin.assignRole) BEFORE the DB insert, same ordering as routes/users.ts/
+//   routes/caregivers.ts, so a failed insert still leaves a retry that can recover. This is
+//   required for correctness, not just consistency: requireAuth/requireRole only ever read the
+//   JWT's custom:role claim, never the DB, so a users row created without also setting this
+//   attribute would leave that person permanently unable to authenticate as a family_member.
+//
+// email given (create a brand-new Cognito identity from scratch, 2026-09-14):
+// - An existing users row with that email: same existing-role-mismatch/reuse rules as the
+//   cognitoSub path above - the DB is checked first specifically so a genuine match never reaches
+//   Cognito at all (avoids creating an orphaned Cognito identity for an email that turns out to
+//   already be registered here).
+// - No existing users row: cognitoAdmin.createUser() creates the Cognito identity and sets
+//   custom:role in the same call (no separate assignRole needed, unlike the cognitoSub path),
+//   sends a real invitation email with a Cognito-generated temporary password. The new person
+//   completes sign-in via the NEW_PASSWORD_REQUIRED flow the login page already handles.
 async function resolveFamilyMemberIdentity(
   db: Db,
   cognitoAdmin: CognitoAdmin,
   body: AddFamilyMemberBody,
-  cognitoSubFieldPath: string,
+  fieldPath: string,
   res: Response,
 ): Promise<ResolvedFamilyMember | undefined> {
-  const existing = await getUserByCognitoSub(db, body.cognitoSub);
-  if (existing) {
-    if (existing.role !== 'family_member') {
+  if (body.cognitoSub) {
+    const existing = await getUserByCognitoSub(db, body.cognitoSub);
+    if (existing) {
+      if (existing.role !== 'family_member') {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'This Cognito identity is already registered with a different role.',
+        });
+        return undefined;
+      }
+      return { kind: 'existing', userId: existing.id };
+    }
+
+    try {
+      await cognitoAdmin.assignRole(body.cognitoSub, 'family_member');
+    } catch (err) {
+      if (isCognitoUserNotFoundError(err)) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail: `${fieldPath}.cognitoSub does not correspond to an existing Cognito user.`,
+        });
+        return undefined;
+      }
+      throw err;
+    }
+    return { kind: 'new', cognitoSub: body.cognitoSub, body };
+  }
+
+  // Schema's refine() guarantees email is present when cognitoSub isn't.
+  const email = body.email;
+  if (!email) {
+    throw new Error(
+      'addFamilyMemberRequestSchema invariant violated: neither cognitoSub nor email present.',
+    );
+  }
+
+  const existingByEmail = await getUserByEmail(db, email);
+  if (existingByEmail) {
+    if (existingByEmail.role !== 'family_member') {
       sendProblem(res, {
         type: 'about:blank',
         title: 'Conflict',
         status: 409,
-        detail: 'This Cognito identity is already registered with a different role.',
+        detail: 'This email is already registered here with a different role.',
       });
       return undefined;
     }
-    return { kind: 'existing', userId: existing.id };
+    return { kind: 'existing', userId: existingByEmail.id };
   }
 
   try {
-    await cognitoAdmin.assignRole(body.cognitoSub, 'family_member');
+    const cognitoSub = await cognitoAdmin.createUser({
+      email,
+      phoneNumber: body.phoneNumber,
+      fullName: body.fullName,
+      role: 'family_member',
+    });
+    return { kind: 'new', cognitoSub, body };
   } catch (err) {
-    if (isCognitoUserNotFoundError(err)) {
+    if (isCognitoUserAlreadyExistsError(err)) {
       sendProblem(res, {
         type: 'about:blank',
-        title: 'Bad Request',
-        status: 400,
-        detail: `${cognitoSubFieldPath} does not correspond to an existing Cognito user.`,
+        title: 'Conflict',
+        status: 409,
+        detail: `${fieldPath}.email already has a Cognito identity with no linked account here - this needs its Cognito sub to link directly, since it can't be found by searching.`,
       });
       return undefined;
     }
     throw err;
   }
-  return { kind: 'new', body };
 }
 
 export function createDependantsRouter(dependencies: DependantsRouterDependencies): Router {
@@ -355,7 +451,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             .insert(schema.users)
             .values({
               id: uuidv7(),
-              cognitoSub: resolved.body.cognitoSub,
+              cognitoSub: resolved.cognitoSub,
+              email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
               role: 'family_member',
@@ -388,7 +485,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           type: 'about:blank',
           title: 'Conflict',
           status: 409,
-          detail: 'A user with this cognitoSub or phoneNumber already exists.',
+          detail: 'A user with this cognitoSub, email, or phoneNumber already exists.',
         });
         return;
       }
@@ -633,7 +730,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             .insert(schema.users)
             .values({
               id: uuidv7(),
-              cognitoSub: resolved.body.cognitoSub,
+              cognitoSub: resolved.cognitoSub,
+              email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
               role: 'family_member',
@@ -681,7 +779,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           title: 'Conflict',
           status: 409,
           detail:
-            'This family member is already linked to this dependant, or the cognitoSub/phoneNumber is already in use.',
+            'This family member is already linked to this dependant, or the cognitoSub/email/phoneNumber is already in use.',
         });
         return;
       }

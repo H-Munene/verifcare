@@ -97,6 +97,13 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // (see infra/lib/auth.ts). Scoped to this user pool only, not a wildcard.
   userPool.grant(apiFunction, "cognito-idp:AdminUpdateUserAttributes");
 
+  // Lets the supervisor web app register a dependant's primary/family
+  // contact who has never touched Cognito at all, not just link an existing
+  // identity (2026-09-14, extending HEZ-30/HEZ-56's family-member linking).
+  // Scoped to this user pool only, not a wildcard - same pattern as the
+  // grant above.
+  userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
+
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,
   });
