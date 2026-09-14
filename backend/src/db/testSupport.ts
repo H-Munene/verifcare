@@ -1,14 +1,13 @@
 // Shared setup for integration tests that need a real Postgres connection (Linear HEZ-11).
-// Not used by the app itself - HEZ-27 builds the actual runtime client separately, though it
-// should follow the same `casing: 'snake_case'` convention established here and in drizzle.config.ts.
+// Not used by the app itself - see db/client.ts's createDb() (HEZ-27) for the runtime client,
+// which this file now reuses so the `casing: 'snake_case'` convention lives in exactly one place.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import * as schema from './schema.js';
+import { createDb, type Db } from './client.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(dirname, '../../drizzle');
@@ -31,13 +30,13 @@ const allTableNames = [
 ] as const;
 
 let pool: Pool | undefined;
-let db: NodePgDatabase<typeof schema> | undefined;
+let db: Db | undefined;
 
 export function getTestDatabaseUrl(): string | undefined {
   return process.env.TEST_DATABASE_URL;
 }
 
-export async function setupTestDb(): Promise<NodePgDatabase<typeof schema>> {
+export async function setupTestDb(): Promise<Db> {
   const url = getTestDatabaseUrl();
   if (!url) {
     throw new Error(
@@ -45,12 +44,12 @@ export async function setupTestDb(): Promise<NodePgDatabase<typeof schema>> {
     );
   }
   pool = new Pool({ connectionString: url });
-  db = drizzle(pool, { schema, casing: 'snake_case' });
+  db = createDb(pool);
   await migrate(db, { migrationsFolder });
   return db;
 }
 
-export function getDb(): NodePgDatabase<typeof schema> {
+export function getDb(): Db {
   if (!db) {
     throw new Error('setupTestDb() must run first (e.g. in a beforeAll hook).');
   }
