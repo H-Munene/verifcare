@@ -5,6 +5,10 @@ import { ApiError } from '../api/client';
 import type { DependantFamilyMember } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import {
+  FamilyMemberResolver,
+  type FamilyMemberSelection,
+} from '../components/FamilyMemberResolver';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Input } from '../design-system/Input';
@@ -171,21 +175,21 @@ function AddFamilyMemberModal({
 }) {
   const { dependants } = useApi();
   const queryClient = useQueryClient();
-  const [cognitoSub, setCognitoSub] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [selection, setSelection] = useState<FamilyMemberSelection | null>(null);
   const [relationship, setRelationship] = useState('');
   const [isPrimaryContact, setIsPrimaryContact] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      dependants.addFamilyMember(dependantId, {
-        cognitoSub,
-        phoneNumber,
-        fullName,
+    mutationFn: () => {
+      if (!selection) {
+        throw new Error('No family member selected.');
+      }
+      return dependants.addFamilyMember(dependantId, {
+        ...selection,
         relationship: relationship || undefined,
         isPrimaryContact,
-      }),
+      });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ['dependant', dependantId, 'family-members'],
@@ -201,28 +205,8 @@ function AddFamilyMemberModal({
 
   return (
     <Modal title="Add Family Member" onClose={onClose}>
-      <form className="dependant-detail__modal-form" onSubmit={handleSubmit}>
-        <Input
-          id="memberCognitoSub"
-          label="Cognito sub"
-          value={cognitoSub}
-          onChange={(e) => setCognitoSub(e.target.value)}
-          required
-        />
-        <Input
-          id="memberFullName"
-          label="Full name"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          required
-        />
-        <Input
-          id="memberPhoneNumber"
-          label="Phone number"
-          value={phoneNumber}
-          onChange={(e) => setPhoneNumber(e.target.value)}
-          required
-        />
+      <form className="dependant-detail__modal-form" onSubmit={handleSubmit} autoComplete="off">
+        <FamilyMemberResolver selection={selection} onSelect={setSelection} />
         <Input
           id="memberRelationship"
           label="Relationship"
@@ -245,7 +229,7 @@ function AddFamilyMemberModal({
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={mutation.isPending}>
+          <Button type="submit" variant="primary" disabled={mutation.isPending || !selection}>
             {mutation.isPending ? 'Adding...' : 'Add'}
           </Button>
         </div>

@@ -37,8 +37,13 @@ export interface DependantFamilyMember {
   createdAt: string;
 }
 
+// Exactly one of cognitoSub/email must be set - cognitoSub links an existing Cognito identity;
+// email creates a brand-new one from scratch (2026-09-14, see backend/openapi.yaml's
+// AddFamilyMemberRequest for the full contract). Built by components/FamilyMemberResolver.tsx,
+// not typed directly by hand in any page.
 export interface AddFamilyMemberRequest {
-  cognitoSub: string;
+  cognitoSub?: string;
+  email?: string;
   phoneNumber: string;
   fullName: string;
   relationship?: string;

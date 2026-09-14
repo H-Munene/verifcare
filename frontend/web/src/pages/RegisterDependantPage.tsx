@@ -5,9 +5,14 @@ import { ApiError } from '../api/client';
 import type { Dependant, DependantGender, DependantStatus } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import {
+  FamilyMemberResolver,
+  type FamilyMemberSelection,
+} from '../components/FamilyMemberResolver';
 import { Button } from '../design-system/Button';
 import { Card } from '../design-system/Card';
 import { Input } from '../design-system/Input';
+import { Stepper } from '../design-system/Stepper';
 import { Switch } from '../design-system/Switch';
 import './RegisterDependantPage.css';
 
@@ -17,6 +22,11 @@ import './RegisterDependantPage.css';
 // members are added from the Dependant Detail page (DependantDetailPage.tsx, HEZ-56), matching
 // architecture.md's "first family member is linked atomically at registration, later members
 // added separately" design.
+//
+// Presented as a stepper (2026-09-14, user request - modeled on a standard e-commerce checkout
+// stepper) rather than one long scrolling form: Details -> Geofence -> Primary Contact
+// (registration only; editing has no primary-contact step, since that's not part of
+// PATCH /dependants/{id} at all - it's managed from DependantDetailPage instead).
 //
 // Consent capture (biometric-verification / audio-cognitive-monitoring, shown in the wireframe)
 // is deliberately not built here - HEZ-40 ("Consent capture endpoints") is a separate, not-yet-
@@ -54,23 +64,29 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
+  const steps = isEdit ? ['Details', 'Geofence'] : ['Details', 'Geofence', 'Primary Contact'];
+  const [step, setStep] = useState(0);
+  const isLastStep = step === steps.length - 1;
+
   const [fullName, setFullName] = useState(initial?.fullName ?? '');
   const [dob, setDob] = useState(initial?.dob ?? '');
   const [gender, setGender] = useState<DependantGender | ''>(initial?.gender ?? '');
   const [homeAddressText, setHomeAddressText] = useState(initial?.homeAddressText ?? '');
   const [geofenceLat, setGeofenceLat] = useState(initial ? String(initial.geofenceLat) : '');
   const [geofenceLng, setGeofenceLng] = useState(initial ? String(initial.geofenceLng) : '');
+  // 20m default - confirmed with the user 2026-09-14 (originally proposed at 10m, revised up after
+  // flagging that typical smartphone GPS accuracy, ~5m under open sky and substantially worse
+  // indoors/urban, leaves too thin a margin at 10m against a genuinely-present caregiver). See
+  // docs/project-state.md and architecture.md's "geofence accuracy threshold" open item.
   const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(
-    initial ? String(initial.geofenceRadiusMeters) : '150',
+    initial ? String(initial.geofenceRadiusMeters) : '20',
   );
   const [cognitiveMonitoringEnabled, setCognitiveMonitoringEnabled] = useState(
     initial?.cognitiveMonitoringEnabled ?? false,
   );
   const [status, setStatus] = useState<DependantStatus>(initial?.status ?? 'active');
 
-  const [primaryCognitoSub, setPrimaryCognitoSub] = useState('');
-  const [primaryPhoneNumber, setPrimaryPhoneNumber] = useState('');
-  const [primaryFullName, setPrimaryFullName] = useState('');
+  const [primarySelection, setPrimarySelection] = useState<FamilyMemberSelection | null>(null);
   const [primaryRelationship, setPrimaryRelationship] = useState('');
 
   const createMutation = useMutation({
@@ -90,8 +106,22 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     },
   });
 
+  // Per-step validity, gating the "Next step" button the same way the final Save button was
+  // already gated - a step's own required fields must be filled before moving on, rather than
+  // discovering a validation problem only after reaching the end.
+  const detailsValid = fullName.trim() !== '' && dob !== '';
+  const geofenceValid = geofenceLat !== '' && geofenceLng !== '' && geofenceRadiusMeters !== '';
+  const primaryContactValid = Boolean(primarySelection);
+  const currentStepValid = [detailsValid, geofenceValid, primaryContactValid][step] ?? true;
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!isLastStep) {
+      // Defensive only - the submit button doesn't exist in the DOM before the last step, so this
+      // shouldn't normally fire, but an Enter keypress in some browsers can still submit a form
+      // with no visible submit button.
+      return;
+    }
 
     const common = {
       fullName,
@@ -109,13 +139,11 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         ...common,
         ...(identity?.role === 'supervisor' ? { status } : {}),
       });
-    } else {
+    } else if (primarySelection) {
       createMutation.mutate({
         ...common,
         primaryFamilyMember: {
-          cognitoSub: primaryCognitoSub,
-          phoneNumber: primaryPhoneNumber,
-          fullName: primaryFullName,
+          ...primarySelection,
           relationship: primaryRelationship || undefined,
         },
       });
@@ -130,130 +158,114 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       <h1 className="register-dependant-page__title">
         {isEdit ? 'Edit Dependant' : 'Register Dependant'}
       </h1>
-      <form onSubmit={handleSubmit} className="register-dependant-page__form">
-        <Card className="register-dependant-page__section">
-          <Input
-            id="fullName"
-            label="Full name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            required
-          />
-          <Input
-            id="dob"
-            label="Date of birth"
-            type="date"
-            value={dob}
-            onChange={(e) => setDob(e.target.value)}
-            required
-          />
-          <div className="register-dependant-page__field">
-            <label className="ds-label" htmlFor="gender">
-              Gender
-            </label>
-            <select
-              id="gender"
-              className="ds-input"
-              value={gender}
-              onChange={(e) => setGender(e.target.value as DependantGender | '')}
-            >
-              <option value="">Not specified</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-            </select>
-          </div>
-          <Input
-            id="homeAddressText"
-            label="Home address"
-            value={homeAddressText}
-            onChange={(e) => setHomeAddressText(e.target.value)}
-          />
-        </Card>
-
-        <Card className="register-dependant-page__section">
-          <div className="register-dependant-page__geofence">
-            {/* Placeholder for the embedded Google Maps pin-drag picker - no platform-restricted
-                API key has been created yet (see docs/project-state.md). Lat/lng/radius are still
-                fully editable as plain number inputs. */}
-            <div className="register-dependant-page__map-placeholder">Map (placeholder)</div>
-            <div className="register-dependant-page__geofence-fields">
-              <Input
-                id="geofenceLat"
-                label="Geofence latitude"
-                type="number"
-                step="any"
-                value={geofenceLat}
-                onChange={(e) => setGeofenceLat(e.target.value)}
-                required
-              />
-              <Input
-                id="geofenceLng"
-                label="Geofence longitude"
-                type="number"
-                step="any"
-                value={geofenceLng}
-                onChange={(e) => setGeofenceLng(e.target.value)}
-                required
-              />
-              <Input
-                id="geofenceRadiusMeters"
-                label="Geofence radius (meters)"
-                type="number"
-                min={1}
-                value={geofenceRadiusMeters}
-                onChange={(e) => setGeofenceRadiusMeters(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-          <Switch
-            checked={cognitiveMonitoringEnabled}
-            onChange={setCognitiveMonitoringEnabled}
-            label="Enable cognitive monitoring"
-          />
-          {isEdit && identity?.role === 'supervisor' ? (
+      <Stepper steps={steps} currentStepIndex={step} />
+      <form onSubmit={handleSubmit} className="register-dependant-page__form" autoComplete="off">
+        {step === 0 ? (
+          <Card className="register-dependant-page__section">
+            <Input
+              id="fullName"
+              label="Dependant Full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+            />
+            <Input
+              id="dob"
+              label="Dependant Date of birth"
+              type="date"
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              required
+            />
             <div className="register-dependant-page__field">
-              <label className="ds-label" htmlFor="status">
-                Status
+              <label className="ds-label" htmlFor="gender">
+                Gender
               </label>
               <select
-                id="status"
+                id="gender"
                 className="ds-input"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as DependantStatus)}
+                value={gender}
+                onChange={(e) => setGender(e.target.value as DependantGender | '')}
               >
-                <option value="active">Active</option>
-                <option value="deactivated">Deactivated</option>
+                <option value="">Not specified</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
               </select>
             </div>
-          ) : null}
-        </Card>
+            <Input
+              id="homeAddressText"
+              label="Home address"
+              value={homeAddressText}
+              onChange={(e) => setHomeAddressText(e.target.value)}
+            />
+          </Card>
+        ) : null}
 
-        {!isEdit ? (
+        {step === 1 ? (
+          <Card className="register-dependant-page__section">
+            <div className="register-dependant-page__geofence">
+              {/* Placeholder for the embedded Google Maps pin-drag picker - no platform-restricted
+                  API key has been created yet (see docs/project-state.md). Lat/lng/radius are
+                  still fully editable as plain number inputs. */}
+              <div className="register-dependant-page__map-placeholder">Map (placeholder)</div>
+              <div className="register-dependant-page__geofence-fields">
+                <Input
+                  id="geofenceLat"
+                  label="Geofence latitude"
+                  type="number"
+                  step="any"
+                  value={geofenceLat}
+                  onChange={(e) => setGeofenceLat(e.target.value)}
+                  required
+                />
+                <Input
+                  id="geofenceLng"
+                  label="Geofence longitude"
+                  type="number"
+                  step="any"
+                  value={geofenceLng}
+                  onChange={(e) => setGeofenceLng(e.target.value)}
+                  required
+                />
+                <Input
+                  id="geofenceRadiusMeters"
+                  label="Geofence radius (meters)"
+                  type="number"
+                  min={1}
+                  value={geofenceRadiusMeters}
+                  onChange={(e) => setGeofenceRadiusMeters(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            <Switch
+              checked={cognitiveMonitoringEnabled}
+              onChange={setCognitiveMonitoringEnabled}
+              label="Enable cognitive monitoring"
+            />
+            {isEdit && identity?.role === 'supervisor' ? (
+              <div className="register-dependant-page__field">
+                <label className="ds-label" htmlFor="status">
+                  Status
+                </label>
+                <select
+                  id="status"
+                  className="ds-input"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as DependantStatus)}
+                >
+                  <option value="active">Active</option>
+                  <option value="deactivated">Deactivated</option>
+                </select>
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
+
+        {step === 2 && !isEdit ? (
           <Card className="register-dependant-page__section">
             <div className="register-dependant-page__section-title">Primary family member</div>
-            <Input
-              id="primaryCognitoSub"
-              label="Cognito sub"
-              hint="Must belong to an existing Cognito user."
-              value={primaryCognitoSub}
-              onChange={(e) => setPrimaryCognitoSub(e.target.value)}
-              required
-            />
-            <Input
-              id="primaryFullName"
-              label="Full name"
-              value={primaryFullName}
-              onChange={(e) => setPrimaryFullName(e.target.value)}
-              required
-            />
-            <Input
-              id="primaryPhoneNumber"
-              label="Phone number"
-              value={primaryPhoneNumber}
-              onChange={(e) => setPrimaryPhoneNumber(e.target.value)}
-              required
-            />
+            <FamilyMemberResolver selection={primarySelection} onSelect={setPrimarySelection} />
             <Input
               id="primaryRelationship"
               label="Relationship"
@@ -271,9 +283,27 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           </div>
         ) : null}
 
-        <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? 'Saving...' : 'Save'}
-        </Button>
+        <div className="register-dependant-page__step-actions">
+          {step > 0 ? (
+            <Button type="button" onClick={() => setStep((s) => s - 1)}>
+              Back
+            </Button>
+          ) : null}
+          {isLastStep ? (
+            <Button type="submit" variant="primary" disabled={pending || !currentStepValid}>
+              {pending ? 'Saving...' : 'Save'}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="primary"
+              disabled={!currentStepValid}
+              onClick={() => setStep((s) => s + 1)}
+            >
+              Next step
+            </Button>
+          )}
+        </div>
       </form>
     </div>
   );
