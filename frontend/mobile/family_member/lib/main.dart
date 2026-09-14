@@ -5,7 +5,6 @@ import 'api/dependants_api.dart';
 import 'api/users_api.dart';
 import 'auth/cognito_auth_service.dart';
 import 'auth/registration.dart';
-import 'screens/confirm_sign_up_screen.dart';
 import 'screens/dependant_choice_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -182,29 +181,14 @@ class _RootScreenState extends State<_RootScreen> {
     );
   }
 
+  // No in-app verification-code chain (2026-09-14, user request - see SignUpScreen's own
+  // comment): SignUpScreen creates the account and tells the user it needs manual confirmation,
+  // then pops itself back to Welcome. Signing in afterward (once confirmed) goes through
+  // LoginScreen, whose _onAuthenticated already knows how to finish self-registration for a
+  // role-less identity via completeSelfRegistrationIfNeeded.
   void _pushSignUp(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SignUpScreen(
-          authService: widget.authService,
-          onSignedUp: (email, password) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ConfirmSignUpScreen(
-                  authService: widget.authService,
-                  usersApi: widget.usersApi,
-                  email: email,
-                  password: password,
-                  onRegistered: (identity) {
-                    setState(() => _identity = identity);
-                    _goToDependantChoice(identity);
-                  },
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => SignUpScreen(authService: widget.authService)),
     );
   }
 }

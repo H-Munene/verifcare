@@ -23,4 +23,11 @@ plugins {
     id("org.jetbrains.kotlin.android") version "2.3.20" apply false
 }
 
+// Gradle defaults the root project's name to its containing folder's name, which for every
+// Flutter app in this repo is literally "android" (frontend/mobile/<app>/android). That collides
+// when both this project and frontend/mobile/caregiver/android are open/built together in the
+// same IDE/Gradle session ("A project with the name 'android' already exists" / "Duplicate root
+// element android") - explicit, unique name avoids it without touching the caregiver app at all.
+rootProject.name = "family_member_android"
+
 include(":app")

@@ -1,12 +1,18 @@
+import 'package:amazon_cognito_identity_dart_2/cognito.dart';
 import 'package:flutter/material.dart';
 
 import '../auth/cognito_auth_service.dart';
+import '../utils/kenyan_phone.dart';
 
+/// Creates the Cognito account and stops there - no in-app verification-code step. Cognito's
+/// default (non-SES) email delivery proved unreliable in testing (2026-09-14: a real sign-up's
+/// code never arrived), so for now accounts are confirmed manually (e.g.
+/// `aws cognito-idp admin-confirm-sign-up`) instead of through the app. Revisit once this project
+/// has a real Amazon SES configuration for the user pool.
 class SignUpScreen extends StatefulWidget {
   final CognitoAuthService authService;
-  final void Function(String email, String password) onSignedUp;
 
-  const SignUpScreen({super.key, required this.authService, required this.onSignedUp});
+  const SignUpScreen({super.key, required this.authService});
 
   @override
   State<SignUpScreen> createState() => _SignUpScreenState();
@@ -46,21 +52,55 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _error = null;
     });
     final email = _emailController.text.trim();
-    final password = _passwordController.text;
+    // Already validated by the field's own validator below, so this can't be null here.
+    final phoneNumber = normalizeKenyanPhoneNumber(_phoneController.text)!;
     try {
       await widget.authService.signUp(
         email: email,
-        phoneNumber: _phoneController.text.trim(),
+        phoneNumber: phoneNumber,
         fullName: _fullNameController.text.trim(),
-        password: password,
+        password: _passwordController.text,
       );
-      widget.onSignedUp(email, password);
+      if (mounted) {
+        await _showAccountCreatedDialog(email);
+      }
+    } on CognitoClientException catch (err) {
+      if (err.code == 'UsernameExistsException') {
+        setState(() => _error =
+            'An account already exists for this email. If it still needs confirming, ask an '
+            'administrator; otherwise use "Sign in" instead.');
+        return;
+      }
+      setState(() => _error = 'Could not create account: $err');
     } catch (err) {
       setState(() => _error = 'Could not create account: $err');
     } finally {
       if (mounted) {
         setState(() => _submitting = false);
       }
+    }
+  }
+
+  Future<void> _showAccountCreatedDialog(String email) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Account created'),
+        content: Text(
+          'An account was created for $email. An administrator needs to confirm it before you '
+          'can sign in - once that\'s done, come back and sign in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (mounted) {
+      Navigator.of(context).pop();
     }
   }
 
@@ -87,9 +127,23 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
                 autofillHints: const [AutofillHints.telephoneNumber],
-                decoration: const InputDecoration(labelText: 'Phone number'),
-                validator: (value) =>
-                    (value == null || value.trim().isEmpty) ? 'Phone number is required.' : null,
+                decoration: const InputDecoration(
+                  labelText: 'Phone number',
+                  hintText: '0712345678',
+                ),
+                // Accepts any common Kenyan local format (0712345678, 254712345678,
+                // +254712345678) and normalizes it to Cognito's required E.164 shape at submit
+                // time - see normalizeKenyanPhoneNumber. This POC is Kenya-only by design.
+                validator: (value) {
+                  final trimmed = value?.trim() ?? '';
+                  if (trimmed.isEmpty) {
+                    return 'Phone number is required.';
+                  }
+                  if (normalizeKenyanPhoneNumber(trimmed) == null) {
+                    return 'Enter a valid Kenyan mobile number, e.g. 0712345678.';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 12),
               TextFormField(

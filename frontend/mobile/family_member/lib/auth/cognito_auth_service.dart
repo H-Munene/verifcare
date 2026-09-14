@@ -80,17 +80,19 @@ class CognitoAuthService {
 
   /// Self-service Cognito sign-up (distinct from AdminCreateUser) - the User Pool's own
   /// `selfSignUpEnabled: true` is what lets this app register a brand-new family member directly,
-  /// without any supervisor involvement. Cognito emails or texts a verification code (the pool has
-  /// both email and phone in autoVerify; the package doesn't surface which channel it picked -
-  /// CognitoUserPoolData only exposes user/userConfirmed/userSub - so callers should show generic
-  /// "check your email or phone" copy).
-  Future<CognitoUser> signUp({
+  /// without any supervisor involvement.
+  ///
+  /// No in-app verification-code step follows this (2026-09-14, user request): Cognito's default
+  /// email delivery proved unreliable in testing, so accounts are confirmed manually for now
+  /// (e.g. `aws cognito-idp admin-confirm-sign-up`) - see docs/project-state.md. Revisit once this
+  /// project has a real Amazon SES configuration for the user pool.
+  Future<void> signUp({
     required String email,
     required String phoneNumber,
     required String fullName,
     required String password,
   }) async {
-    final data = await _pool.signUp(
+    await _pool.signUp(
       email,
       password,
       userAttributes: [
@@ -99,17 +101,6 @@ class CognitoAuthService {
         AttributeArg(name: 'name', value: fullName),
       ],
     );
-    return data.user;
-  }
-
-  Future<void> confirmSignUp(String email, String confirmationCode) async {
-    final user = CognitoUser(email, _pool);
-    await user.confirmRegistration(confirmationCode);
-  }
-
-  Future<void> resendConfirmationCode(String email) async {
-    final user = CognitoUser(email, _pool);
-    await user.resendConfirmationCode();
   }
 
   Future<SignInResult> signIn(String email, String password) async {
