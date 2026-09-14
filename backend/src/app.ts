@@ -5,6 +5,7 @@ import type { Db } from './db/client.js';
 import { sendProblem } from './errors.js';
 import { logger } from './logger.js';
 import { createCaregiversRouter } from './routes/caregivers.js';
+import { createDependantsRouter } from './routes/dependants.js';
 import { createUsersRouter } from './routes/users.js';
 
 declare global {
@@ -59,6 +60,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   if (requireAuth && requireVerifiedIdentity && cognitoAdmin) {
     app.use('/users', createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity }));
     app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.

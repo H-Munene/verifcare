@@ -48,3 +48,20 @@ describe('createCognitoAdmin', () => {
     );
   });
 });
+
+describe('isCognitoUserNotFoundError', () => {
+  it('recognizes a modeled UserNotFoundException by its .name (AWS SDK v3 convention)', async () => {
+    const { isCognitoUserNotFoundError } = await import('./cognitoAdmin.js');
+    const err = Object.assign(new Error('User does not exist.'), {
+      name: 'UserNotFoundException',
+    });
+    expect(isCognitoUserNotFoundError(err)).toBe(true);
+  });
+
+  it('returns false for an unrelated error', async () => {
+    const { isCognitoUserNotFoundError } = await import('./cognitoAdmin.js');
+    expect(isCognitoUserNotFoundError(new Error('boom'))).toBe(false);
+    expect(isCognitoUserNotFoundError(undefined)).toBe(false);
+    expect(isCognitoUserNotFoundError('not an error')).toBe(false);
+  });
+});

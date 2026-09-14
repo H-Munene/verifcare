@@ -7,7 +7,7 @@
 // matching, wrong issuer format) that a fully-mocked verifier test cannot catch, since it never
 // exercises the real verification logic at all.
 
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { describe, expect, it } from 'vitest';
 
@@ -20,7 +20,12 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url');
 }
 
-function signTestIdToken(privateKey: string, claims: Record<string, unknown>): string {
+// generateKeyPairSync('rsa', { modulusLength: 2048 }) (no encoding options) returns KeyObject, not
+// a PEM string - node:crypto's sign() accepts either, so this worked at runtime all along, but the
+// parameter's declared type here was wrong (a pre-existing type error, not caught by npm run build
+// since tsconfig.build.json excludes test files, nor by `npm test` since Vitest's esbuild
+// transform doesn't type-check - only found by running tsc -p tsconfig.json directly).
+function signTestIdToken(privateKey: KeyObject, claims: Record<string, unknown>): string {
   const header = { alg: 'RS256', kid: KEY_ID, typ: 'JWT' };
   const now = Math.floor(Date.now() / 1000);
   const payload = {

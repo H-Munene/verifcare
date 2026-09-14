@@ -17,6 +17,21 @@ export interface CognitoAdmin {
   assignRole: (sub: string, role: UserRole) => Promise<void>;
 }
 
+// Classifies an AdminUpdateUserAttributes rejection caused by a cognitoSub that doesn't
+// correspond to any real Cognito user - lets a route turn this into a clean 400 instead of
+// letting the raw AWS SDK error surface as a 500 (HEZ-30, when a submitted cognitoSub is invalid
+// rather than merely unassigned a role yet). Checked against the AWS SDK v3 error-handling
+// convention (both e.name and instanceof are safe, since the SDK overrides Symbol.hasInstance for
+// modeled exceptions) - e.name is used here since importing the exception class just to compare
+// identity would be no more precise for this single check.
+export function isCognitoUserNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { name?: unknown }).name === 'UserNotFoundException'
+  );
+}
+
 export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
   const client = new CognitoIdentityProviderClient({});
   return {
