@@ -36,3 +36,19 @@ npm run dev
 `npm test` runs the unit tests; the DB-enforcement integration tests in that same run need `TEST_DATABASE_URL` (in `.env.example`) and skip themselves cleanly if it isn't set.
 
 See `backend/drizzle/README.md` for migrations and how to re-verify them, check `backend/openapi.yaml` for the API contract.
+
+### Running the web app
+
+With `backend/`'s dev server already running (above):
+
+```bash
+cd frontend/web
+cp .env.example .env   # points at the local backend + the real deployed Cognito User Pool
+npm install
+npm run dev
+```
+
+Opens at `http://localhost:5173`. Authenticates against the real, deployed Cognito User Pool (no
+local Cognito emulator exists in this project) - see `docs/project-state.md`'s HEZ-52/53/55/56
+entry for the AWS CLI steps to bootstrap a first real supervisor account if the User Pool has no
+users yet.

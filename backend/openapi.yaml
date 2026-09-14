@@ -930,7 +930,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: A Cognito-issued JWT (ID or access token, per HEZ-28's implementation). The `role` custom claim drives RBAC.
+      description: A Cognito-issued ID token (not the access token - the `custom:role` custom attribute this API's RBAC relies on is only present in the ID token by default, confirmed against AWS's Cognito documentation; the access token's default claim set does not include custom attributes without a Pre Token Generation Lambda trigger, which this project does not use). The `custom:role` claim drives RBAC.
 
   parameters:
     Cursor:

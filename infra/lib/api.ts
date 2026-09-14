@@ -79,13 +79,23 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     },
   });
 
-  // Network-level access only (the security group rule letting api reach
-  // RDS's port) - matches architecture.md's "Networking (VPC layout)"
-  // section, which is settled. IAM grants for what api's code actually
-  // reads/writes (the secret, the two buckets, Rekognition) are Linear
-  // HEZ-24's explicit scope, not this one - the current app only serves a
-  // health check and doesn't touch any of them yet.
+  // Network-level access (the security group rule letting api reach RDS's
+  // port) - matches architecture.md's "Networking (VPC layout)" section,
+  // which is settled. IAM grants for what api's code actually reads/writes
+  // beyond the secret (S3, Rekognition) are Linear HEZ-24's explicit scope,
+  // not this one - the app doesn't touch those yet.
   database.connections.allowDefaultPortFrom(apiFunction);
+
+  // Lets api's Lambda-to-Drizzle connection (backend/src/db/lambdaDb.ts)
+  // resolve DB credentials at runtime - scoped to this secret's ARN and its
+  // KMS key, not a wildcard grant.
+  databaseSecret.grantRead(apiFunction);
+
+  // Lets api's POST /users complete a genuinely new self-signup by assigning
+  // custom:role server-side (HEZ-29) - the only way that attribute can be
+  // set at all now that the app client's own write access to it was removed
+  // (see infra/lib/auth.ts). Scoped to this user pool only, not a wildcard.
+  userPool.grant(apiFunction, "cognito-idp:AdminUpdateUserAttributes");
 
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,

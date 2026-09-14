@@ -11,8 +11,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import { createDb } from './client.js';
 import * as schema from './schema.js';
 
 try {
@@ -33,7 +33,7 @@ if (!/localhost|127\.0\.0\.1/.test(databaseUrl)) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
-const db = drizzle(pool, { schema, casing: 'snake_case' });
+const db = createDb(pool);
 
 const ALL_TABLES = [
   'users',
