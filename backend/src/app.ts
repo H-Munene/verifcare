@@ -83,7 +83,10 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       try {
         req.app.locals.db = await resolveDb();
       } catch (err) {
-        logger.warn({ err }, 'Could not resolve DB client for this request; proceeding without one');
+        logger.warn(
+          { err },
+          'Could not resolve DB client for this request; proceeding without one',
+        );
       }
       next();
     });

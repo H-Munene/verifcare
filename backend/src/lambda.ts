@@ -30,7 +30,12 @@ const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 // bolted on afterward here (that was the actual bug, fixed 2026-09-14: middleware added to an
 // already-returned app, after every router and the catch-all 404 were already registered, could
 // never run for any request).
-const app = createApp({ requireAuth, requireVerifiedIdentity, cognitoAdmin, resolveDb: getLambdaDb });
+const app = createApp({
+  requireAuth,
+  requireVerifiedIdentity,
+  cognitoAdmin,
+  resolveDb: getLambdaDb,
+});
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,
 // overlapping it with cold-start latency, so the first real request doesn't pay for it - the
