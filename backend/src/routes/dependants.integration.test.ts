@@ -93,11 +93,12 @@ async function createTestUser(
   role: UserRole,
   phoneNumber: string,
   fullName = `User ${sub}`,
+  email?: string,
 ): Promise<typeof schema.users.$inferSelect> {
   const db = getDb();
   const [row] = await db
     .insert(schema.users)
-    .values({ cognitoSub: sub, fullName, phoneNumber, role })
+    .values({ cognitoSub: sub, fullName, phoneNumber, role, email })
     .returning();
   if (!row) {
     throw new Error('Failed to insert test user.');
@@ -133,7 +134,14 @@ describe.skipIf(!hasTestDb)(
 
     beforeEach(async () => {
       await truncateAllTables();
-      cognitoAdmin = { assignRole: vi.fn().mockResolvedValue(undefined) };
+      cognitoAdmin = {
+        assignRole: vi.fn().mockResolvedValue(undefined),
+        createUser: vi
+          .fn()
+          .mockImplementation(({ email }: { email: string }) =>
+            Promise.resolve(`created-sub-${email}`),
+          ),
+      };
       app = buildTestApp(cognitoAdmin);
     });
 
@@ -318,6 +326,165 @@ describe.skipIf(!hasTestDb)(
                 cognitoSub: 'nonexistent-cognito-user',
                 phoneNumber: '+254700000014',
                 fullName: 'Ghost',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(400);
+      });
+
+      it('creates a brand-new Cognito identity via email when no cognitoSub is given', async () => {
+        await createTestUser('sup-email-1', 'supervisor', '+254700000016');
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-1', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                email: 'brand-new@example.com',
+                phoneNumber: '+254700000017',
+                fullName: 'Brand New By Email',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(201);
+        expect(cognitoAdmin.createUser).toHaveBeenCalledWith({
+          email: 'brand-new@example.com',
+          phoneNumber: '+254700000017',
+          fullName: 'Brand New By Email',
+          role: 'family_member',
+        });
+        expect(cognitoAdmin.assignRole).not.toHaveBeenCalled();
+
+        const db = getDb();
+        const [created] = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.email, 'brand-new@example.com'));
+        expect(created).toMatchObject({
+          role: 'family_member',
+          fullName: 'Brand New By Email',
+          cognitoSub: 'created-sub-brand-new@example.com',
+        });
+      });
+
+      it('returns 409 when the primaryFamilyMember email belongs to an existing non-family_member user', async () => {
+        await createTestUser('sup-email-2', 'supervisor', '+254700000018');
+        await createTestUser(
+          'cg-email',
+          'caregiver',
+          '+254700000019',
+          'User cg-email',
+          'cg-taken@example.com',
+        );
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-2', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                email: 'cg-taken@example.com',
+                phoneNumber: '+254700000020',
+                fullName: 'Irrelevant',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(409);
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
+      });
+
+      it('reuses an existing family_member found by email instead of creating a new Cognito identity', async () => {
+        await createTestUser('sup-email-3', 'supervisor', '+254700000021');
+        const fm = await createTestUser(
+          'fm-email-existing',
+          'family_member',
+          '+254700000022',
+          'User fm-email-existing',
+          'existing-fm@example.com',
+        );
+        const db = getDb();
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-3', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                email: 'existing-fm@example.com',
+                phoneNumber: '+254799999997',
+                fullName: 'Ignored',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(201);
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
+        const [link] = await db
+          .select()
+          .from(schema.dependantFamilyMembers)
+          .where(eq(schema.dependantFamilyMembers.dependantId, dependantBody(response).id));
+        expect(link?.familyMemberUserId).toBe(fm.id);
+      });
+
+      it('returns 409 when the email already has a Cognito identity that cannot be found by searching', async () => {
+        await createTestUser('sup-email-4', 'supervisor', '+254700000023');
+        cognitoAdmin.createUser = vi.fn().mockRejectedValue(
+          Object.assign(new Error('An account with the email already exists.'), {
+            name: 'UsernameExistsException',
+          }),
+        );
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-4', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                email: 'orphaned-cognito-user@example.com',
+                phoneNumber: '+254700000024',
+                fullName: 'Ghost',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(409);
+      });
+
+      it('returns 400 when both cognitoSub and email are provided', async () => {
+        await createTestUser('sup-email-5', 'supervisor', '+254700000025');
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-5', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                cognitoSub: 'some-sub',
+                email: 'both@example.com',
+                phoneNumber: '+254700000026',
+                fullName: 'Both Given',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(400);
+      });
+
+      it('returns 400 when neither cognitoSub nor email is provided', async () => {
+        await createTestUser('sup-email-6', 'supervisor', '+254700000027');
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-6', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                phoneNumber: '+254700000028',
+                fullName: 'Neither Given',
               },
             }),
           );

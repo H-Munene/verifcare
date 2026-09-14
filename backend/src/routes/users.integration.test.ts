@@ -92,7 +92,10 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
 
   beforeEach(async () => {
     await truncateAllTables();
-    cognitoAdmin = { assignRole: vi.fn().mockResolvedValue(undefined) };
+    cognitoAdmin = {
+      assignRole: vi.fn().mockResolvedValue(undefined),
+      createUser: vi.fn().mockResolvedValue('unused-sub'),
+    };
     app = buildTestApp(cognitoAdmin);
   });
 
@@ -255,6 +258,43 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
 
       const allIds = [...page1.items, ...page2.items].map((u) => u.id);
       expect(new Set(allIds).size).toBe(3);
+    });
+
+    it('filters by an exact phoneNumber match', async () => {
+      const auth = testAuthHeader({ sub: 'supervisor-sub', role: 'supervisor', email: undefined });
+
+      const response = userPageBody(
+        await request(app).get('/users?phoneNumber=%2B254700000101').set('x-test-auth', auth),
+      );
+
+      expect(response.items).toHaveLength(1);
+      expect(response.items[0]).toMatchObject({ fullName: 'User 1' });
+    });
+
+    it('filters by an exact email match, added 2026-09-14 for the supervisor-search-by-email/phone flow', async () => {
+      await request(app)
+        .post('/users')
+        .set('x-test-auth', testAuthHeader({ sub: 'email-sub', role: undefined, email: undefined }))
+        .send({
+          cognitoSub: 'email-sub',
+          fullName: 'Has Email',
+          phoneNumber: '+254700000199',
+          email: 'searchable@example.com',
+          role: 'family_member',
+        });
+      const auth = testAuthHeader({ sub: 'supervisor-sub', role: 'supervisor', email: undefined });
+
+      const response = userPageBody(
+        await request(app).get('/users?email=searchable%40example.com').set('x-test-auth', auth),
+      );
+
+      expect(response.items).toHaveLength(1);
+      expect(response.items[0]).toMatchObject({ fullName: 'Has Email' });
+
+      const noMatch = userPageBody(
+        await request(app).get('/users?email=nobody%40example.com').set('x-test-auth', auth),
+      );
+      expect(noMatch.items).toHaveLength(0);
     });
   });
 

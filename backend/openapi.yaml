@@ -96,6 +96,17 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/UserStatus'
+        - name: email
+          in: query
+          description: "Exact match, not search/prefix. Added so a supervisor can look up an existing user (e.g. a dependant's primary contact) by email instead of needing their id or Cognito sub already."
+          schema:
+            type: string
+            format: email
+        - name: phoneNumber
+          in: query
+          description: 'Exact match, not search/prefix. Same rationale as `email` above.'
+          schema:
+            type: string
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1050,11 +1061,14 @@ components:
 
     User:
       type: object
-      required: [id, fullName, role, status, createdAt, updatedAt]
+      required: [id, cognitoSub, fullName, role, status, createdAt, updatedAt]
       properties:
         id:
           type: string
           format: uuid
+        cognitoSub:
+          type: string
+          description: "Not secret - already visible to the caller via their own decoded JWT for a self-view; needed by a supervisor's search-by-email/phone flow to link an existing identity."
         email:
           type: [string, 'null']
           format: email
@@ -1309,11 +1323,24 @@ components:
           format: date-time
     AddFamilyMemberRequest:
       type: object
-      required: [cognitoSub, phoneNumber, fullName]
+      description: |
+        Exactly one of `cognitoSub` or `email` must be provided (a plain JSON Schema `required`
+        list can't express this conditional constraint - enforced server-side via zod, matching
+        `CreateUserRequest`'s phone-required-unless-supervisor precedent elsewhere in this spec).
+        `cognitoSub` links an identity that already exists in Cognito; if that identity doesn't
+        have a `users` row yet, one is created with `role: family_member`. `email` creates a
+        brand-new Cognito identity from scratch for someone who has never signed up or been
+        created before - a real invitation email is sent with a Cognito-generated temporary
+        password.
+      required: [phoneNumber, fullName]
       properties:
         cognitoSub:
           type: string
-          description: "Must belong to an existing Cognito user; if that user doesn't have a `users` row yet, one is created with `role: family_member`."
+          description: 'Links an existing Cognito identity. Mutually exclusive with email.'
+        email:
+          type: string
+          format: email
+          description: 'Creates a brand-new Cognito identity and sends it a real invitation email. Mutually exclusive with cognitoSub.'
         phoneNumber:
           type: string
         fullName:
