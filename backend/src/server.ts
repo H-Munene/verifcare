@@ -25,7 +25,7 @@ const db = createDb(pool);
 // No local Cognito emulator in this project's stack - local dev verifies against the same real,
 // deployed User Pool the Lambda uses (see .env.example), including AdminUpdateUserAttributes
 // calls, which need the same AWS credentials this machine already has configured for the AWS CLI.
-const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientId);
+const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientIds);
 const requireAuth = createRequireAuth(verifier);
 const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
 const cognitoAdmin = createCognitoAdmin(config.userPoolId);

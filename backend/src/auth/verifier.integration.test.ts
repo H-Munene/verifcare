@@ -89,6 +89,44 @@ describe('CognitoJwtVerifier with tokenUse: id (real RS256 verification)', () =>
     await expect(verifier.verify(forgedToken)).rejects.toThrow();
   });
 
+  it('accepts a token whose audience matches one of several configured client ids', async () => {
+    // Regression test for a real bug (2026-09-14): verifier.ts's createIdTokenVerifier() used to
+    // accept only a single clientId, so tokens issued to any app client other than the one
+    // configured (the web app's) were rejected as unverifiable - every mobile app sign-in failed
+    // backend calls with a generic 401, even with a perfectly valid token. clientId here mirrors
+    // that fix: an array of every accepted app client, exactly as createIdTokenVerifier now takes.
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const jwk = publicKey.export({ format: 'jwk' }) as { kty: string; n: string; e: string };
+    const otherClientId = 'other-app-client-id';
+
+    const verifier = CognitoJwtVerifier.create({
+      userPoolId: USER_POOL_ID,
+      tokenUse: 'id',
+      clientId: [CLIENT_ID, otherClientId],
+    });
+    verifier.cacheJwks({ keys: [{ ...jwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }] });
+
+    // Signed for the second client id, not the first - proves any of the configured ids works,
+    // not just the first entry in the array.
+    const header = { alg: 'RS256', kid: KEY_ID, typ: 'JWT' };
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      token_use: 'id',
+      iss: ISSUER,
+      aud: otherClientId,
+      iat: now,
+      exp: now + 3600,
+      sub: 'abc',
+      'custom:role': 'family_member',
+    };
+    const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
+    const signature = sign('RSA-SHA256', Buffer.from(signingInput), privateKey);
+    const token = `${signingInput}.${base64url(signature)}`;
+
+    const verifiedPayload = await verifier.verify(token);
+    expect(verifiedPayload.sub).toBe('abc');
+  });
+
   it('rejects a token with a mismatched audience (clientId)', async () => {
     const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const jwk = publicKey.export({ format: 'jwk' }) as { kty: string; n: string; e: string };

@@ -11,3 +11,4 @@ coverage/
 /temp_images
 CLAUDE.md
 /.claude
+.agents

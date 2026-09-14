@@ -20,31 +20,23 @@ if (!config.databaseSecretArn) {
 
 // Cheap and synchronous - CognitoJwtVerifier.create() does not fetch the JWKS eagerly, only on
 // first verify() call (then caches it), so this is safe to construct once per cold start here.
-const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientId);
+const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientIds);
 const requireAuth = createRequireAuth(verifier);
 const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
 const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 
-const app = createApp({ requireAuth, requireVerifiedIdentity, cognitoAdmin });
+// resolveDb (not db) - see app.ts's AppDependencies.resolveDb comment for why this needs to be a
+// per-request resolver createApp() wires in itself, before its routers, rather than middleware
+// bolted on afterward here (that was the actual bug, fixed 2026-09-14: middleware added to an
+// already-returned app, after every router and the catch-all 404 were already registered, could
+// never run for any request).
+const app = createApp({ requireAuth, requireVerifiedIdentity, cognitoAdmin, resolveDb: getLambdaDb });
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,
-// overlapping it with cold-start latency.
+// overlapping it with cold-start latency, so the first real request doesn't pay for it - the
+// resolveDb middleware above re-checks getLambdaDb() per request regardless, but that's cheap
+// once warm (getLambdaDb() caches its result).
 void getLambdaDb().catch(() => {});
-
-// Attaches the DB client to every request when it's available, but never fails a request just
-// because it isn't: a request that doesn't touch the database (e.g. /health) must keep working
-// even if Secrets Manager is having a transient problem. Routes that do need the database check
-// for its absence themselves (see routes/users.ts and routes/caregivers.ts's getDb() helper) and
-// report their own 503, the same way server.ts's local-dev path would if db were ever missing
-// there.
-app.use(async (req, _res, next) => {
-  try {
-    req.app.locals.db = await getLambdaDb();
-  } catch (err) {
-    logger.warn({ err }, 'Could not resolve DB client for this request; proceeding without one');
-  }
-  next();
-});
 
 // Rotation handling: the RDS credentials secret auto-rotates every 30 days (infra/lib/database.ts).
 // If a warm execution environment survives a rotation, its cached pool can fail a query with a
