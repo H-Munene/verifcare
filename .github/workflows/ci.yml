@@ -40,6 +40,17 @@ jobs:
       - run: npm test
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mzazi_care_test
+          # Real, deployed, non-secret Cognito identifiers - same values already checked into
+          # backend/.env.example. Needed because lambda.test.ts imports the real lambda.js module,
+          # which calls loadConfig() at import time - vitest.setup.ts's own comment claims CI "sets
+          # real environment variables directly," but this step never actually did, for any of the
+          # four required Cognito vars, not just the two added this session (CAREGIVER_/
+          # FAMILY_MEMBER_USER_POOL_CLIENT_ID). That gap was masked until now by the format:check
+          # step failing first, before npm test ever ran.
+          USER_POOL_ID: eu-west-1_901G3wGkr
+          USER_POOL_CLIENT_ID: 62h8bi9cih94nhcd3hom9kheol
+          CAREGIVER_USER_POOL_CLIENT_ID: 4th550b5rk8st5fmgfdio465tr
+          FAMILY_MEMBER_USER_POOL_CLIENT_ID: 7b63vkbmrooqvu4g5to6c1gtvk
 
   infra:
     runs-on: ubuntu-latest
