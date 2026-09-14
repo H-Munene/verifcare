@@ -1,0 +1,54 @@
+/*
+ * Design tokens transcribed exactly from temp_images/claude_design_prompt_admin_webapp.md's
+ * "Mac-Native-Web-Design-System" spec - values are not reinterpreted, only translated into CSS
+ * custom properties so every component/page references one source instead of repeating literals.
+ */
+
+:root {
+  /* Color: one accent, one success, one danger - never substituted with a generic gray/blue */
+  --color-accent: #0077e6;
+  --color-accent-hover: #0068c9;
+  --color-success-text: #15b042;
+  --color-success-tint: #cafce0;
+  --color-danger-text: #e0392b;
+  --color-danger-tint: #fde8e6;
+
+  /* Ink ladder for text hierarchy */
+  --color-ink-primary: #292929;
+  --color-ink-default: #525252;
+  --color-ink-subtle: #737373;
+  --color-ink-muted: #9e9e9e;
+
+  /* Hairline grays for borders - structural (cards/inputs) vs. row dividers, one step lighter */
+  --color-border-structural: #e5e5e5;
+  --color-border-divider: #f0f0f0;
+
+  /* The spec only names one surface explicitly: the login canvas. Page background is plain white
+     per "Elevation: flat/no-shadow for page background" - not a separate token. */
+  --color-surface: #f5f5f4;
+  --color-page-background: #ffffff;
+
+  /* Accent-tint, for tags and the cognitive-trend chart's fill band (the spec reserves solid
+     accent for interactive controls and green for computed status, so data/attribute surfaces get
+     a tint instead). */
+  --color-accent-tint-bg: #e3f1fd;
+  --color-accent-tint-text: #0068c9;
+
+  /* Radius ladder */
+  --radius-checkbox: 4px;
+  --radius-tag: 6px;
+  --radius-default: 7px;
+  --radius-button: 10px;
+  --radius-pill: 9999px;
+
+  /* Row heights - pick one per surface, never mix */
+  --row-height-table-cell: 36px;
+  --row-height-row-data: 40px;
+  --row-height-row-store: 44px;
+
+  /* Buttons and inputs share this height so toolbars and forms line up */
+  --control-height: 32px;
+
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}

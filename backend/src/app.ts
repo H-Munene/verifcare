@@ -1,3 +1,4 @@
+import cors from 'cors';
 import express, { type Express, type RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import type { CognitoAdmin } from './auth/cognitoAdmin.js';
@@ -38,6 +39,13 @@ export interface AppDependencies {
 export function createApp(dependencies: AppDependencies = {}): Express {
   const app = express();
   app.locals.db = dependencies.db;
+  // Permissive (no origin restriction): this API's authorization is entirely bearer-token based
+  // (Authorization: Bearer <idToken>), never cookies, so permissive CORS carries none of the CSRF
+  // exposure it would for a cookie-authenticated API. Needed so frontend/web/ (a different
+  // origin/port in local dev, and any future deployed origin) can call this API from a browser -
+  // added unconditionally here rather than only for local dev, so a future deployed web app needs
+  // no separate backend change.
+  app.use(cors());
   app.use(express.json());
 
   app.use(
