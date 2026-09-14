@@ -23,11 +23,25 @@ declare global {
 }
 
 export interface AppDependencies {
+  // server.ts's shape: a single db client resolved once at startup, before any request arrives -
+  // set directly onto app.locals below, synchronously.
   db?: Db;
+  // lambda.ts's shape instead: db isn't known synchronously at app-creation time (it's resolved
+  // from Secrets Manager, cached across warm invocations - see db/lambdaDb.ts), so it must be
+  // re-checked per request via a middleware, not assigned once. Real bug fixed 2026-09-14: lambda.ts
+  // used to add this middleware itself, AFTER calling createApp() - but createApp() had already
+  // registered every router and the catch-all 404 handler by then, and every one of those sends
+  // its own response without ever calling next() through to later middleware, so the db-attaching
+  // middleware could never actually run, for any request, ever. app.locals.db was permanently
+  // undefined in the deployed Lambda - every DB-touching route always 503'd with "No database
+  // client is configured," undetected because every backend test either passes `db` directly
+  // (server.ts's shape) or never exercises a DB route through the real deployed handler. Providing
+  // this as a dependency createApp() itself wires in, before the routers, fixes the ordering by
+  // construction rather than relying on call-site discipline.
+  resolveDb?: () => Promise<Db>;
   // All optional for the same reason: app.test.ts constructs the app with none of them, and
   // /health needs none of them. Whichever caller has them (server.ts, lambda.ts) passes them in -
-  // db is attached to app.locals for any route to read; the rest are threaded into the routers
-  // that need them.
+  // the rest are threaded into the routers that need them.
   requireAuth?: RequestHandler;
   requireVerifiedIdentity?: RequestHandler;
   cognitoAdmin?: CognitoAdmin;
@@ -56,6 +70,27 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       customProps: (req) => ({ awsRequestId: req.apiGateway?.context?.awsRequestId }),
     }),
   );
+
+  // Must run before every router below - see AppDependencies.resolveDb's comment for why this
+  // exact position matters. Failure is deliberately non-fatal here: a request that doesn't touch
+  // the database (like /health) must keep working even if Secrets Manager is having a transient
+  // problem; routes that do need the database detect its absence themselves (each router's own
+  // getDb() helper) and report their own 503, same as server.ts's local-dev path would if db were
+  // ever missing there.
+  if (dependencies.resolveDb) {
+    const resolveDb = dependencies.resolveDb;
+    app.use(async (req, _res, next) => {
+      try {
+        req.app.locals.db = await resolveDb();
+      } catch (err) {
+        logger.warn(
+          { err },
+          'Could not resolve DB client for this request; proceeding without one',
+        );
+      }
+      next();
+    });
+  }
 
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok' });

@@ -4,6 +4,8 @@ import { loadConfig } from './config.js';
 const requiredEnv = {
   USER_POOL_ID: 'eu-west-1_901G3wGkr',
   USER_POOL_CLIENT_ID: '62h8bi9cih94nhcd3hom9kheol',
+  CAREGIVER_USER_POOL_CLIENT_ID: '4th550b5rk8st5fmgfdio465tr',
+  FAMILY_MEMBER_USER_POOL_CLIENT_ID: '7b63vkbmrooqvu4g5to6c1gtvk',
 };
 
 describe('loadConfig', () => {
@@ -18,7 +20,11 @@ describe('loadConfig', () => {
       databaseUrl: 'postgres://user:pass@localhost:5433/db',
       databaseSecretArn: undefined,
       userPoolId: requiredEnv.USER_POOL_ID,
-      userPoolClientId: requiredEnv.USER_POOL_CLIENT_ID,
+      userPoolClientIds: [
+        requiredEnv.USER_POOL_CLIENT_ID,
+        requiredEnv.CAREGIVER_USER_POOL_CLIENT_ID,
+        requiredEnv.FAMILY_MEMBER_USER_POOL_CLIENT_ID,
+      ],
     });
   });
 
@@ -62,15 +68,42 @@ describe('loadConfig', () => {
     ).toThrow(/PORT/);
   });
 
+  function withoutKey(key: keyof typeof requiredEnv): Record<string, string> {
+    const copy: Record<string, string> = { ...requiredEnv };
+    delete copy[key];
+    return copy;
+  }
+
   it('throws when USER_POOL_ID is missing', () => {
     expect(() =>
-      loadConfig({ DATABASE_URL: 'postgres://localhost/db', USER_POOL_CLIENT_ID: 'abc' }),
+      loadConfig({ ...withoutKey('USER_POOL_ID'), DATABASE_URL: 'postgres://localhost/db' }),
     ).toThrow(/USER_POOL_ID/);
   });
 
   it('throws when USER_POOL_CLIENT_ID is missing', () => {
     expect(() =>
-      loadConfig({ DATABASE_URL: 'postgres://localhost/db', USER_POOL_ID: 'abc' }),
+      loadConfig({
+        ...withoutKey('USER_POOL_CLIENT_ID'),
+        DATABASE_URL: 'postgres://localhost/db',
+      }),
     ).toThrow(/USER_POOL_CLIENT_ID/);
+  });
+
+  it('throws when CAREGIVER_USER_POOL_CLIENT_ID is missing', () => {
+    expect(() =>
+      loadConfig({
+        ...withoutKey('CAREGIVER_USER_POOL_CLIENT_ID'),
+        DATABASE_URL: 'postgres://localhost/db',
+      }),
+    ).toThrow(/CAREGIVER_USER_POOL_CLIENT_ID/);
+  });
+
+  it('throws when FAMILY_MEMBER_USER_POOL_CLIENT_ID is missing', () => {
+    expect(() =>
+      loadConfig({
+        ...withoutKey('FAMILY_MEMBER_USER_POOL_CLIENT_ID'),
+        DATABASE_URL: 'postgres://localhost/db',
+      }),
+    ).toThrow(/FAMILY_MEMBER_USER_POOL_CLIENT_ID/);
   });
 });

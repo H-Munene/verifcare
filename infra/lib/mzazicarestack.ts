@@ -15,7 +15,8 @@ export class MzaziCareStack extends cdk.Stack {
     super(scope, id, props);
 
     const vpc = createNetwork(this);
-    const { userPool, userPoolClient } = createAuth(this);
+    const { userPool, userPoolClient, caregiverAppUserPoolClient, familyMemberAppUserPoolClient } =
+      createAuth(this);
     const { database, databaseSecret } = createDatabase(this, vpc);
     const { biometricEnrollmentsBucket, visitAudioBucket } = createStorage(this);
     createRegistry(this);
@@ -26,6 +27,8 @@ export class MzaziCareStack extends cdk.Stack {
       databaseSecret,
       userPool,
       userPoolClient,
+      caregiverAppUserPoolClient,
+      familyMemberAppUserPoolClient,
       biometricEnrollmentsBucket,
       visitAudioBucket,
     });

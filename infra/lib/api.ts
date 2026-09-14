@@ -15,6 +15,8 @@ export interface ApiParams {
   databaseSecret: rds.DatabaseSecret;
   userPool: cognito.UserPool;
   userPoolClient: cognito.UserPoolClient;
+  caregiverAppUserPoolClient: cognito.UserPoolClient;
+  familyMemberAppUserPoolClient: cognito.UserPoolClient;
   biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
 }
@@ -31,6 +33,8 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     databaseSecret,
     userPool,
     userPoolClient,
+    caregiverAppUserPoolClient,
+    familyMemberAppUserPoolClient,
     biometricEnrollmentsBucket,
     visitAudioBucket,
   } = params;
@@ -73,7 +77,14 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     environment: {
       DATABASE_SECRET_ARN: databaseSecret.secretArn,
       USER_POOL_ID: userPool.userPoolId,
+      // All three app clients (web, caregiver mobile, family-member mobile) must be passed
+      // through so the Lambda's ID token verifier accepts tokens from any of them - a real bug
+      // (2026-09-14): passing only the web client id made every mobile sign-in fail backend
+      // calls with a generic 401, even though the token itself was perfectly valid. See
+      // backend/src/config.ts and backend/src/auth/verifier.ts.
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
+      CAREGIVER_USER_POOL_CLIENT_ID: caregiverAppUserPoolClient.userPoolClientId,
+      FAMILY_MEMBER_USER_POOL_CLIENT_ID: familyMemberAppUserPoolClient.userPoolClientId,
       BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
     },

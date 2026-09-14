@@ -39,8 +39,15 @@ export interface IdTokenVerifier {
   verify: (jwt: string) => Promise<Record<string, unknown>>;
 }
 
-export function createIdTokenVerifier(userPoolId: string, clientId: string): IdTokenVerifier {
-  const verifier = CognitoJwtVerifier.create({ userPoolId, tokenUse: 'id', clientId });
+// clientId accepts an array (aws-jwt-verify's own support for multiple accepted audiences) -
+// required since this project has three separate app clients under one user pool (web, caregiver
+// mobile, family-member mobile - see infra/lib/auth.ts), and a real ID token's aud/client_id
+// claim is always exactly one of them, never the others. Passing only one client id here would
+// reject every token issued by the other two clients as unverifiable, indistinguishable from a
+// genuinely invalid token (a real bug found 2026-09-14: this function originally took a single
+// clientId, so every mobile app sign-in failed backend calls with a generic 401).
+export function createIdTokenVerifier(userPoolId: string, clientIds: string[]): IdTokenVerifier {
+  const verifier = CognitoJwtVerifier.create({ userPoolId, tokenUse: 'id', clientId: clientIds });
   return {
     verify: (jwt: string) => verifier.verify(jwt),
   };
