@@ -8,6 +8,6 @@ coverage/
 .env
 .env.*
 !.env.example
-/temp_aws_images
+/temp_images
 CLAUDE.md
 /.claude
