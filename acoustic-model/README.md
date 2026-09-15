@@ -55,7 +55,17 @@ The deployed model will score audio captured on a caregiver's phone microphone i
 Jitter, shimmer, and harmonics-to-noise ratio - voice-quality features this project plans to use - are well documented in voice science as sensitive to recording-channel quality itself, not only to vocal-fold physiology, so this mismatch can produce spurious feature values unrelated to the speaker.
 It also compounds the archival-provenance confound above: if the dementia cohort skews toward older, lower-quality footage, a model could learn "sounds like an old broadcast recording" as a shortcut for "dementia," which would not just underperform on deployment audio, it could behave unpredictably on it.
 
-The mitigations for the channel/signal mismatch specifically (not the other two limitations) are: a per-file channel-quality confound check in the dataset audit (see `results/audit/audit_summary.md`); a synthetic-degradation robustness check run against cross-validation validation folds only, later in development; an interpretability check for whether jitter/shimmer/HNR-style features dominate model importance, which would suggest a channel-driven shortcut; and exactly one post-lock sensitivity check against the held-out test set after the final model is frozen, which is never used to adjust the locked model or its decision threshold.
+The mitigations for the channel/signal mismatch specifically (not the other two limitations) are: a per-file channel-quality confound check in the dataset audit (see `results/audit/audit_summary.md`); a direct comparison of jitter/shimmer/HNR against the same channel-quality proxies once those features are extracted in the feature-engineering phase; a synthetic-degradation robustness check run against cross-validation validation folds only, later in development; an interpretability check for whether jitter/shimmer/HNR-style features dominate model importance, which would suggest a channel-driven shortcut; and exactly one post-lock sensitivity check against the held-out test set after the final model is frozen, which is never used to adjust the locked model or its decision threshold.
+
+## Preprocessing and subject-level split
+
+Running `scripts/run_preprocessing.py` trims leading/trailing silence and resamples every file to 16kHz mono, writing the result under `data/processed/` (git-ignored, same as the raw dataset).
+A file is included only if its post-trim duration clears a documented minimum (`config.MIN_USABLE_DURATION_SECONDS`); this is the criterion that resolves any format or duration outlier found in the audit, not the raw format alone.
+Committed, anonymized output: `results/preprocessing/duration_report.csv` and `preprocessing_summary.md`.
+
+Running `scripts/run_splits.py` afterward carves out a locked, subject-level, stratified test set (`config.TEST_SET_FRACTION`) from the subjects with at least one included file, leaving the rest as a train pool for later cross-validation.
+No subject's files ever cross the train/test boundary.
+Committed, anonymized output: `results/splits/subject_splits.csv` and `splits_summary.md`.
 
 ## Audit output and subject privacy
 

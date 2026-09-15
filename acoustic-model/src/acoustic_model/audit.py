@@ -14,79 +14,18 @@ Run via `scripts/run_audit.py`, not this module directly.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 from scipy import stats
 
-from acoustic_model import audio_io, channel_quality
-from acoustic_model.config import (
-    AUDIT_RESULTS_DIR,
-    CLASS_LABEL_MAP,
-    DATA_ROOT,
-    RAW_CLASS_DIRS,
-)
-from acoustic_model.subject_names import (
-    SubjectIdentity,
-    assign_subject_ids,
-    canonicalize,
-    dedup_key,
-    find_unflagged_near_duplicates,
-)
-
-# Matches the "_<marker>" or "_<marker>_<sub_index>" suffix on a wav
-# filename stem, e.g. "AbeBurrows_5" -> marker=5, or
-# "aileenhernandez_5_1" -> marker=5, sub_index=1.
-_SUFFIX_PATTERN = re.compile(r"_(\d+)(?:_(\d+))?$")
-
-# The two folders use unrelated numbering schemes (see README.md):
-# dementia's marker approximates years-relative-to-symptom-onset;
-# nodementia/nodementia2's marker is a 1/2/3 index into the
-# 5/10/15-years-before-death-or-current-age scheme.
-_YEARS_PRE_SYMPTOM_SCHEME = "years_pre_symptom_marker"
-_DEATH_OR_CURRENT_AGE_INDEX_SCHEME = "death_or_current_age_index"
+from acoustic_model import audio_io, channel_quality, dataset
+from acoustic_model.config import AUDIT_RESULTS_DIR
+from acoustic_model.dataset import FileEntry
+from acoustic_model.subject_names import find_unflagged_near_duplicates
 
 
-def _parse_suffix(stem: str) -> tuple[int | None, int | None]:
-    match = _SUFFIX_PATTERN.search(stem)
-    if not match:
-        return None, None
-    marker = int(match.group(1))
-    sub_index = int(match.group(2)) if match.group(2) else None
-    return marker, sub_index
-
-
-def _numbering_scheme(raw_class_dir: str) -> str:
-    return _YEARS_PRE_SYMPTOM_SCHEME if raw_class_dir == "dementia" else _DEATH_OR_CURRENT_AGE_INDEX_SCHEME
-
-
-@dataclass
-class _RawSubjectFolder:
-    raw_class_dir: str
-    path: Path
-
-
-def _discover_raw_subject_folders() -> list[_RawSubjectFolder]:
-    folders: list[_RawSubjectFolder] = []
-    for raw_class_dir in RAW_CLASS_DIRS:
-        class_path = DATA_ROOT / raw_class_dir
-        if not class_path.is_dir():
-            raise FileNotFoundError(f"Expected raw class directory not found: {class_path}")
-        for subject_path in sorted(p for p in class_path.iterdir() if p.is_dir()):
-            folders.append(_RawSubjectFolder(raw_class_dir=raw_class_dir, path=subject_path))
-    return folders
-
-
-def _wav_files(subject_dir: Path) -> list[Path]:
-    return sorted({p for p in subject_dir.iterdir() if p.suffix.lower() == ".wav"})
-
-
-def _build_manifests(
-    raw_folders: list[_RawSubjectFolder],
-    identities_by_key: dict[str, SubjectIdentity],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _build_manifests(entries: list[FileEntry]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Returns (file_df, lookup_df, class_conflicts) - class_conflicts is empty unless a
     subject_id maps to more than one class_label, which should never happen given the
     dataset's confirmed zero name-overlap between dementia and the merged no_dementia class."""
@@ -94,65 +33,56 @@ def _build_manifests(
     lookup_rows: dict[str, dict] = {}
     label_by_subject: dict[str, set[str]] = {}
 
-    for folder in raw_folders:
-        canonical_name = canonicalize(folder.path.name)
-        key = dedup_key(canonical_name)
-        identity = identities_by_key[key]
-        class_label = CLASS_LABEL_MAP[folder.raw_class_dir]
-        numbering_scheme = _numbering_scheme(folder.raw_class_dir)
-
-        label_by_subject.setdefault(identity.subject_id, set()).add(class_label)
+    for entry in entries:
+        label_by_subject.setdefault(entry.subject_id, set()).add(entry.class_label)
 
         lookup_row = lookup_rows.setdefault(
-            identity.subject_id,
+            entry.subject_id,
             {
-                "subject_id": identity.subject_id,
-                "canonical_name": identity.canonical_name,
+                "subject_id": entry.subject_id,
+                "canonical_name": entry.canonical_name,
                 "raw_class_dirs": set(),
                 "raw_subject_folders": set(),
                 "typo_corrected": False,
             },
         )
-        lookup_row["raw_class_dirs"].add(folder.raw_class_dir)
-        lookup_row["raw_subject_folders"].add(folder.path.name)
-        if folder.path.name != canonical_name:
+        lookup_row["raw_class_dirs"].add(entry.raw_class_dir)
+        lookup_row["raw_subject_folders"].add(entry.raw_subject_folder)
+        if entry.raw_subject_folder != entry.canonical_name:
             lookup_row["typo_corrected"] = True
 
-        wav_files = _wav_files(folder.path)
-        for file_index, wav_path in enumerate(wav_files, start=1):
-            marker, sub_index = _parse_suffix(wav_path.stem)
-            audio_info = audio_io.inspect(wav_path)
+        audio_info = audio_io.inspect(entry.path)
 
-            proxies = None
-            if audio_info.readable:
-                try:
-                    proxies = channel_quality.compute_from_file(wav_path)
-                except Exception:
-                    proxies = None
+        proxies = None
+        if audio_info.readable:
+            try:
+                proxies = channel_quality.compute_from_file(entry.path)
+            except Exception:
+                proxies = None
 
-            file_rows.append(
-                {
-                    "file_id": f"{identity.subject_id}_f{file_index:02d}",
-                    "subject_id": identity.subject_id,
-                    "class_label": class_label,
-                    "raw_class_dir": folder.raw_class_dir,
-                    "numbering_scheme": numbering_scheme,
-                    "suffix_marker": marker,
-                    "suffix_sub_index": sub_index,
-                    "readable": audio_info.readable,
-                    "format_ok": audio_info.format_ok,
-                    "error": audio_info.error,
-                    "duration_seconds": audio_info.duration_seconds,
-                    "sample_rate_hz": audio_info.sample_rate_hz,
-                    "channels": audio_info.channels,
-                    "subtype": audio_info.subtype,
-                    "file_size_bytes": audio_info.file_size_bytes,
-                    "sha256": audio_info.sha256,
-                    "noise_floor_db": proxies.noise_floor_db if proxies else None,
-                    "spectral_bandwidth_hz": proxies.spectral_bandwidth_hz if proxies else None,
-                    "spectral_flatness": proxies.spectral_flatness if proxies else None,
-                }
-            )
+        file_rows.append(
+            {
+                "file_id": entry.file_id,
+                "subject_id": entry.subject_id,
+                "class_label": entry.class_label,
+                "raw_class_dir": entry.raw_class_dir,
+                "numbering_scheme": entry.numbering_scheme,
+                "suffix_marker": entry.suffix_marker,
+                "suffix_sub_index": entry.suffix_sub_index,
+                "readable": audio_info.readable,
+                "format_ok": audio_info.format_ok,
+                "error": audio_info.error,
+                "duration_seconds": audio_info.duration_seconds,
+                "sample_rate_hz": audio_info.sample_rate_hz,
+                "channels": audio_info.channels,
+                "subtype": audio_info.subtype,
+                "file_size_bytes": audio_info.file_size_bytes,
+                "sha256": audio_info.sha256,
+                "noise_floor_db": proxies.noise_floor_db if proxies else None,
+                "spectral_bandwidth_hz": proxies.spectral_bandwidth_hz if proxies else None,
+                "spectral_flatness": proxies.spectral_flatness if proxies else None,
+            }
+        )
 
     file_df = pd.DataFrame(file_rows)
 
@@ -386,11 +316,9 @@ def _write_summary(
 def run() -> None:
     AUDIT_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    raw_folders = _discover_raw_subject_folders()
-    canonical_names = [canonicalize(folder.path.name) for folder in raw_folders]
-    identities_by_key = assign_subject_ids(canonical_names)
+    entries = dataset.build_file_index()
 
-    file_df, lookup_df, class_conflicts = _build_manifests(raw_folders, identities_by_key)
+    file_df, lookup_df, class_conflicts = _build_manifests(entries)
     subject_df = _build_subject_manifest(file_df, lookup_df)
     confound_df = _confound_check(subject_df)
 
@@ -398,6 +326,7 @@ def run() -> None:
     duplicate_group_count = duplicate_groups["sha256"].nunique()
     duplicate_file_count = len(duplicate_groups)
 
+    canonical_names = list({entry.canonical_name for entry in entries})
     near_duplicates = find_unflagged_near_duplicates(canonical_names)
 
     file_df.to_csv(AUDIT_RESULTS_DIR / "file_manifest.csv", index=False)
