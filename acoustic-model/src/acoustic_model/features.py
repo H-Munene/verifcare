@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import opensmile
 import pandas as pd
 
@@ -36,6 +37,7 @@ from acoustic_model.config import (
     CHANNEL_QUALITY_PROXY_COLUMNS,
     EGEMAPS_FEATURE_COUNT,
     FEATURES_RESULTS_DIR,
+    HIGH_CORRELATION_THRESHOLD,
     PREPROCESSING_RESULTS_DIR,
     PROCESSED_DATA_ROOT,
     SPLITS_RESULTS_DIR,
@@ -148,6 +150,48 @@ def _class_label_voice_quality_check(feature_df: pd.DataFrame) -> tuple[pd.DataF
     return pd.DataFrame(subject_rows), pd.DataFrame(file_rows)
 
 
+def _missing_value_report(feature_df: pd.DataFrame, feature_columns: list[str]) -> pd.DataFrame:
+    """Data-completeness check closing out Phase 3's EDA-absorption scope: per-feature
+    NaN/Inf counts, plus a check for opensmile's known failure mode on voicing-
+    dependent functionals (F0/jitter/shimmer/HNR/loudness) - it can silently emit 0.0
+    rather than NaN when a file has too little voiced content, which a plain
+    isna().sum() would miss entirely."""
+    X = feature_df[feature_columns]
+    voicing_dependent = [c for c in feature_columns if any(k in c for k in ("F0", "jitter", "shimmer", "HNR", "loudness"))]
+
+    rows = []
+    for col in feature_columns:
+        rows.append(
+            {
+                "feature": col,
+                "nan_count": int(X[col].isna().sum()),
+                "inf_count": int(np.isinf(X[col].to_numpy(dtype=float)).sum()),
+                "exact_zero_count": int((X[col] == 0.0).sum()) if col in voicing_dependent else None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _correlation_matrix(feature_df: pd.DataFrame, feature_columns: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Multicollinearity check closing out Phase 3's EDA-absorption scope: the full
+    NxN Pearson correlation matrix across all eGeMAPS features (not just the 3
+    voice-quality ones the confound triangle tests), plus the pairs at or above
+    config.HIGH_CORRELATION_THRESHOLD. Directly informs Phase 4 (a feature-selection
+    method needs to know if it's choosing among distinct signals or redundant ones)
+    and Phase 8 (permutation importance splits credit unpredictably across
+    correlated features - a feature "not mattering" can mean "uninformative" or
+    "redundant with a correlated feature that got evaluated first")."""
+    correlation_matrix = feature_df[feature_columns].corr(method="pearson")
+
+    upper_triangle_mask = np.triu(np.ones(correlation_matrix.shape, dtype=bool), k=1)
+    pairs = correlation_matrix.where(upper_triangle_mask).stack().reset_index()
+    pairs.columns = ["feature_a", "feature_b", "pearson_r"]
+    pairs["abs_r"] = pairs["pearson_r"].abs()
+    high_pairs = pairs[pairs["abs_r"] >= HIGH_CORRELATION_THRESHOLD].sort_values("abs_r", ascending=False)
+
+    return correlation_matrix, high_pairs.drop(columns="abs_r")
+
+
 def _write_summary(
     path: Path,
     feature_df: pd.DataFrame,
@@ -156,6 +200,8 @@ def _write_summary(
     label_check_subject_df: pd.DataFrame,
     label_check_file_df: pd.DataFrame,
     variance_summary: pd.DataFrame,
+    missing_value_report: pd.DataFrame,
+    high_correlation_pairs: pd.DataFrame,
 ) -> None:
     lines: list[str] = []
     lines.append("# Feature Extraction Summary")
@@ -271,6 +317,37 @@ def _write_summary(
         lines.append("None.")
     lines.append("")
 
+    lines.append("## Data completeness and multicollinearity (EDA-absorption closure)")
+    lines.append("")
+    lines.append("These two checks close out the scope a dedicated EDA phase would otherwise have covered, per the decision recorded in `docs/ml-development-spec.md` and `docs/acoustic-model-dev-log.md`: EDA is not run as its own phase, but its load-bearing content (completeness, multicollinearity) must actually be checked, not asserted as 'already covered.'")
+    lines.append("")
+    lines.append("### Missing/degenerate values")
+    lines.append("")
+    total_nan = missing_value_report["nan_count"].sum()
+    total_inf = missing_value_report["inf_count"].sum()
+    lines.append(f"{int(total_nan)} NaN cells and {int(total_inf)} Inf cells across all {len(feature_df) * len(variance_summary)} feature values (all {len(variance_summary)} features x {len(feature_df)} files).")
+    voicing_zero_counts = missing_value_report[missing_value_report["exact_zero_count"].notna() & (missing_value_report["exact_zero_count"] > 0)]
+    if len(voicing_zero_counts) > 0:
+        lines.append("Voicing-dependent functionals (F0/jitter/shimmer/HNR/loudness) with at least one exact-zero value - checked specifically because opensmile is known to substitute 0.0 rather than NaN when a file has too little voiced content, which a plain NaN count would miss:")
+        for _, row in voicing_zero_counts.iterrows():
+            lines.append(f"  {row['feature']}: {int(row['exact_zero_count'])} file(s).")
+        lines.append("No feature has more than a small handful of affected files; not treated as a data-quality blocker, but worth Phase 4 knowing which files/features these are before any imputation or scaling decision is made.")
+    else:
+        lines.append("No voicing-dependent functional has an exact-zero value in any file.")
+    lines.append("")
+
+    lines.append("### Multicollinearity")
+    lines.append("")
+    lines.append(f"Full {len(variance_summary)}x{len(variance_summary)} Pearson correlation matrix computed across all features (`feature_correlation_matrix.csv`); pairs at or above the |r|>={HIGH_CORRELATION_THRESHOLD} threshold are in `high_correlation_pairs.csv`.")
+    lines.append(f"{len(high_correlation_pairs)} of {len(variance_summary) * (len(variance_summary) - 1) // 2} possible pairs exceed that threshold - substantial redundancy, expected given eGeMAPS functionals are derived from a small set of underlying low-level descriptors.")
+    if len(high_correlation_pairs) > 0:
+        lines.append("Ten highest by |r|:")
+        top_ten = high_correlation_pairs.reindex(high_correlation_pairs["pearson_r"].abs().sort_values(ascending=False).index).head(10)
+        for _, row in top_ten.iterrows():
+            lines.append(f"  {row['feature_a']} / {row['feature_b']}: r={row['pearson_r']:.3f}.")
+    lines.append("This directly informs Phase 4 (a feature-selection method needs to know if it is choosing among distinct signals or redundant ones - selection stability across CV folds should be reported, not just one run's result) and Phase 8 (permutation importance splits credit unpredictably across correlated features, so a feature 'not mattering' can mean 'uninformative' or 'redundant with a correlated feature evaluated first').")
+    lines.append("")
+
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -308,6 +385,8 @@ def run() -> pd.DataFrame:
     proxy_df = _load_channel_quality_proxies()
     cross_check_df = _channel_quality_cross_check(feature_df, proxy_df)
     label_check_subject_df, label_check_file_df = _class_label_voice_quality_check(feature_df)
+    missing_value_report = _missing_value_report(feature_df, feature_columns)
+    correlation_matrix, high_correlation_pairs = _correlation_matrix(feature_df, feature_columns)
 
     variance_summary = pd.DataFrame(
         [
@@ -329,6 +408,9 @@ def run() -> pd.DataFrame:
     label_check_subject_df.to_csv(FEATURES_RESULTS_DIR / "class_label_voice_quality_check_subject_level.csv", index=False)
     label_check_file_df.to_csv(FEATURES_RESULTS_DIR / "class_label_voice_quality_check_file_level.csv", index=False)
     variance_summary.to_csv(FEATURES_RESULTS_DIR / "feature_variance.csv", index=False)
+    missing_value_report.to_csv(FEATURES_RESULTS_DIR / "missing_value_report.csv", index=False)
+    correlation_matrix.to_csv(FEATURES_RESULTS_DIR / "feature_correlation_matrix.csv")
+    high_correlation_pairs.to_csv(FEATURES_RESULTS_DIR / "high_correlation_pairs.csv", index=False)
 
     _write_summary(
         FEATURES_RESULTS_DIR / "feature_extraction_summary.md",
@@ -338,5 +420,7 @@ def run() -> pd.DataFrame:
         label_check_subject_df=label_check_subject_df,
         label_check_file_df=label_check_file_df,
         variance_summary=variance_summary,
+        missing_value_report=missing_value_report,
+        high_correlation_pairs=high_correlation_pairs,
     )
     return feature_df

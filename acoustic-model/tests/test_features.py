@@ -6,6 +6,8 @@ from acoustic_model.config import EGEMAPS_FEATURE_COUNT
 from acoustic_model.features import (
     _channel_quality_cross_check,
     _class_label_voice_quality_check,
+    _correlation_matrix,
+    _missing_value_report,
     extract_file,
 )
 
@@ -123,3 +125,41 @@ def test_class_label_voice_quality_check_subject_level_avoids_pseudo_replication
     jitter_file = file_df[file_df["voice_quality_feature"] == "jitterLocal_sma3nz_amean"].iloc[0]
     assert jitter_subject["n"] == 2
     assert jitter_file["n"] == 6
+
+
+def test_missing_value_report_flags_nan_and_voicing_dependent_zeros():
+    feature_df = pd.DataFrame(
+        {
+            "jitterLocal_sma3nz_amean": [0.01, 0.02, np.nan],
+            "shimmerLocaldB_sma3nz_amean": [0.0, 1.0, 2.0],  # a voicing-dependent zero
+            "some_other_feature": [1.0, 2.0, 3.0],
+        }
+    )
+
+    report = _missing_value_report(feature_df, list(feature_df.columns))
+
+    jitter_row = report[report["feature"] == "jitterLocal_sma3nz_amean"].iloc[0]
+    shimmer_row = report[report["feature"] == "shimmerLocaldB_sma3nz_amean"].iloc[0]
+    other_row = report[report["feature"] == "some_other_feature"].iloc[0]
+
+    assert jitter_row["nan_count"] == 1
+    assert shimmer_row["exact_zero_count"] == 1
+    assert pd.isna(other_row["exact_zero_count"])  # not a voicing-dependent column, not checked
+
+
+def test_correlation_matrix_flags_high_correlation_pairs():
+    n = 50
+    x = np.linspace(0, 1, n)
+    feature_df = pd.DataFrame(
+        {
+            "feature_a": x,
+            "feature_b": x * 2 + 0.001,  # near-perfectly correlated with feature_a
+            "feature_c": np.random.default_rng(0).normal(size=n),  # unrelated
+        }
+    )
+
+    _, high_pairs = _correlation_matrix(feature_df, list(feature_df.columns))
+
+    flagged = set(zip(high_pairs["feature_a"], high_pairs["feature_b"]))
+    assert ("feature_a", "feature_b") in flagged
+    assert not any("feature_c" in pair for pair in flagged)

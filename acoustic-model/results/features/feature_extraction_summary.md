@@ -66,3 +66,33 @@ Computed across all extracted files (train_pool + test), for visibility only - t
 Actual feature selection (Phase 4) must be fit train_pool-only, inside the cross-validation pipeline, per the spec's leakage-prevention rule.
 0 of 88 features have a coefficient of variation below 0.01 (near-constant across the dataset):
 None.
+
+## Data completeness and multicollinearity (EDA-absorption closure)
+
+These two checks close out the scope a dedicated EDA phase would otherwise have covered, per the decision recorded in `docs/ml-development-spec.md` and `docs/acoustic-model-dev-log.md`: EDA is not run as its own phase, but its load-bearing content (completeness, multicollinearity) must actually be checked, not asserted as 'already covered.'
+
+### Missing/degenerate values
+
+0 NaN cells and 0 Inf cells across all 40040 feature values (all 88 features x 455 files).
+Voicing-dependent functionals (F0/jitter/shimmer/HNR/loudness) with at least one exact-zero value - checked specifically because opensmile is known to substitute 0.0 rather than NaN when a file has too little voiced content, which a plain NaN count would miss:
+  F0semitoneFrom27.5Hz_sma3nz_meanRisingSlope: 1 file(s).
+  F0semitoneFrom27.5Hz_sma3nz_stddevRisingSlope: 1 file(s).
+  F0semitoneFrom27.5Hz_sma3nz_stddevFallingSlope: 1 file(s).
+No feature has more than a small handful of affected files; not treated as a data-quality blocker, but worth Phase 4 knowing which files/features these are before any imputation or scaling decision is made.
+
+### Multicollinearity
+
+Full 88x88 Pearson correlation matrix computed across all features (`feature_correlation_matrix.csv`); pairs at or above the |r|>=0.9 threshold are in `high_correlation_pairs.csv`.
+53 of 3828 possible pairs exceed that threshold - substantial redundancy, expected given eGeMAPS functionals are derived from a small set of underlying low-level descriptors.
+Ten highest by |r|:
+  F2amplitudeLogRelF0_sma3nz_amean / F3amplitudeLogRelF0_sma3nz_amean: r=0.997.
+  MeanUnvoicedSegmentLength / StddevUnvoicedSegmentLength: r=0.990.
+  loudness_sma3_amean / loudness_sma3_percentile50.0: r=0.988.
+  F0semitoneFrom27.5Hz_sma3nz_amean / F0semitoneFrom27.5Hz_sma3nz_percentile50.0: r=0.988.
+  F2amplitudeLogRelF0_sma3nz_stddevNorm / F3amplitudeLogRelF0_sma3nz_stddevNorm: r=0.986.
+  loudness_sma3_amean / loudness_sma3_percentile80.0: r=0.985.
+  F1amplitudeLogRelF0_sma3nz_amean / F2amplitudeLogRelF0_sma3nz_amean: r=0.985.
+  spectralFlux_sma3_amean / spectralFluxV_sma3nz_amean: r=0.984.
+  F1amplitudeLogRelF0_sma3nz_amean / F1amplitudeLogRelF0_sma3nz_stddevNorm: r=-0.983.
+  alphaRatioUV_sma3nz_amean / hammarbergIndexUV_sma3nz_amean: r=-0.980.
+This directly informs Phase 4 (a feature-selection method needs to know if it is choosing among distinct signals or redundant ones - selection stability across CV folds should be reported, not just one run's result) and Phase 8 (permutation importance splits credit unpredictably across correlated features, so a feature 'not mattering' can mean 'uninformative' or 'redundant with a correlated feature evaluated first').

@@ -110,3 +110,11 @@ VOICE_QUALITY_CROSS_CHECK_COLUMNS = (
 # cross-check - not recomputed, so the comparison is against the exact values that
 # produced Phase 1's original confound finding.
 CHANNEL_QUALITY_PROXY_COLUMNS = ("noise_floor_db", "spectral_bandwidth_hz", "spectral_flatness")
+
+# Threshold for flagging a pair of eGeMAPS features as "highly correlated" in the
+# multicollinearity check that closes out Phase 3's EDA-absorption scope. 0.9 is a
+# common, conservative convention for "these two features are near-redundant" (vs.
+# 0.7-0.8, which is common but much more permissive) - deliberately conservative so
+# the flagged list is a small, high-confidence set worth Phase 4/8's attention, not
+# a large list diluted by moderate, unremarkable correlations.
+HIGH_CORRELATION_THRESHOLD = 0.9
