@@ -14,22 +14,51 @@ No extraction failures.
 test: 93 files (dementia=26, no_dementia=67).
 train_pool: 362 files (dementia=105, no_dementia=257).
 
-## Channel-quality cross-check (Phase 1 mitigation 2)
+## Confound triangle: class label (C), channel-quality proxy (Ch), voice-quality feature (V)
 
-Pearson and Spearman correlation between each of the three voice-quality functionals named in the spec and each of the three Phase 1 channel-quality proxies, at file level, Bonferroni-corrected across all 9 pairs tested per test family.
-Tests whether the voice-quality features themselves are entangled with recording-channel quality, not just whether class label is (that was Phase 1's check).
+Three pairwise checks, each Bonferroni-corrected at both a per-test-family level and a stricter all-tests level (the strict level is the more conservative, harder-to-satisfy view).
+Correction method, stated explicitly rather than left as an unspecified 'Bonferroni correction': **flat/naive Bonferroni** (adjusted_p = min(raw_p * n, 1.0)), not Holm-Bonferroni or another step-down procedure. n is always applied to the raw p-value, never chained on top of an already-adjusted one - the family-level and strict-level adjusted p-values for the same test are therefore both derived independently from the same raw p, not from each other.
+C-Ch (Phase 1, results/audit/audit_summary.md): class label vs. channel-quality proxy, subject level, n_family=3 (3 proxies), n_strict=6.
+V-Ch (this phase, below): voice-quality feature vs. channel-quality proxy, file level, n_family=9 (3 voice-quality features x 3 proxies), n_strict=18.
+C-V (this phase, below): class label vs. voice-quality feature, subject level (primary) and file level (secondary, informational). Only the 3 features named in the spec (jitter/shimmer/HNR) are tested here, not all 88 eGeMAPS features - n_family=3, n_strict=6, the same scale as Phase 1's C-Ch check, not a large-family scan.
 
-jitterLocal_sma3nz_amean vs noise_floor_db: n=455, Pearson r=0.000 (Bonferroni p=1.0000), Spearman rho=-0.047 (Bonferroni p=1.0000).
-jitterLocal_sma3nz_amean vs spectral_bandwidth_hz: n=455, Pearson r=-0.034 (Bonferroni p=1.0000), Spearman rho=0.002 (Bonferroni p=1.0000).
-jitterLocal_sma3nz_amean vs spectral_flatness: n=455, Pearson r=-0.056 (Bonferroni p=1.0000), Spearman rho=-0.039 (Bonferroni p=1.0000).
-shimmerLocaldB_sma3nz_amean vs noise_floor_db: n=455, Pearson r=-0.195 (Bonferroni p=0.0003), Spearman rho=-0.164 (Bonferroni p=0.0040).
-shimmerLocaldB_sma3nz_amean vs spectral_bandwidth_hz: n=455, Pearson r=-0.016 (Bonferroni p=1.0000), Spearman rho=-0.022 (Bonferroni p=1.0000).
-shimmerLocaldB_sma3nz_amean vs spectral_flatness: n=455, Pearson r=0.060 (Bonferroni p=1.0000), Spearman rho=-0.003 (Bonferroni p=1.0000).
-HNRdBACF_sma3nz_amean vs noise_floor_db: n=455, Pearson r=-0.021 (Bonferroni p=1.0000), Spearman rho=-0.052 (Bonferroni p=1.0000).
-HNRdBACF_sma3nz_amean vs spectral_bandwidth_hz: n=455, Pearson r=0.080 (Bonferroni p=0.8053), Spearman rho=0.056 (Bonferroni p=1.0000).
-HNRdBACF_sma3nz_amean vs spectral_flatness: n=455, Pearson r=0.028 (Bonferroni p=1.0000), Spearman rho=0.082 (Bonferroni p=0.7238).
+### V-Ch: channel-quality cross-check
 
-After Bonferroni correction, 1 pair(s) remain significant: shimmerLocaldB_sma3nz_amean/noise_floor_db. Needs human interpretation before these features are trusted uncritically in modeling.
+Pearson and Spearman correlation, file level, family correction n=9 (per test type), strict correction n=18 (all tests in this check).
+
+jitterLocal_sma3nz_amean vs noise_floor_db: n=455, Pearson r=0.000 (family p=1.0000, strict p=1.0000), Spearman rho=-0.047 (family p=1.0000, strict p=1.0000).
+jitterLocal_sma3nz_amean vs spectral_bandwidth_hz: n=455, Pearson r=-0.034 (family p=1.0000, strict p=1.0000), Spearman rho=0.002 (family p=1.0000, strict p=1.0000).
+jitterLocal_sma3nz_amean vs spectral_flatness: n=455, Pearson r=-0.056 (family p=1.0000, strict p=1.0000), Spearman rho=-0.039 (family p=1.0000, strict p=1.0000).
+shimmerLocaldB_sma3nz_amean vs noise_floor_db: n=455, Pearson r=-0.195 (family p=0.0003, strict p=0.0005), Spearman rho=-0.164 (family p=0.0040, strict p=0.0080).
+shimmerLocaldB_sma3nz_amean vs spectral_bandwidth_hz: n=455, Pearson r=-0.016 (family p=1.0000, strict p=1.0000), Spearman rho=-0.022 (family p=1.0000, strict p=1.0000).
+shimmerLocaldB_sma3nz_amean vs spectral_flatness: n=455, Pearson r=0.060 (family p=1.0000, strict p=1.0000), Spearman rho=-0.003 (family p=1.0000, strict p=1.0000).
+HNRdBACF_sma3nz_amean vs noise_floor_db: n=455, Pearson r=-0.021 (family p=1.0000, strict p=1.0000), Spearman rho=-0.052 (family p=1.0000, strict p=1.0000).
+HNRdBACF_sma3nz_amean vs spectral_bandwidth_hz: n=455, Pearson r=0.080 (family p=0.8053, strict p=1.0000), Spearman rho=0.056 (family p=1.0000, strict p=1.0000).
+HNRdBACF_sma3nz_amean vs spectral_flatness: n=455, Pearson r=0.028 (family p=1.0000, strict p=1.0000), Spearman rho=0.082 (family p=0.7238, strict p=1.0000).
+
+Survives even the strict, all-tests correction: shimmerLocaldB_sma3nz_amean/noise_floor_db.
+
+### C-V: does class label correlate with the voice-quality features directly?
+
+Subject level (primary - avoids pseudo-replication from multi-file subjects, matching Phase 1's methodology), family correction n=3, strict correction n=6:
+  jitterLocal_sma3nz_amean: n=215, point-biserial r=0.057 (family p=1.0000, strict p=1.0000); Mann-Whitney family p=0.8899, strict p=1.0000, rank-biserial r=-0.085.
+  shimmerLocaldB_sma3nz_amean: n=215, point-biserial r=0.047 (family p=1.0000, strict p=1.0000); Mann-Whitney family p=1.0000, strict p=1.0000, rank-biserial r=-0.072.
+  HNRdBACF_sma3nz_amean: n=215, point-biserial r=-0.012 (family p=1.0000, strict p=1.0000); Mann-Whitney family p=1.0000, strict p=1.0000, rank-biserial r=0.040.
+
+File level (secondary, informational only - does NOT correct for multiple files per subject, so its p-values are not trustworthy for significance, only useful as a sanity comparison against the subject-level numbers above):
+  jitterLocal_sma3nz_amean: n=455, point-biserial r=0.054, Mann-Whitney rank-biserial r=-0.098 (p-values omitted deliberately - see caveat above).
+  shimmerLocaldB_sma3nz_amean: n=455, point-biserial r=0.037, Mann-Whitney rank-biserial r=-0.078 (p-values omitted deliberately - see caveat above).
+  HNRdBACF_sma3nz_amean: n=455, point-biserial r=0.006, Mann-Whitney rank-biserial r=0.007 (p-values omitted deliberately - see caveat above).
+
+### Triangle interpretation
+
+C-V: no voice-quality feature survives even the lenient family correction against class label directly, at the statistically defensible subject level.
+Combined with Phase 1's C-Ch result (no robust class-label/channel-proxy association) and this phase's V-Ch result (shimmer/noise_floor_db does correlate), the current picture is: shimmer is entangled with a channel-quality proxy, but that entanglement has not (yet) produced a corresponding direct association between shimmer and the class label itself.
+This is a reassuring combination, not a clearance: it means the channel confound has not obviously leaked into a spurious label association through shimmer so far, but the entanglement itself is still real and shimmer-derived features should be treated cautiously in Phase 8 (interpretability) regardless.
+
+**Scope caveat: every check in this triangle is univariate** - each tests one feature against one other variable in isolation.
+A clean C-V result rules out any single voice-quality feature directly encoding a channel-driven shortcut to the label, but says nothing about a classifier learning a subtler pattern across a *combination* of features (e.g. shimmer plus two or three other correlated features jointly reconstructing a channel-driven signal that no single univariate test would catch).
+This is exactly why the Phase 8 permutation-importance check and the Phase 9/10 synthetic-degradation robustness check remain mandatory regardless of this result, not superseded by it.
 
 ## Feature variance overview (informational only)
 
