@@ -20,6 +20,7 @@ AUDIT_RESULTS_DIR = RESULTS_DIR / "audit"
 PREPROCESSING_RESULTS_DIR = RESULTS_DIR / "preprocessing"
 SPLITS_RESULTS_DIR = RESULTS_DIR / "splits"
 FEATURES_RESULTS_DIR = RESULTS_DIR / "features"
+FEATURE_SELECTION_RESULTS_DIR = RESULTS_DIR / "feature_selection"
 
 # Raw on-disk class folders and the label each merges into.
 #
@@ -118,3 +119,28 @@ CHANNEL_QUALITY_PROXY_COLUMNS = ("noise_floor_db", "spectral_bandwidth_hz", "spe
 # the flagged list is a small, high-confidence set worth Phase 4/8's attention, not
 # a large list diluted by moderate, unremarkable correlations.
 HIGH_CORRELATION_THRESHOLD = 0.9
+
+# Phase 4 feature selection (ml-development-spec.md section 4b): Random Forest
+# permutation importance, applied uniformly to select one feature subset used to
+# train all four section-7 candidates in Phase 5 - not a per-model selection.
+
+# Number of subject-aware (StratifiedGroupKFold) CV folds used both to rank
+# features by permutation importance and to choose k via CV score. 5 is a standard
+# default; with 172 train_pool subjects this gives ~34 subjects per fold, small but
+# workable given the class split (67 dementia / 105 no_dementia).
+FEATURE_SELECTION_CV_FOLDS = 5
+
+# Candidate feature-subset sizes evaluated for the CV-tuned stopping rule (a fixed
+# k the student would otherwise have to defend as a guess is avoided - see the
+# spec). 88 (all features) is included as the upper-bound comparison point.
+FEATURE_SELECTION_CANDIDATE_K_VALUES = (5, 10, 15, 20, 30, 45, 60, 88)
+
+# Random Forest hyperparameters used for the selector itself (not the Phase 5
+# candidate model of the same name, though the two may end up similar).
+# class_weight="balanced" accounts for the train_pool's 67/105 class imbalance.
+# n_estimators=500 is large enough for stable permutation-importance estimates.
+FEATURE_SELECTION_RF_N_ESTIMATORS = 500
+
+# Permutation-importance repeats per fold - averaged to reduce the noise inherent
+# in randomly shuffling a column and remeasuring performance once.
+PERMUTATION_IMPORTANCE_N_REPEATS = 10
