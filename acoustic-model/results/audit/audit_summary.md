@@ -56,10 +56,17 @@ Not applicable at this stage: no perceptual features (jitter, shimmer, HNR, etc.
 
 Point-biserial correlation and Mann-Whitney U test between class label (dementia=1) and each per-subject mean channel-quality proxy, computed at the subject level to avoid pseudo-replication from subjects with multiple files.
 A statistically significant association here would mean the label is confounded with recording-channel quality rather than purely with speaker physiology - relevant because jitter, shimmer, and HNR (planned voice-quality features) are themselves sensitive to channel quality, not just vocal-fold physiology.
+Three proxies were tested, so raw p-values are reported alongside a Bonferroni-adjusted p-value (within each test family, n=3) to avoid overstating how surprising any single result is.
+The Mann-Whitney result also includes a rank-biserial effect size (Wendt 1972: r = 1 - 2U/(n1*n2)), the nonparametric analogue of r, interpretable on roughly the same small (~0.1) / medium (~0.3) / large (~0.5) scale as Pearson's r.
 
-mean_noise_floor_db: n=215, point-biserial r=0.143 (p=0.0366), Mann-Whitney U p=0.0753.
-mean_spectral_bandwidth_hz: n=215, point-biserial r=0.007 (p=0.9149), Mann-Whitney U p=0.7471.
-mean_spectral_flatness: n=215, point-biserial r=-0.098 (p=0.1514), Mann-Whitney U p=0.0164.
+mean_noise_floor_db: n=215, point-biserial r=0.143 (raw p=0.0366, Bonferroni p=0.1097); Mann-Whitney raw p=0.0753, Bonferroni p=0.2260, rank-biserial r=-0.144.
+mean_spectral_bandwidth_hz: n=215, point-biserial r=0.007 (raw p=0.9149, Bonferroni p=1.0000); Mann-Whitney raw p=0.7471, Bonferroni p=1.0000, rank-biserial r=-0.026.
+mean_spectral_flatness: n=215, point-biserial r=-0.098 (raw p=0.1514, Bonferroni p=0.4543); Mann-Whitney raw p=0.0164, Bonferroni p=0.0491, rank-biserial r=0.194.
+
+Interpretation: under the per-family Bonferroni correction (n=3), no point-biserial correlation survives.
+The spectral-flatness Mann-Whitney result survives at the edge (Bonferroni p=0.0491, just under 0.05) but does not survive the stricter correction across all 6 tests run (raw p=0.0164 vs. a 0.05/6=0.0083 threshold).
+All three rank-biserial effect sizes are small in magnitude (noise floor -0.14, spectral bandwidth -0.03, spectral flatness 0.19), none approaching a medium effect.
+Net reading: this is a real, worth-tracking signal on noise floor and spectral flatness, not a robust, corrected-for-multiple-testing confound - it does not on its own block proceeding, but the planned Phase 3 check (comparing jitter/shimmer/HNR against these same channel-quality proxies once those features exist) should treat noise floor and spectral flatness as the two proxies to watch most closely.
 
 ## Numbering scheme note
 

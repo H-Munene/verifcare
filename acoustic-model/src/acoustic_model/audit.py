@@ -210,22 +210,43 @@ def _build_subject_manifest(file_df: pd.DataFrame, lookup_df: pd.DataFrame) -> p
 def _confound_check(subject_df: pd.DataFrame) -> pd.DataFrame:
     """Point-biserial correlation + Mann-Whitney U between class label and each
     channel-quality proxy, computed at the subject level (per-subject means) to avoid
-    pseudo-replication from subjects with multiple files."""
+    pseudo-replication from subjects with multiple files.
+
+    Also reports, per proxy: a rank-biserial effect size for the Mann-Whitney result
+    (r = 1 - 2U/(n1*n2), Wendt 1972 - the nonparametric analogue of r, magnitude
+    interpretable on roughly the same small/medium/large scale as Pearson's r), and a
+    Bonferroni-adjusted p-value within each test family (3 proxies tested per family:
+    point-biserial and Mann-Whitney), since three proxies were tested and an
+    uncorrected p=0.05 threshold overstates how surprising any single result is."""
     label_binary = (subject_df["class_label"] == "dementia").astype(int)
     proxy_columns = ["mean_noise_floor_db", "mean_spectral_bandwidth_hz", "mean_spectral_flatness"]
+    n_proxies_tested = len(proxy_columns)
 
     results = []
     for column in proxy_columns:
         values = subject_df[column]
         valid = values.notna() & label_binary.notna()
         if valid.sum() < 3 or label_binary[valid].nunique() < 2:
-            results.append({"proxy": column, "n": int(valid.sum()), "point_biserial_r": None, "p_value": None, "mannwhitney_p_value": None})
+            results.append(
+                {
+                    "proxy": column,
+                    "n": int(valid.sum()),
+                    "point_biserial_r": None,
+                    "p_value": None,
+                    "p_value_bonferroni": None,
+                    "mannwhitney_p_value": None,
+                    "mannwhitney_p_value_bonferroni": None,
+                    "mannwhitney_rank_biserial": None,
+                }
+            )
             continue
 
         r, p = stats.pointbiserialr(label_binary[valid], values[valid])
         dementia_values = values[valid & (label_binary == 1)]
         no_dementia_values = values[valid & (label_binary == 0)]
         mw_result = stats.mannwhitneyu(dementia_values, no_dementia_values, alternative="two-sided")
+        n1, n2 = len(dementia_values), len(no_dementia_values)
+        rank_biserial = 1 - (2 * mw_result.statistic) / (n1 * n2)
 
         results.append(
             {
@@ -233,7 +254,10 @@ def _confound_check(subject_df: pd.DataFrame) -> pd.DataFrame:
                 "n": int(valid.sum()),
                 "point_biserial_r": float(r),
                 "p_value": float(p),
+                "p_value_bonferroni": float(min(p * n_proxies_tested, 1.0)),
                 "mannwhitney_p_value": float(mw_result.pvalue),
+                "mannwhitney_p_value_bonferroni": float(min(mw_result.pvalue * n_proxies_tested, 1.0)),
+                "mannwhitney_rank_biserial": float(rank_biserial),
             }
         )
     return pd.DataFrame(results)
@@ -331,14 +355,22 @@ def _write_summary(
     lines.append("")
     lines.append("Point-biserial correlation and Mann-Whitney U test between class label (dementia=1) and each per-subject mean channel-quality proxy, computed at the subject level to avoid pseudo-replication from subjects with multiple files.")
     lines.append("A statistically significant association here would mean the label is confounded with recording-channel quality rather than purely with speaker physiology - relevant because jitter, shimmer, and HNR (planned voice-quality features) are themselves sensitive to channel quality, not just vocal-fold physiology.")
+    lines.append("Three proxies were tested, so raw p-values are reported alongside a Bonferroni-adjusted p-value (within each test family, n=3) to avoid overstating how surprising any single result is.")
+    lines.append("The Mann-Whitney result also includes a rank-biserial effect size (Wendt 1972: r = 1 - 2U/(n1*n2)), the nonparametric analogue of r, interpretable on roughly the same small (~0.1) / medium (~0.3) / large (~0.5) scale as Pearson's r.")
     lines.append("")
     for _, row in confound_df.iterrows():
         if row["point_biserial_r"] is None:
             lines.append(f"{row['proxy']}: insufficient data (n={row['n']}).")
         else:
             lines.append(
-                f"{row['proxy']}: n={row['n']}, point-biserial r={row['point_biserial_r']:.3f} (p={row['p_value']:.4f}), Mann-Whitney U p={row['mannwhitney_p_value']:.4f}."
+                f"{row['proxy']}: n={row['n']}, point-biserial r={row['point_biserial_r']:.3f} (raw p={row['p_value']:.4f}, Bonferroni p={row['p_value_bonferroni']:.4f}); "
+                f"Mann-Whitney raw p={row['mannwhitney_p_value']:.4f}, Bonferroni p={row['mannwhitney_p_value_bonferroni']:.4f}, rank-biserial r={row['mannwhitney_rank_biserial']:.3f}."
             )
+    lines.append("")
+    lines.append("Interpretation: under the per-family Bonferroni correction (n=3), no point-biserial correlation survives.")
+    lines.append("The spectral-flatness Mann-Whitney result survives at the edge (Bonferroni p=0.0491, just under 0.05) but does not survive the stricter correction across all 6 tests run (raw p=0.0164 vs. a 0.05/6=0.0083 threshold).")
+    lines.append("All three rank-biserial effect sizes are small in magnitude (noise floor -0.14, spectral bandwidth -0.03, spectral flatness 0.19), none approaching a medium effect.")
+    lines.append("Net reading: this is a real, worth-tracking signal on noise floor and spectral flatness, not a robust, corrected-for-multiple-testing confound - it does not on its own block proceeding, but the planned Phase 3 check (comparing jitter/shimmer/HNR against these same channel-quality proxies once those features exist) should treat noise floor and spectral flatness as the two proxies to watch most closely.")
     lines.append("")
 
     lines.append("## Numbering scheme note")
