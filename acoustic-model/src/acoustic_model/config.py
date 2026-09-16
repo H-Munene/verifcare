@@ -214,3 +214,25 @@ TUNING_STAGE2_N_ITER = 40
 
 # The final full-train_pool lock-in step (section 9b) reuses whichever stage's
 # budget a model last went through - no separate constant needed for it.
+
+# Phase 7 calibration (ml-development-spec.md section 9c): manual cross_val_predict
+# + _SigmoidCalibration calibrator (CalibratedClassifierCV(ensemble=False) doesn't
+# actually route subject groups in scikit-learn==1.9.1 - verified, see section 9c),
+# applied uniformly to Phase 6's surviving candidates on their locked hyperparameters.
+
+CALIBRATION_RESULTS_DIR = RESULTS_DIR / "calibration"
+
+# Outer CV: identical to Phase 4/5/6's fold structure - every numbered fold across
+# every phase holds out the same subjects.
+CALIBRATION_OUTER_CV_FOLDS = FEATURE_SELECTION_CV_FOLDS
+
+# Inner CV for the calibration-fitting step: 5-fold, not Phase 6's 3-fold - Phase 7
+# has no repeated hyperparameter search driving compute cost (one calibration fit
+# per outer fold per model, not hundreds), so a more stable 5-fold out-of-fold
+# score estimate is affordable.
+CALIBRATION_INNER_CV_FOLDS = 5
+
+# Family size for the Bonferroni correction across the 3 pairwise Brier
+# comparisons among Phase 6's surviving candidates (flat/naive, matching the
+# convention already used in Phases 1 and 3 - never Holm-Bonferroni).
+CALIBRATION_BRIER_COMPARISON_FAMILY_SIZE = 3

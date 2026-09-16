@@ -1,0 +1,4 @@
+model,expected_calibration_error,n_pooled_predictions
+xgboost,0.025082246043921782,362
+random_forest,0.04696099681149326,362
+svm,0.038956064875006045,362

@@ -136,13 +136,29 @@ def _make_pipeline(model_name: str, scale_pos_weight: float, svm_probability: bo
         # calibration curve/ECE - which score the literal probability values, not
         # rank - are potentially distorted for SVM specifically, flagged (not
         # corrected) in the Phase 5 summary and dev-log.
-        # Concrete plan before Phase 7 (Calibration, where this becomes
-        # load-bearing): replace with CalibratedClassifierCV(SVC(probability=False),
-        # cv=<subject-grouped splitter>, ensemble=False), using scikit-learn's
-        # metadata routing (set_config(enable_metadata_routing=True) +
-        # .set_fit_request(groups=True)) to thread subject groups into the internal
-        # cv - not done here, since Phase 5's job is relative model comparison under
-        # one shared (if imperfect) internal-calibration behavior across candidates.
+        # Fix plan before Phase 7 (Calibration, where this becomes load-bearing) -
+        # revised after the originally-sketched CalibratedClassifierCV(SVC(...),
+        # cv=<subject-grouped>, ensemble=False) plan was actually tried and found
+        # not to work: with scikit-learn's metadata routing enabled and the cv
+        # splitter's split request set, ensemble=False's internal cross_val_predict
+        # call never forwards the routed groups (traced to CalibratedClassifierCV's
+        # own source - its ensemble=False branch omits routed_params.splitter.split
+        # from the cross_val_predict call), so grouping silently fails to apply and
+        # StratifiedGroupKFold raises immediately. Real, verified in this
+        # environment (scikit-learn==1.9.1), not assumed; ensemble=True *does* route
+        # groups correctly, but changes the fitted model into an average over K
+        # per-fold refits rather than one fixed pipeline - a real design change, not
+        # substituted in silently. The actual fix (Phase 7): build the calibrator
+        # manually - cross_val_predict(base_estimator, X, y, groups=groups,
+        # cv=<subject-grouped>, method="decision_function") for genuinely
+        # out-of-fold, subject-safe scores (cross_val_predict's own groups=
+        # parameter is the older, non-routing mechanism and works correctly here),
+        # then fit sklearn.calibration._SigmoidCalibration directly on those scores
+        # - statistically identical to what ensemble=False was supposed to do (fit
+        # the base estimator once on all data, fit one calibrator on pooled
+        # out-of-fold scores), verified against CalibratedClassifierCV's own source.
+        # Not done here, since Phase 5's job is relative model comparison under one
+        # shared (if imperfect) internal-calibration behavior across candidates.
         #
         # probability=True is separately deprecated in scikit-learn 1.9 (removal
         # targeted 1.11); not switched to the bare suggested replacement
