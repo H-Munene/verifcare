@@ -144,3 +144,46 @@ FEATURE_SELECTION_RF_N_ESTIMATORS = 500
 # Permutation-importance repeats per fold - averaged to reduce the noise inherent
 # in randomly shuffling a column and remeasuring performance once.
 PERMUTATION_IMPORTANCE_N_REPEATS = 10
+
+# Phase 5 baseline models (ml-development-spec.md section 7 candidates, section 8b
+# evaluation methodology): Logistic Regression, Random Forest, SVM, XGBoost, trained
+# on the fixed 20-feature subset selected in Phase 4.
+
+BASELINE_MODELS_RESULTS_DIR = RESULTS_DIR / "baseline_models"
+
+# Reuses the exact same subject-aware CV shape Phase 4 used (n_splits, shuffle,
+# random_state, applied to train_pool in the same row order) rather than a separately
+# declared constant of the same value - this is deliberate, not just economy: it
+# means each numbered fold in Phase 5 holds out the same subjects Phase 4's
+# same-numbered fold did, so the fixed 20-feature subset (whose out-of-fold
+# permutation importance was computed on exactly those held-out subjects) is being
+# evaluated on data structured the same way it was selected on.
+BASELINE_MODEL_CV_FOLDS = FEATURE_SELECTION_CV_FOLDS
+
+# Random Forest candidate hyperparameters. Independently declared from the Phase 4
+# selector RF of the same name (the config module docstring in feature_selection.py
+# notes they may end up similar, not that they're shared) - class_weight="balanced"
+# and n_estimators=500 for the same reasons as the selector: accounts for
+# train_pool's 67/105 imbalance, large enough for stable predictions.
+BASELINE_RF_N_ESTIMATORS = 500
+
+# XGBoost candidate hyperparameters. XGBoost has no "balanced" class-weight option,
+# so scale_pos_weight is computed per CV fold from that fold's own training-portion
+# class counts (negative/positive) rather than fixed here, mirroring what
+# class_weight="balanced" does for the other three candidates.
+BASELINE_XGB_N_ESTIMATORS = 300
+
+# Fixed specificity operating point for the sensitivity-at-fixed-specificity
+# secondary metric (Phase 5 design decision, 2026-09-16- see ml-development-spec.md
+# section 8b): read directly off each fold's ROC curve, no threshold optimization
+# involved. 90% is a conventional screening-context reference point, not a settled
+# product decision - this project has not yet decided whether the eventual locked
+# threshold should prioritize sensitivity over precision (see section 8b) - it is
+# simply a fixed, reproducible point reported alongside Youden's J for whoever makes
+# that decision later.
+BASELINE_FIXED_SPECIFICITY_TARGET = 0.90
+
+# Bin count for the pooled out-of-fold calibration curve and Expected Calibration
+# Error. 10 matches sklearn's calibration_curve default and is the standard
+# convention for this diagnostic.
+CALIBRATION_N_BINS = 10
