@@ -112,15 +112,20 @@ def _make_pipeline(model_name: str, scale_pos_weight: float) -> Pipeline:
         # both sides of this *internal* split. This is a second-order leakage,
         # distinct from (and in addition to) the now-deprecated-parameter warning
         # below.
-        # Scope, reasoned precisely rather than discounting every SVM number:
-        # decision_function itself is fit on the whole outer-fold training data
-        # (libsvm's QP solve isn't affected by the internal CV), and ROC-AUC/PR-AUC
-        # are rank statistics, invariant to any strictly monotonic recalibration of
-        # scores - so SVM's Phase 5 ROC-AUC/PR-AUC are NOT compromised by this.
-        # Brier score and the pooled calibration curve/ECE care about the literal
-        # probability values, not just rank, so SVM's numbers for those ARE
-        # potentially inflated/distorted by this - flagged, not corrected, in the
-        # Phase 5 summary and dev-log.
+        # Scope, reasoned precisely rather than discounting every SVM number (tightened
+        # on a second review round - the affected set is narrower than "everything
+        # downstream of predict_proba"): decision_function itself is fit on the whole
+        # outer-fold training data (libsvm's QP solve isn't touched by the internal
+        # CV). ROC-AUC and PR-AUC are rank statistics, invariant to any strictly
+        # monotonic recalibration of scores. Youden's J, and every metric derived
+        # from it (sensitivity/specificity/F1/balanced accuracy at that threshold),
+        # and sensitivity-at-fixed-specificity are ALSO purely ROC-curve/rank-based -
+        # a monotonic recalibration relabels which raw score sits at a given
+        # TPR/FPR point on the curve, but it's the same point, same classifications.
+        # None of the above are compromised by this. Only Brier score and the pooled
+        # calibration curve/ECE - which score the literal probability values, not
+        # rank - are potentially distorted for SVM specifically, flagged (not
+        # corrected) in the Phase 5 summary and dev-log.
         # Concrete plan before Phase 7 (Calibration, where this becomes
         # load-bearing): replace with CalibratedClassifierCV(SVC(probability=False),
         # cv=<subject-grouped splitter>, ensemble=False), using scikit-learn's
@@ -277,12 +282,21 @@ def pooled_calibration(pooled: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, p
     return pd.DataFrame(curve_rows), pd.DataFrame(ece_rows)
 
 
+def _trivial_baseline_brier(y: pd.Series) -> float:
+    """Brier score of the trivial "always predict the base rate" strategy:
+    p*(1-p), the variance of a Bernoulli(p) - a standard reference point for
+    whether a model's probability outputs beat doing nothing at all."""
+    p = float(y.mean())
+    return p * (1 - p)
+
+
 def _write_summary(
     path: Path,
     df: pd.DataFrame,
     selected_features: list[str],
     aggregated: pd.DataFrame,
     ece: pd.DataFrame,
+    trivial_baseline_brier: float,
 ) -> None:
     lines: list[str] = []
     lines.append("# Phase 5 Baseline Models Summary")
@@ -313,6 +327,40 @@ def _write_summary(
     )
     lines.append("")
     lines.append(
+        f"**Brier score vs. the trivial baseline (always predict the base rate, p*(1-p) = "
+        f"{trivial_baseline_brier:.4f})**: a real, useful finding, not a formality. None of the four "
+        "candidates are meaningfully calibrated yet, even where ROC-AUC shows real above-chance "
+        "discrimination:"
+    )
+    for _, row in aggregated.iterrows():
+        diff = row["brier_score_mean"] - trivial_baseline_brier
+        verdict = "beats the trivial baseline" if diff < 0 else "WORSE than the trivial baseline"
+        lines.append(f"  {row['model']}: Brier={row['brier_score_mean']:.4f}, diff={diff:+.4f} -> {verdict}.")
+    lines.append(
+        "Two mechanisms, not one, and the second is the more direct explanation for the pattern above. "
+        "First, a contributing factor shared by three of the four, not an LR-specific finding: "
+        "class_weight=\"balanced\" (Logistic Regression, Random Forest) and scale_pos_weight (XGBoost) "
+        "reweight the training objective away from the true class distribution - well known to improve "
+        "ranking/decision-boundary metrics while hurting probability calibration. XGBoost's Brier gap "
+        "(+0.0492) is actually larger than Logistic Regression's (+0.0333), confirming this isn't unique to "
+        "either model. Second, and more directly explanatory: none of Logistic Regression's, Random "
+        "Forest's, or XGBoost's predict_proba() in this phase passes through any post-hoc calibration step "
+        "- each is the model's own native, unrecalibrated probability output. SVM is the only one of the "
+        "four whose predict_proba() gets any calibration pass at all: SVC(probability=True) fits Platt "
+        "scaling on top of its decision_function via its own internal CV - imperfect and leaky (see the "
+        "caveat above), but a real calibration step, unlike the other three's raw outputs. That is the more "
+        "direct reading of why SVM alone beats the trivial baseline: not that its reweighting is less "
+        "damaging (it uses class_weight=\"balanced\" too), but that it's the only candidate with any "
+        "calibration mechanism attached, however compromised. This reframes the finding: three "
+        "uncalibrated, reweighted models with poor Brier scores, one model with even an imperfect "
+        "calibration step showing a real improvement - closer to demonstrating Phase 7's fix mechanism "
+        "than the reweighting point alone diagnoses the problem. (Random Forest's own gap is much smaller "
+        "than Logistic Regression's/XGBoost's despite the same reweighting - plausibly Random Forest's own "
+        "well-documented tendency to compress predicted probabilities toward the middle of the range, "
+        "noted here as an open observation, not verified in detail.)"
+    )
+    lines.append("")
+    lines.append(
         "**Read plainly, not just relatively**: all four candidates land in the 0.61-0.64 mean ROC-AUC "
         "range - weak-to-moderate discrimination, not strong. Worth stating alongside this project's own "
         "documented domain-shift and archival-provenance limitations (ml-development-spec.md section 2), "
@@ -321,15 +369,19 @@ def _write_summary(
     )
     lines.append("")
     lines.append(
-        "**SVM's Brier score and calibration numbers below carry a known, tracked caveat**: "
-        "SVC(probability=True) fits its decision_function-to-probability mapping via an internal 5-fold CV "
-        "with no subject grouping (see the code comment in baseline_models.py, verified directly against "
-        "the installed scikit-learn==1.9.1 docstring) - a subject with multiple files in an outer training "
-        "fold can land on both sides of that internal split. ROC-AUC/PR-AUC are rank statistics and are NOT "
-        "affected (any strictly monotonic recalibration preserves rank); Brier score and the pooled "
-        "calibration curve/ECE, which score the literal probability values, ARE potentially distorted for "
-        "SVM specifically. Not fixed in Phase 5 (relative model comparison doesn't require it); has a "
-        "concrete fix plan before Phase 7 (Calibration), where it becomes load-bearing."
+        "**SVM's Brier score and calibration numbers below carry a known, tracked caveat - narrowly "
+        "scoped, not a blanket discount on every SVM number**: SVC(probability=True) fits its "
+        "decision_function-to-probability mapping via an internal 5-fold CV with no subject grouping (see "
+        "the code comment in baseline_models.py, verified directly against the installed "
+        "scikit-learn==1.9.1 docstring) - a subject with multiple files in an outer training fold can land "
+        "on both sides of that internal split. ROC-AUC, PR-AUC, and every threshold-dependent metric above "
+        "(Youden's J and everything derived from it, plus sensitivity-at-fixed-specificity) are all "
+        "rank-based - purely a function of the ROC curve, which any strictly monotonic recalibration "
+        "leaves unchanged point-for-point - so none of them are affected. Only Brier score and the pooled "
+        "calibration curve/ECE below, which score the literal probability values rather than rank, are "
+        "potentially distorted for SVM specifically. Not fixed in Phase 5 (relative model comparison "
+        "doesn't require literal probability accuracy); has a concrete fix plan before Phase 7 "
+        "(Calibration), where it becomes load-bearing."
     )
     lines.append("")
 
@@ -420,6 +472,7 @@ def run() -> dict:
         selected_features=selected_features,
         aggregated=aggregated,
         ece=ece_df,
+        trivial_baseline_brier=_trivial_baseline_brier(y),
     )
 
     return {"aggregated": aggregated.to_dict(orient="records")}

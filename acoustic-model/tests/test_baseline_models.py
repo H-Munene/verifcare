@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from acoustic_model import baseline_models, feature_selection
 
@@ -149,6 +150,14 @@ def test_aggregate_metrics_computes_mean_and_std_per_model():
     row = aggregated[aggregated["model"] == "logistic_regression"].iloc[0]
     assert row["roc_auc_mean"] == 0.7
     assert row["roc_auc_std"] == _sample_std([0.8, 0.6])
+
+
+def test_trivial_baseline_brier_matches_bernoulli_variance():
+    y = pd.Series([1, 1, 0, 0, 0])  # p = 0.4
+
+    result = baseline_models._trivial_baseline_brier(y)
+
+    assert result == pytest.approx(0.4 * 0.6)
 
 
 def test_pooled_calibration_ece_is_zero_for_perfectly_calibrated_predictions():
