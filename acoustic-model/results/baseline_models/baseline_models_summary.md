@@ -15,6 +15,10 @@ Mean across 5 folds (std in parentheses). No threshold is involved in any of the
 
 No winner is declared here - see ml-development-spec.md section 8b. Sorted by mean ROC-AUC descending for reporting convenience only.
 
+**Read plainly, not just relatively**: all four candidates land in the 0.61-0.64 mean ROC-AUC range - weak-to-moderate discrimination, not strong. Worth stating alongside this project's own documented domain-shift and archival-provenance limitations (ml-development-spec.md section 2), rather than letting "no winner declared" read as more neutral than "none of these are working particularly well yet."
+
+**SVM's Brier score and calibration numbers below carry a known, tracked caveat**: SVC(probability=True) fits its decision_function-to-probability mapping via an internal 5-fold CV with no subject grouping (see the code comment in baseline_models.py, verified directly against the installed scikit-learn==1.9.1 docstring) - a subject with multiple files in an outer training fold can land on both sides of that internal split. ROC-AUC/PR-AUC are rank statistics and are NOT affected (any strictly monotonic recalibration preserves rank); Brier score and the pooled calibration curve/ECE, which score the literal probability values, ARE potentially distorted for SVM specifically. Not fixed in Phase 5 (relative model comparison doesn't require it); has a concrete fix plan before Phase 7 (Calibration), where it becomes load-bearing.
+
 ## Threshold-dependent secondary metrics (provisional - read this caveat first)
 
 Per section 8b: each fold's Youden's-J threshold is chosen from that same fold's held-out predictions, then that same fold is scored at it. These numbers are an **optimistic upper bound** on what a single fixed threshold would achieve, not a fair estimate of one. ROC-AUC/PR-AUC/Brier above are not subject to this.

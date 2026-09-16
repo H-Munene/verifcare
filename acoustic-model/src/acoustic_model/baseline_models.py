@@ -103,16 +103,37 @@ def _make_pipeline(model_name: str, scale_pos_weight: float) -> Pipeline:
             n_jobs=-1,
         )
     elif model_name == "svm":
-        # probability=True is deprecated in scikit-learn 1.9 (removal targeted for
-        # 1.11), in favor of CalibratedClassifierCV(SVC(), ensemble=False). Not
-        # switched here: CalibratedClassifierCV's own internal cv defaults to plain
-        # (non-subject-grouped) K-fold, which would split a subject's files across
-        # its internal train/calibration halves - a real leakage risk this project
-        # treats as non-negotiable, not a warning worth accepting to silence another
-        # warning. Left as SVC(probability=True) - still fully functional on the
-        # pinned scikit-learn==1.9.1 - and tracked here for whenever this actually
-        # needs fixing (removal, or wiring a subject-grouped inner cv through
-        # explicitly), not silently ignored.
+        # KNOWN, TRACKED LEAKAGE RISK (raised on review, 2026-09-16, confirmed
+        # directly against the installed scikit-learn==1.9.1 SVC docstring): probability=True
+        # "internally uses 5-fold cross-validation" (Platt/Wu-Lin-Weng scaling,
+        # implemented in libsvm) to fit the decision_function-to-probability mapping
+        # - that internal CV has no groups parameter and is plain K-fold, so within
+        # any one outer training fold, a subject with multiple files can land on
+        # both sides of this *internal* split. This is a second-order leakage,
+        # distinct from (and in addition to) the now-deprecated-parameter warning
+        # below.
+        # Scope, reasoned precisely rather than discounting every SVM number:
+        # decision_function itself is fit on the whole outer-fold training data
+        # (libsvm's QP solve isn't affected by the internal CV), and ROC-AUC/PR-AUC
+        # are rank statistics, invariant to any strictly monotonic recalibration of
+        # scores - so SVM's Phase 5 ROC-AUC/PR-AUC are NOT compromised by this.
+        # Brier score and the pooled calibration curve/ECE care about the literal
+        # probability values, not just rank, so SVM's numbers for those ARE
+        # potentially inflated/distorted by this - flagged, not corrected, in the
+        # Phase 5 summary and dev-log.
+        # Concrete plan before Phase 7 (Calibration, where this becomes
+        # load-bearing): replace with CalibratedClassifierCV(SVC(probability=False),
+        # cv=<subject-grouped splitter>, ensemble=False), using scikit-learn's
+        # metadata routing (set_config(enable_metadata_routing=True) +
+        # .set_fit_request(groups=True)) to thread subject groups into the internal
+        # cv - not done here, since Phase 5's job is relative model comparison under
+        # one shared (if imperfect) internal-calibration behavior across candidates.
+        #
+        # probability=True is separately deprecated in scikit-learn 1.9 (removal
+        # targeted 1.11); not switched to the bare suggested replacement
+        # (CalibratedClassifierCV(SVC(), ensemble=False) with its cv left at
+        # scikit-learn's plain-K-fold default) since that would keep this exact
+        # leakage risk while only silencing the warning.
         clf = SVC(kernel="rbf", probability=True, class_weight="balanced", random_state=RANDOM_SEED)
     elif model_name == "xgboost":
         clf = XGBClassifier(
@@ -289,6 +310,26 @@ def _write_summary(
     lines.append(
         "No winner is declared here - see ml-development-spec.md section 8b. Sorted by mean ROC-AUC "
         "descending for reporting convenience only."
+    )
+    lines.append("")
+    lines.append(
+        "**Read plainly, not just relatively**: all four candidates land in the 0.61-0.64 mean ROC-AUC "
+        "range - weak-to-moderate discrimination, not strong. Worth stating alongside this project's own "
+        "documented domain-shift and archival-provenance limitations (ml-development-spec.md section 2), "
+        "rather than letting \"no winner declared\" read as more neutral than \"none of these are working "
+        "particularly well yet.\""
+    )
+    lines.append("")
+    lines.append(
+        "**SVM's Brier score and calibration numbers below carry a known, tracked caveat**: "
+        "SVC(probability=True) fits its decision_function-to-probability mapping via an internal 5-fold CV "
+        "with no subject grouping (see the code comment in baseline_models.py, verified directly against "
+        "the installed scikit-learn==1.9.1 docstring) - a subject with multiple files in an outer training "
+        "fold can land on both sides of that internal split. ROC-AUC/PR-AUC are rank statistics and are NOT "
+        "affected (any strictly monotonic recalibration preserves rank); Brier score and the pooled "
+        "calibration curve/ECE, which score the literal probability values, ARE potentially distorted for "
+        "SVM specifically. Not fixed in Phase 5 (relative model comparison doesn't require it); has a "
+        "concrete fix plan before Phase 7 (Calibration), where it becomes load-bearing."
     )
     lines.append("")
 
