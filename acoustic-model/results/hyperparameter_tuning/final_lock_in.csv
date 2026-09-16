@@ -1,0 +1,4 @@
+model,best_params,selection_score_not_a_performance_estimate
+xgboost,"{""clf__colsample_bytree"": 0.9439761626945282, ""clf__learning_rate"": 0.10113389297817889, ""clf__max_depth"": 2, ""clf__n_estimators"": 266, ""clf__subsample"": 0.6053059844639466}",0.6703117144293615
+random_forest,"{""clf__max_depth"": null, ""clf__max_features"": 0.3, ""clf__min_samples_leaf"": 3}",0.6525928320045967
+svm,"{""clf__C"": 0.6672367170464207, ""clf__gamma"": 0.13826232179369857}",0.6569309775192128

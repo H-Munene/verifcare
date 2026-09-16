@@ -187,3 +187,30 @@ BASELINE_FIXED_SPECIFICITY_TARGET = 0.90
 # Error. 10 matches sklearn's calibration_curve default and is the standard
 # convention for this diagnostic.
 CALIBRATION_N_BINS = 10
+
+# Phase 6 hyperparameter tuning (ml-development-spec.md section 9b): two-stage
+# nested CV, reusing Phase 4/5's exact outer folds. Justified by Varma & Simon
+# (2006, BMC Bioinformatics 7:91) - single-level CV for model selection is
+# optimistically biased; nested CV corrects it. See section 9b for the full
+# reasoning and the verification performed on that citation.
+
+TUNING_RESULTS_DIR = RESULTS_DIR / "hyperparameter_tuning"
+
+# Outer CV: identical to Phase 4/5's fold structure (not a separately-valued
+# constant) - every numbered fold across Phases 4/5/6 holds out the same subjects.
+TUNING_OUTER_CV_FOLDS = FEATURE_SELECTION_CV_FOLDS
+
+# Inner CV: 3-fold, not 5 - an explicitly-decided choice (section 9b), not a
+# default. Outer-training folds are already only ~137-138 subjects; a 5-fold
+# inner split would leave ~27-28 subjects per inner-validation fold, too small
+# and noisy to trust for picking a hyperparameter configuration.
+TUNING_INNER_CV_FOLDS = 3
+
+# RandomizedSearchCV budget per stage - small, fixed, and identical across all
+# four candidates (the "same budget, no model favored" design decision). Stage 2
+# is deeper than Stage 1, consistent with Stage 1 being a coarse screening pass.
+TUNING_STAGE1_N_ITER = 15
+TUNING_STAGE2_N_ITER = 40
+
+# The final full-train_pool lock-in step (section 9b) reuses whichever stage's
+# budget a model last went through - no separate constant needed for it.

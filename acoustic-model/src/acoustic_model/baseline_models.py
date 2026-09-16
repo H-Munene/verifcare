@@ -86,13 +86,23 @@ def _build_folds(df: pd.DataFrame, y: pd.Series, groups: pd.Series) -> list[tupl
     return list(splitter.split(df, y, groups))
 
 
-def _make_pipeline(model_name: str, scale_pos_weight: float) -> Pipeline:
+def _make_pipeline(model_name: str, scale_pos_weight: float, svm_probability: bool = True) -> Pipeline:
     """StandardScaler applied uniformly ahead of all four models, fit train-fold-
     only inside the pipeline (never leaking validation-fold statistics into
     scaling). Required for Logistic Regression and the RBF-kernel SVM; a no-op in
     substance for the two tree-based models (monotonic per-feature scaling doesn't
     change their splits), so one pipeline shape is used for all four rather than
-    branching."""
+    branching.
+
+    svm_probability: default True preserves Phase 5's exact behavior unchanged.
+    Phase 6 (hyperparameter_tuning.py) passes False - its scoring is exclusively
+    ROC-AUC (rank-based, invariant to monotonic recalibration), so it never needs
+    SVC's calibrated predict_proba() at all; scikit-learn's roc_auc scorer falls
+    back to decision_function() automatically when probability=False, which is
+    both faster and sidesteps the SVC internal-CV leakage risk (see the SVM branch
+    below) entirely for Phase 6's own numbers - not by fixing the underlying issue,
+    but by not needing the thing that issue affects during tuning. Phase 7
+    (Calibration) is still where predict_proba() itself gets fixed."""
     if model_name == "logistic_regression":
         clf = LogisticRegression(class_weight="balanced", max_iter=5000, random_state=RANDOM_SEED)
     elif model_name == "random_forest":
@@ -139,7 +149,7 @@ def _make_pipeline(model_name: str, scale_pos_weight: float) -> Pipeline:
         # (CalibratedClassifierCV(SVC(), ensemble=False) with its cv left at
         # scikit-learn's plain-K-fold default) since that would keep this exact
         # leakage risk while only silencing the warning.
-        clf = SVC(kernel="rbf", probability=True, class_weight="balanced", random_state=RANDOM_SEED)
+        clf = SVC(kernel="rbf", probability=svm_probability, class_weight="balanced", random_state=RANDOM_SEED)
     elif model_name == "xgboost":
         clf = XGBClassifier(
             n_estimators=BASELINE_XGB_N_ESTIMATORS,
