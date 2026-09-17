@@ -37,6 +37,24 @@ export function createStorage(stack: cdk.Stack): Storage {
     // No lifecycle rule - per architecture.md's Retention section, deletion
     // here is application-triggered on caregiver/dependant offboarding, not
     // a calendar-based S3 rule (unlike visit-audio below).
+    // CORS (HEZ-31/HEZ-85, added after a real "Failed to fetch" reproduced against the admin web
+    // app): a browser's PUT straight to a presigned URL is a cross-origin request from the
+    // frontend's own origin to S3's REST endpoint, and S3 rejects the preflight for any bucket
+    // with no CORS configuration at all - confirmed directly (`aws s3api get-bucket-cors` returned
+    // NoSuchCORSConfiguration) and against AWS's own CORS documentation, not assumed. `AllowedOrigins:
+    // ['*']` is deliberate, not a shortcut: the presigned URL's own signature is what actually
+    // authorizes the upload (it can only be obtained from api's bearer-token-gated
+    // /biometric-enrollments/upload-url endpoint in the first place), the same reasoning
+    // app.ts's own permissive `cors()` already relies on for the API itself. No frontend origin is
+    // fixed yet either (frontend/web/ isn't deployed anywhere - see docs/project-state.md), so a
+    // literal origin allowlist would need updating every time that changes.
+    cors: [
+      {
+        allowedMethods: [s3.HttpMethods.PUT],
+        allowedOrigins: ["*"],
+        allowedHeaders: ["*"],
+      },
+    ],
   });
 
   const visitAudioBucket = new s3.Bucket(stack, "VisitAudioBucket", {

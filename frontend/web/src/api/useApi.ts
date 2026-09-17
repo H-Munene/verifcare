@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { createBiometricEnrollmentsApi } from './biometricEnrollments';
 import { createApiClient } from './client';
 import { createDependantsApi } from './dependants';
 import { createUsersApi } from './users';
@@ -12,5 +13,6 @@ export function useApi() {
   const client = useMemo(() => createApiClient(getIdToken), [getIdToken]);
   const dependants = useMemo(() => createDependantsApi(client), [client]);
   const users = useMemo(() => createUsersApi(client), [client]);
-  return { dependants, users };
+  const biometricEnrollments = useMemo(() => createBiometricEnrollmentsApi(client), [client]);
+  return { dependants, users, biometricEnrollments };
 }

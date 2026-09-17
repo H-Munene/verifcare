@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import { useAuth } from '../auth/AuthContext';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Switch } from '../design-system/Switch';
@@ -9,6 +10,7 @@ import './DependantsListPage.css';
 
 export function DependantsListPage() {
   const { dependants } = useApi();
+  const { identity } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   // Simple back/forward cursor history - this list is small and bounded (cursor pagination, per
@@ -33,14 +35,25 @@ export function DependantsListPage() {
     <div>
       <div className="dependants-page__toolbar">
         <h1 className="dependants-page__title">Dependants</h1>
-        <Button
-          variant="cta-pill"
-          onClick={() => {
-            void navigate('/dependants/new');
-          }}
-        >
-          + Register Dependant
-        </Button>
+        <div className="dependants-page__toolbar-actions">
+          {identity?.role === 'supervisor' ? (
+            <Button
+              onClick={() => {
+                void navigate('/flagged-enrollments');
+              }}
+            >
+              Flagged Enrollments
+            </Button>
+          ) : null}
+          <Button
+            variant="cta-pill"
+            onClick={() => {
+              void navigate('/dependants/new');
+            }}
+          >
+            + Register Dependant
+          </Button>
+        </div>
       </div>
 
       {query.isLoading ? <p>Loading...</p> : null}

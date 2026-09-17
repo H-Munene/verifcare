@@ -3,6 +3,7 @@ import { RequireAuth } from './auth/RequireAuth';
 import { AppShell } from './components/AppShell';
 import { DependantDetailPage } from './pages/DependantDetailPage';
 import { DependantsListPage } from './pages/DependantsListPage';
+import { FlaggedEnrollmentsPage } from './pages/FlaggedEnrollmentsPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterDependantPage } from './pages/RegisterDependantPage';
 
@@ -21,6 +22,7 @@ export function App() {
                 <Route path="/dependants/new" element={<RegisterDependantPage />} />
                 <Route path="/dependants/:dependantId" element={<DependantDetailPage />} />
                 <Route path="/dependants/:dependantId/edit" element={<RegisterDependantPage />} />
+                <Route path="/flagged-enrollments" element={<FlaggedEnrollmentsPage />} />
               </Routes>
             </AppShell>
           </RequireAuth>
