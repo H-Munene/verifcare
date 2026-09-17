@@ -27,6 +27,10 @@ const envSchema = z
     USER_POOL_CLIENT_ID: z.string().min(1),
     CAREGIVER_USER_POOL_CLIENT_ID: z.string().min(1),
     FAMILY_MEMBER_USER_POOL_CLIENT_ID: z.string().min(1),
+    // The S3 bucket biometric enrollment images are uploaded to (routes/biometricEnrollments.ts,
+    // HEZ-31). Already passed into the Lambda's environment by infra/lib/api.ts since HEZ-21, but
+    // unread by any code here until now.
+    BIOMETRIC_ENROLLMENTS_BUCKET_NAME: z.string().min(1),
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.DATABASE_SECRET_ARN !== undefined, {
     message: 'Either DATABASE_URL (local dev) or DATABASE_SECRET_ARN (Lambda) must be set.',
@@ -39,6 +43,7 @@ export interface Config {
   userPoolId: string;
   // Every app client the ID token verifier must accept - see the schema comment above.
   userPoolClientIds: [string, string, string];
+  biometricEnrollmentsBucketName: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -59,5 +64,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       result.data.CAREGIVER_USER_POOL_CLIENT_ID,
       result.data.FAMILY_MEMBER_USER_POOL_CLIENT_ID,
     ],
+    biometricEnrollmentsBucketName: result.data.BIOMETRIC_ENROLLMENTS_BUCKET_NAME,
   };
 }

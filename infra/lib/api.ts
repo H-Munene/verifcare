@@ -4,6 +4,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
@@ -92,9 +93,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
 
   // Network-level access (the security group rule letting api reach RDS's
   // port) - matches architecture.md's "Networking (VPC layout)" section,
-  // which is settled. IAM grants for what api's code actually reads/writes
-  // beyond the secret (S3, Rekognition) are Linear HEZ-24's explicit scope,
-  // not this one - the app doesn't touch those yet.
+  // which is settled.
   database.connections.allowDefaultPortFrom(apiFunction);
 
   // Lets api's Lambda-to-Drizzle connection (backend/src/db/lambdaDb.ts)
@@ -114,6 +113,31 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // Scoped to this user pool only, not a wildcard - same pattern as the
   // grant above.
   userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
+
+  // Lets api's biometric-enrollment upload flow (HEZ-31) sign a presigned PUT
+  // URL that S3 will actually honor - a presigned URL is only valid if the
+  // signing principal's own IAM policy allows the signed action, so grantPut
+  // is required even though the Lambda itself never uploads the bytes.
+  // grantRead covers both the confirm-time HeadObject existence check and
+  // Rekognition's own need to read the S3 object when the Lambda calls
+  // DetectFaces with an S3Object reference instead of downloading the image.
+  biometricEnrollmentsBucket.grantPut(apiFunction);
+  biometricEnrollmentsBucket.grantRead(apiFunction);
+
+  // Lets api's biometric-enrollment confirm endpoint (HEZ-31) call
+  // Rekognition DetectFaces to compute biometric_enrollments.quality_score.
+  // rekognition:DetectFaces does not support resource-level permissions
+  // (confirmed against AWS's Service Authorization Reference - every
+  // Rekognition action with no resource type listed there requires
+  // Resource: "*"), so the only controllable least-privilege axis is the
+  // action itself - scoped to this one action, not a wildcard
+  // "rekognition:*" grant.
+  apiFunction.addToRolePolicy(
+    new iam.PolicyStatement({
+      actions: ["rekognition:DetectFaces"],
+      resources: ["*"],
+    }),
+  );
 
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,

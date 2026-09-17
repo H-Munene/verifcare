@@ -1,3 +1,5 @@
+import { RekognitionClient } from '@aws-sdk/client-rekognition';
+import { S3Client } from '@aws-sdk/client-s3';
 import type { ErrorRequestHandler } from 'express';
 import serverlessHttp from 'serverless-http';
 import { createApp } from './app.js';
@@ -5,6 +7,7 @@ import { createCognitoAdmin } from './auth/cognitoAdmin.js';
 import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
+import { createBiometricStorage } from './db/biometricStorage.js';
 import { getLambdaDb, invalidateLambdaDb } from './db/lambdaDb.js';
 import { isPostgresAuthError } from './db/postgresErrors.js';
 import { errorHandler } from './errors.js';
@@ -25,6 +28,16 @@ const requireAuth = createRequireAuth(verifier);
 const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
 const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 
+// Biometric enrollment storage (HEZ-31) - S3 for the presigned upload, Rekognition for
+// quality_score. Both clients are constructed with no explicit region/credentials, same as
+// auth/cognitoAdmin.ts's CognitoIdentityProviderClient - the Lambda execution environment supplies
+// both via its own IAM role and AWS_REGION.
+const biometricStorage = createBiometricStorage({
+  s3Client: new S3Client({}),
+  rekognitionClient: new RekognitionClient({}),
+  bucketName: config.biometricEnrollmentsBucketName,
+});
+
 // resolveDb (not db) - see app.ts's AppDependencies.resolveDb comment for why this needs to be a
 // per-request resolver createApp() wires in itself, before its routers, rather than middleware
 // bolted on afterward here (that was the actual bug, fixed 2026-09-14: middleware added to an
@@ -34,6 +47,7 @@ const app = createApp({
   requireAuth,
   requireVerifiedIdentity,
   cognitoAdmin,
+  biometricStorage,
   resolveDb: getLambdaDb,
 });
 

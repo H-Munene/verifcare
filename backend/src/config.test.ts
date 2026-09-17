@@ -6,6 +6,7 @@ const requiredEnv = {
   USER_POOL_CLIENT_ID: '62h8bi9cih94nhcd3hom9kheol',
   CAREGIVER_USER_POOL_CLIENT_ID: '4th550b5rk8st5fmgfdio465tr',
   FAMILY_MEMBER_USER_POOL_CLIENT_ID: '7b63vkbmrooqvu4g5to6c1gtvk',
+  BIOMETRIC_ENROLLMENTS_BUCKET_NAME: 'mzazicarestack-biometricenrollmentsbucket-abc123',
 };
 
 describe('loadConfig', () => {
@@ -25,6 +26,7 @@ describe('loadConfig', () => {
         requiredEnv.CAREGIVER_USER_POOL_CLIENT_ID,
         requiredEnv.FAMILY_MEMBER_USER_POOL_CLIENT_ID,
       ],
+      biometricEnrollmentsBucketName: requiredEnv.BIOMETRIC_ENROLLMENTS_BUCKET_NAME,
     });
   });
 
@@ -105,5 +107,14 @@ describe('loadConfig', () => {
         DATABASE_URL: 'postgres://localhost/db',
       }),
     ).toThrow(/FAMILY_MEMBER_USER_POOL_CLIENT_ID/);
+  });
+
+  it('throws when BIOMETRIC_ENROLLMENTS_BUCKET_NAME is missing', () => {
+    expect(() =>
+      loadConfig({
+        ...withoutKey('BIOMETRIC_ENROLLMENTS_BUCKET_NAME'),
+        DATABASE_URL: 'postgres://localhost/db',
+      }),
+    ).toThrow(/BIOMETRIC_ENROLLMENTS_BUCKET_NAME/);
   });
 });

@@ -223,7 +223,9 @@ function getDb(res: Response): Db | undefined {
 // Looks up whether callerSub is linked to dependantId, returning both the caller's own users row
 // (needed by callers for addedBy/registeredBy-style columns) and the link row itself (needed to
 // check isPrimaryContact). Returns undefined if the caller has no users row, or no link exists.
-async function findFamilyMemberLink(
+// Exported for routes/biometricEnrollments.ts (HEZ-31), which needs the exact same
+// family_member-to-dependant ownership check, not a re-derived copy of it.
+export async function findFamilyMemberLink(
   db: Db,
   dependantId: string,
   callerSub: string,
