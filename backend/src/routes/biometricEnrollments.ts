@@ -1,4 +1,5 @@
-// POST /biometric-enrollments/upload-url, POST/GET /biometric-enrollments (HEZ-31).
+// POST /biometric-enrollments/upload-url, POST/GET /biometric-enrollments (HEZ-31),
+// GET /biometric-enrollments/flagged, POST /biometric-enrollments/{id}/approve|reject (HEZ-85).
 //
 // Who enrolls whom (confirmed with the user before implementing, not assumed):
 // - supervisor: may enroll any caregiver or any dependant.
@@ -12,28 +13,43 @@
 //
 // Re-enrollment (a new image confirmed for a subject/imageOrder that already has an active row):
 // the previous active row is marked 'superseded' in the same transaction as the new insert - the
-// natural reading of the active/superseded/deleted status enum, which the schema defines but no
-// code path used before this issue.
+// natural reading of the active/superseded/deleted/flagged status column, which the schema defines
+// but no code path used before HEZ-31.
+//
+// Uniqueness (HEZ-85): after DetectFaces' quality check passes, db/biometricFaceCollection.ts's
+// checkDuplicate() searches every previously enrolled face (across both caregivers and dependants -
+// confirmed with the user as global, not per-role) for a match belonging to a *different* subject.
+// A match flags the row (status 'flagged', not written to the collection yet) instead of
+// hard-rejecting it - AWS's own CompareFaces documentation cautions that probabilistic face-match
+// results affecting someone's access should go to a human, not an automatic block, and that
+// reasoning applies just as much to a duplicate-enrollment decision. A supervisor then approves
+// (indexes the face, promotes to active) or rejects (marks deleted, never indexed) it via the two
+// new endpoints below.
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/verifier.js';
 import { requireRole } from '../auth/middleware.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { biometricKeyPrefix, type BiometricStorage } from '../db/biometricStorage.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
+import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 import { findFamilyMemberLink } from './dependants.js';
 
 export interface BiometricEnrollmentsRouterDependencies {
   requireAuth: RequestHandler;
   storage: BiometricStorage;
+  faceCollection: BiometricFaceCollection;
 }
+
+type BiometricEnrollmentStatus = 'active' | 'superseded' | 'deleted' | 'flagged';
 
 interface BiometricEnrollmentResponse {
   id: string;
@@ -42,7 +58,10 @@ interface BiometricEnrollmentResponse {
   dependantId: string | null;
   imageOrder: number;
   qualityScore: number | null;
-  status: 'active' | 'superseded' | 'deleted';
+  status: BiometricEnrollmentStatus;
+  matchedSubjectType: 'caregiver' | 'dependant' | null;
+  matchedSubjectId: string | null;
+  matchedSimilarity: number | null;
   enrolledBy: string;
   enrolledAt: string;
   updatedAt: string;
@@ -58,7 +77,10 @@ function toResponse(
     dependantId: row.dependantId,
     imageOrder: row.imageOrder,
     qualityScore: row.qualityScore,
-    status: row.status,
+    status: row.status as BiometricEnrollmentStatus,
+    matchedSubjectType: row.matchedSubjectType,
+    matchedSubjectId: row.matchedSubjectId,
+    matchedSimilarity: row.matchedSimilarity,
     enrolledBy: row.enrolledBy,
     enrolledAt: row.enrolledAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -85,6 +107,15 @@ const listBiometricEnrollmentsQuerySchema = z.object({
   subjectType: subjectTypeSchema,
   subjectId: z.string().uuid(),
 });
+
+const listFlaggedQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+// Express 5's params type allows string | string[], so req.params.id isn't a plain string on its
+// own - validated the same way any other input is, via parseOrSendProblem.
+const enrollmentIdParamSchema = z.string().uuid();
 
 function getDb(res: Response): Db | undefined {
   const db = res.req.app.locals.db as Db | undefined;
@@ -163,7 +194,7 @@ export function createBiometricEnrollmentsRouter(
   dependencies: BiometricEnrollmentsRouterDependencies,
 ): Router {
   const router = Router();
-  const { requireAuth, storage } = dependencies;
+  const { requireAuth, storage, faceCollection } = dependencies;
   // caregiver is forbidden on every route in this file (see the file header comment).
   router.use(requireAuth, requireRole('supervisor', 'family_member'));
 
@@ -257,19 +288,16 @@ export function createBiometricEnrollmentsRouter(
         return;
       }
 
-      const row = await db.transaction(async (tx) => {
-        await tx
-          .update(schema.biometricEnrollments)
-          .set({ status: 'superseded', updatedAt: new Date() })
-          .where(
-            and(
-              subjectCondition(body.subjectType, body.subjectId),
-              eq(schema.biometricEnrollments.imageOrder, body.imageOrder),
-              eq(schema.biometricEnrollments.status, 'active'),
-            ),
-          );
+      const duplicate = await faceCollection.checkDuplicate({
+        s3Key: body.s3Key,
+        self: { subjectType: body.subjectType, subjectId: body.subjectId },
+      });
 
-        const [inserted] = await tx
+      let row: typeof schema.biometricEnrollments.$inferSelect;
+      if (duplicate.duplicate) {
+        // Flagged, not hard-rejected (see file header) - written with no rekognitionFaceId, since
+        // indexing is deferred until a supervisor approves it via POST /{id}/approve.
+        const [inserted] = await db
           .insert(schema.biometricEnrollments)
           .values({
             id: uuidv7(),
@@ -279,14 +307,57 @@ export function createBiometricEnrollmentsRouter(
             s3Key: body.s3Key,
             imageOrder: body.imageOrder,
             qualityScore: assessment.qualityScore,
+            status: 'flagged',
+            matchedSubjectType: duplicate.matchedSubjectType,
+            matchedSubjectId: duplicate.matchedSubjectId,
+            matchedSimilarity: duplicate.similarity,
             enrolledBy: callerRow.id,
           })
           .returning();
         if (!inserted) {
           throw new Error('Insert into biometric_enrollments returned no row.');
         }
-        return inserted;
-      });
+        row = inserted;
+      } else {
+        const faceId = await faceCollection.indexFace({
+          s3Key: body.s3Key,
+          subjectType: body.subjectType,
+          subjectId: body.subjectId,
+        });
+
+        row = await db.transaction(async (tx) => {
+          await tx
+            .update(schema.biometricEnrollments)
+            .set({ status: 'superseded', updatedAt: new Date() })
+            .where(
+              and(
+                subjectCondition(body.subjectType, body.subjectId),
+                eq(schema.biometricEnrollments.imageOrder, body.imageOrder),
+                eq(schema.biometricEnrollments.status, 'active'),
+              ),
+            );
+
+          const [inserted] = await tx
+            .insert(schema.biometricEnrollments)
+            .values({
+              id: uuidv7(),
+              subjectType: body.subjectType,
+              caregiverId: body.subjectType === 'caregiver' ? body.subjectId : undefined,
+              dependantId: body.subjectType === 'dependant' ? body.subjectId : undefined,
+              s3Key: body.s3Key,
+              imageOrder: body.imageOrder,
+              qualityScore: assessment.qualityScore,
+              status: 'active',
+              rekognitionFaceId: faceId,
+              enrolledBy: callerRow.id,
+            })
+            .returning();
+          if (!inserted) {
+            throw new Error('Insert into biometric_enrollments returned no row.');
+          }
+          return inserted;
+        });
+      }
 
       res.status(201).json(toResponse(row));
     } catch (err) {
@@ -336,7 +407,7 @@ export function createBiometricEnrollmentsRouter(
         .where(
           and(
             subjectCondition(query.subjectType, query.subjectId),
-            sql`${schema.biometricEnrollments.status} != 'deleted'`,
+            ne(schema.biometricEnrollments.status, 'deleted'),
           ),
         )
         .orderBy(
@@ -345,6 +416,166 @@ export function createBiometricEnrollmentsRouter(
         );
 
       res.status(200).json(rows.map(toResponse));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Supervisor-only (narrower than the router-level supervisor+family_member gate) - a family
+  // member has no legitimate reason to see cross-subject duplicate-match review data.
+  router.get('/flagged', requireRole('supervisor'), async (req, res, next) => {
+    const query = parseOrSendProblem(listFlaggedQuerySchema, req.query, res);
+    if (!query) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+
+    try {
+      const conditions = [eq(schema.biometricEnrollments.status, 'flagged')];
+      if (query.cursor) {
+        let cursor;
+        try {
+          cursor = decodeCursor(query.cursor);
+        } catch {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Bad Request',
+            status: 400,
+            detail: 'Malformed cursor.',
+          });
+          return;
+        }
+        conditions.push(cursorCondition(schema.biometricEnrollments.id, cursor));
+      }
+
+      const rows = await db
+        .select()
+        .from(schema.biometricEnrollments)
+        .where(and(...conditions))
+        .orderBy(asc(schema.biometricEnrollments.id))
+        .limit(query.limit + 1);
+
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
+      res.status(200).json({ items: items.map(toResponse), nextCursor });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Supervisor-only. Indexes the face now (deferred at confirm time while flagged), then applies
+  // the same supersede-then-activate transaction the normal confirm path uses.
+  router.post('/:id/approve', requireRole('supervisor'), async (req, res, next) => {
+    const id = parseOrSendProblem(enrollmentIdParamSchema, req.params.id, res);
+    if (!id) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+
+    try {
+      const [existing] = await db
+        .select()
+        .from(schema.biometricEnrollments)
+        .where(eq(schema.biometricEnrollments.id, id));
+      if (!existing) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (existing.status !== 'flagged') {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: `Only a flagged enrollment can be approved (current status: ${existing.status}).`,
+        });
+        return;
+      }
+      const subjectType = existing.subjectType;
+      const subjectId = subjectType === 'caregiver' ? existing.caregiverId : existing.dependantId;
+      if (!subjectId) {
+        throw new Error(`biometric_enrollments row ${id} has no subject id for its subjectType.`);
+      }
+
+      const faceId = await faceCollection.indexFace({
+        s3Key: existing.s3Key,
+        subjectType,
+        subjectId,
+      });
+
+      const updated = await db.transaction(async (tx) => {
+        await tx
+          .update(schema.biometricEnrollments)
+          .set({ status: 'superseded', updatedAt: new Date() })
+          .where(
+            and(
+              subjectCondition(subjectType, subjectId),
+              eq(schema.biometricEnrollments.imageOrder, existing.imageOrder),
+              eq(schema.biometricEnrollments.status, 'active'),
+            ),
+          );
+
+        const [row] = await tx
+          .update(schema.biometricEnrollments)
+          .set({ status: 'active', rekognitionFaceId: faceId, updatedAt: new Date() })
+          .where(eq(schema.biometricEnrollments.id, id))
+          .returning();
+        return row;
+      });
+      if (!updated) {
+        throw new Error('Update to biometric_enrollments returned no row.');
+      }
+      res.status(200).json(toResponse(updated));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Supervisor-only. Never indexed (deferred while flagged, and never will be now) - just marks
+  // the row deleted so it's excluded from every listing/selection going forward, keeping it as a
+  // permanent record of the rejected duplicate attempt.
+  router.post('/:id/reject', requireRole('supervisor'), async (req, res, next) => {
+    const id = parseOrSendProblem(enrollmentIdParamSchema, req.params.id, res);
+    if (!id) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+
+    try {
+      const [existing] = await db
+        .select()
+        .from(schema.biometricEnrollments)
+        .where(eq(schema.biometricEnrollments.id, id));
+      if (!existing) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (existing.status !== 'flagged') {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: `Only a flagged enrollment can be rejected (current status: ${existing.status}).`,
+        });
+        return;
+      }
+
+      const [updated] = await db
+        .update(schema.biometricEnrollments)
+        .set({ status: 'deleted', updatedAt: new Date() })
+        .where(eq(schema.biometricEnrollments.id, id))
+        .returning();
+      if (!updated) {
+        throw new Error('Update to biometric_enrollments returned no row.');
+      }
+      res.status(200).json(toResponse(updated));
     } catch (err) {
       next(err);
     }

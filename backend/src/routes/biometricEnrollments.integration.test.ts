@@ -3,15 +3,17 @@
 // (real unique-constraint/transaction behavior, not a faked query builder) and for the
 // test-auth-header pattern used here too.
 //
-// db/biometricStorage.ts's S3/Rekognition calls are faked (vi.fn()) rather than hitting real AWS -
-// this file only needs to prove the router's own RBAC/ownership/supersede/error-mapping logic,
-// which is independent of what Rekognition or S3 actually do.
+// db/biometricStorage.ts's S3/Rekognition calls, and db/biometricFaceCollection.ts's Rekognition
+// Collection calls, are faked (vi.fn()) rather than hitting real AWS - this file only needs to
+// prove the router's own RBAC/ownership/supersede/duplicate-flagging/error-mapping logic, which is
+// independent of what Rekognition or S3 actually do.
 
 import { eq } from 'drizzle-orm';
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import type { BiometricStorage } from '../db/biometricStorage.js';
 import * as schema from '../db/schema.js';
 import {
@@ -36,7 +38,14 @@ interface EnrollmentBody {
   dependantId: string | null;
   imageOrder: number;
   qualityScore: number | null;
-  status: 'active' | 'superseded' | 'deleted';
+  status: 'active' | 'superseded' | 'deleted' | 'flagged';
+  matchedSubjectType: 'caregiver' | 'dependant' | null;
+  matchedSubjectId: string | null;
+  matchedSimilarity: number | null;
+}
+interface EnrollmentPageBody {
+  items: EnrollmentBody[];
+  nextCursor: string | null;
 }
 interface UploadUrlBody {
   uploadUrl: string;
@@ -52,8 +61,25 @@ function uploadUrlBody(response: request.Response): UploadUrlBody {
 function enrollmentListBody(response: request.Response): EnrollmentBody[] {
   return response.body as EnrollmentBody[];
 }
+function enrollmentPageBody(response: request.Response): EnrollmentPageBody {
+  return response.body as EnrollmentPageBody;
+}
 
-function buildTestApp(storage: BiometricStorage): Express {
+function fakeFaceCollection(
+  overrides: Partial<BiometricFaceCollection> = {},
+): BiometricFaceCollection {
+  return {
+    checkDuplicate: vi.fn().mockResolvedValue({ duplicate: false }),
+    indexFace: vi.fn().mockResolvedValue('fake-face-id'),
+    deleteFaces: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function buildTestApp(
+  storage: BiometricStorage,
+  faceCollection: BiometricFaceCollection = fakeFaceCollection(),
+): Express {
   const app = express();
   app.use(express.json());
   app.locals.db = getDb();
@@ -68,7 +94,10 @@ function buildTestApp(storage: BiometricStorage): Express {
     next();
   };
 
-  app.use('/biometric-enrollments', createBiometricEnrollmentsRouter({ requireAuth, storage }));
+  app.use(
+    '/biometric-enrollments',
+    createBiometricEnrollmentsRouter({ requireAuth, storage, faceCollection }),
+  );
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -542,6 +571,220 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', auth);
 
         expect(res.status).toBe(403);
+      });
+    });
+
+    describe('POST /biometric-enrollments - duplicate detection (HEZ-85)', () => {
+      async function setupCaregiverSubject(): Promise<{ subjectId: string; auth: string }> {
+        const caregiver = await createTestCaregiver('caregiver-1-sub');
+        await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+        const auth = testAuthHeader({
+          sub: 'supervisor-sub',
+          role: 'supervisor',
+          email: undefined,
+        });
+        return { subjectId: caregiver.id, auth };
+      }
+
+      it('flags the row instead of activating it when checkDuplicate finds a different subject', async () => {
+        const { subjectId, auth } = await setupCaregiverSubject();
+        const otherSubjectId = '11111111-1111-1111-1111-111111111111';
+        const faceCollection = fakeFaceCollection({
+          checkDuplicate: vi.fn().mockResolvedValue({
+            duplicate: true,
+            matchedSubjectType: 'dependant',
+            matchedSubjectId: otherSubjectId,
+            similarity: 97.2,
+          }),
+        });
+        const app = buildTestApp(fakeStorage(), faceCollection);
+
+        const res = await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId,
+            imageOrder: 1,
+            s3Key: `caregiver/${subjectId}/1/photo-a.jpg`,
+          });
+
+        expect(res.status).toBe(201);
+        const body = enrollmentBody(res);
+        expect(body.status).toBe('flagged');
+        expect(body.matchedSubjectType).toBe('dependant');
+        expect(body.matchedSubjectId).toBe(otherSubjectId);
+        expect(body.matchedSimilarity).toBe(97.2);
+        expect(faceCollection.indexFace).not.toHaveBeenCalled();
+      });
+
+      it('indexes and activates normally when checkDuplicate finds no match', async () => {
+        const { subjectId, auth } = await setupCaregiverSubject();
+        const faceCollection = fakeFaceCollection();
+        const app = buildTestApp(fakeStorage(), faceCollection);
+
+        const res = await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId,
+            imageOrder: 1,
+            s3Key: `caregiver/${subjectId}/1/photo-a.jpg`,
+          });
+
+        expect(res.status).toBe(201);
+        expect(enrollmentBody(res).status).toBe('active');
+        expect(faceCollection.indexFace).toHaveBeenCalledWith({
+          s3Key: `caregiver/${subjectId}/1/photo-a.jpg`,
+          subjectType: 'caregiver',
+          subjectId,
+        });
+      });
+    });
+
+    describe('GET /biometric-enrollments/flagged (HEZ-85)', () => {
+      it('lets a supervisor list flagged enrollments', async () => {
+        const { subjectId, auth } = await (async () => {
+          const caregiver = await createTestCaregiver('caregiver-1-sub');
+          await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+          return {
+            subjectId: caregiver.id,
+            auth: testAuthHeader({ sub: 'supervisor-sub', role: 'supervisor', email: undefined }),
+          };
+        })();
+        const faceCollection = fakeFaceCollection({
+          checkDuplicate: vi.fn().mockResolvedValue({
+            duplicate: true,
+            matchedSubjectType: 'caregiver',
+            matchedSubjectId: '22222222-2222-2222-2222-222222222222',
+            similarity: 96,
+          }),
+        });
+        const app = buildTestApp(fakeStorage(), faceCollection);
+        await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId,
+            imageOrder: 1,
+            s3Key: `caregiver/${subjectId}/1/photo-a.jpg`,
+          });
+
+        const res = await request(app)
+          .get('/biometric-enrollments/flagged')
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(200);
+        expect(enrollmentPageBody(res).items).toHaveLength(1);
+        expect(enrollmentPageBody(res).items[0]?.status).toBe('flagged');
+      });
+
+      it('forbids a family member from listing flagged enrollments', async () => {
+        const app = buildTestApp(fakeStorage());
+        const auth = testAuthHeader({ sub: 'fm-sub', role: 'family_member', email: undefined });
+
+        const res = await request(app)
+          .get('/biometric-enrollments/flagged')
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(403);
+      });
+    });
+
+    describe('POST /biometric-enrollments/{id}/approve, /reject (HEZ-85)', () => {
+      async function createFlaggedRow(): Promise<{ id: string; subjectId: string; auth: string }> {
+        const caregiver = await createTestCaregiver('caregiver-1-sub');
+        await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+        const auth = testAuthHeader({
+          sub: 'supervisor-sub',
+          role: 'supervisor',
+          email: undefined,
+        });
+        const faceCollection = fakeFaceCollection({
+          checkDuplicate: vi.fn().mockResolvedValue({
+            duplicate: true,
+            matchedSubjectType: 'caregiver',
+            matchedSubjectId: '22222222-2222-2222-2222-222222222222',
+            similarity: 96,
+          }),
+        });
+        const app = buildTestApp(fakeStorage(), faceCollection);
+        const res = await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId: caregiver.id,
+            imageOrder: 1,
+            s3Key: `caregiver/${caregiver.id}/1/photo-a.jpg`,
+          });
+        return { id: enrollmentBody(res).id, subjectId: caregiver.id, auth };
+      }
+
+      it('approves a flagged row: indexes it and promotes it to active', async () => {
+        const { id, auth } = await createFlaggedRow();
+        const faceCollection = fakeFaceCollection();
+        const app = buildTestApp(fakeStorage(), faceCollection);
+
+        const res = await request(app)
+          .post(`/biometric-enrollments/${id}/approve`)
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(200);
+        expect(enrollmentBody(res).status).toBe('active');
+        expect(faceCollection.indexFace).toHaveBeenCalledOnce();
+      });
+
+      it('rejects approving a row that is not flagged', async () => {
+        const { id, auth } = await createFlaggedRow();
+        const app = buildTestApp(fakeStorage());
+        await request(app).post(`/biometric-enrollments/${id}/approve`).set('x-test-auth', auth);
+
+        const second = await request(app)
+          .post(`/biometric-enrollments/${id}/approve`)
+          .set('x-test-auth', auth);
+
+        expect(second.status).toBe(409);
+      });
+
+      it('forbids a family member from approving', async () => {
+        const { id } = await createFlaggedRow();
+        const app = buildTestApp(fakeStorage());
+        const auth = testAuthHeader({ sub: 'fm-sub', role: 'family_member', email: undefined });
+
+        const res = await request(app)
+          .post(`/biometric-enrollments/${id}/approve`)
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(403);
+      });
+
+      it('rejects a flagged row: marks it deleted without indexing it', async () => {
+        const { id, auth } = await createFlaggedRow();
+        const faceCollection = fakeFaceCollection();
+        const app = buildTestApp(fakeStorage(), faceCollection);
+
+        const res = await request(app)
+          .post(`/biometric-enrollments/${id}/reject`)
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(200);
+        expect(enrollmentBody(res).status).toBe('deleted');
+        expect(faceCollection.indexFace).not.toHaveBeenCalled();
+      });
+
+      it('rejects re-rejecting a row that is not flagged', async () => {
+        const { id, auth } = await createFlaggedRow();
+        const app = buildTestApp(fakeStorage());
+        await request(app).post(`/biometric-enrollments/${id}/reject`).set('x-test-auth', auth);
+
+        const second = await request(app)
+          .post(`/biometric-enrollments/${id}/reject`)
+          .set('x-test-auth', auth);
+
+        expect(second.status).toBe(409);
       });
     });
   },

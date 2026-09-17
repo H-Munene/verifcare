@@ -49,11 +49,6 @@ import {
 export const subjectTypeEnum = pgEnum('subject_type', ['caregiver', 'dependant']);
 export const dependantStatusEnum = pgEnum('dependant_status', ['active', 'deactivated']);
 export const dependantGenderEnum = pgEnum('dependant_gender', ['male', 'female']);
-export const biometricEnrollmentStatusEnum = pgEnum('biometric_enrollment_status', [
-  'active',
-  'superseded',
-  'deleted',
-]);
 export const verificationAttemptTypeEnum = pgEnum('verification_attempt_type', [
   'geofence',
   'caregiver_liveness',
@@ -188,7 +183,30 @@ export const biometricEnrollments = pgTable(
     s3Key: text().notNull().unique('uq_biometric_enrollments_s3_key'),
     imageOrder: smallint().notNull(),
     qualityScore: real(),
-    status: biometricEnrollmentStatusEnum().notNull().default('active'),
+    // Plain text + CHECK, not a native pgEnum - matching users.status's own established pattern in
+    // this file. A real pgEnum was tried first for HEZ-85's new 'flagged' value and reverted:
+    // Postgres forbids using a freshly-added enum value ("ALTER TYPE ... ADD VALUE") within the
+    // same transaction that added it, and drizzle-orm's migrate() always batches every not-yet-
+    // applied migration file into one single transaction (confirmed directly - not just when a
+    // fresh database applies its whole history at once, which is exactly what every fresh test-DB
+    // run and CI run does). Splitting the enum-add and its first use into separate migration files
+    // does not avoid this, since both still count as "not yet applied" together. text()+CHECK has
+    // no such restriction, since altering a CHECK constraint is just an ordinary DDL statement.
+    status: text().notNull().default('active'),
+    // The Rekognition Collection FaceId for this image (HEZ-85) - only ever set once the image is
+    // actually indexed (status 'active'/'superseded'; never set while 'flagged', since indexing is
+    // deliberately deferred until a supervisor approves it). Needed to call DeleteFaces later
+    // (offboarding cleanup) - the collection has no other way to look up which vectors belong to
+    // which enrollment row.
+    rekognitionFaceId: text(),
+    // The other subject this image matched above the duplicate-detection threshold, and the
+    // similarity score at the time - populated only when status is (or was) 'flagged', for a
+    // supervisor to review. No FK: matchedSubjectId may point at either caregivers.userId or
+    // dependants.id depending on matchedSubjectType, the same "can't FK to two tables" reasoning
+    // audit_log.entityId already uses.
+    matchedSubjectType: subjectTypeEnum(),
+    matchedSubjectId: uuid(),
+    matchedSimilarity: real(),
     enrolledBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -202,9 +220,22 @@ export const biometricEnrollments = pgTable(
       sql`(${table.subjectType} = 'caregiver' AND ${table.caregiverId} IS NOT NULL AND ${table.dependantId} IS NULL) OR
           (${table.subjectType} = 'dependant' AND ${table.dependantId} IS NOT NULL AND ${table.caregiverId} IS NULL)`,
     ),
+    check(
+      'chk_biometric_enrollments_status',
+      sql`${table.status} IN ('active', 'superseded', 'deleted', 'flagged')`,
+    ),
+    check(
+      'chk_biometric_enrollments_flagged_has_match',
+      sql`${table.status} != 'flagged' OR (${table.matchedSubjectType} IS NOT NULL AND ${table.matchedSubjectId} IS NOT NULL AND ${table.matchedSimilarity} IS NOT NULL)`,
+    ),
     index('idx_biometric_enrollments_caregiver_active').on(table.caregiverId, table.status),
     index('idx_biometric_enrollments_dependant_active').on(table.dependantId, table.status),
     index('idx_biometric_enrollments_enrolled_by').on(table.enrolledBy),
+    // Supports GET /biometric-enrollments/flagged (HEZ-85), a cross-subject listing with no
+    // caregiverId/dependantId filter to drive off the two composite indexes above.
+    index('idx_biometric_enrollments_flagged')
+      .on(table.id)
+      .where(sql`${table.status} = 'flagged'`),
   ],
 );
 

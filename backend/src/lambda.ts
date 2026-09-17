@@ -7,6 +7,7 @@ import { createCognitoAdmin } from './auth/cognitoAdmin.js';
 import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
+import { createBiometricFaceCollection } from './db/biometricFaceCollection.js';
 import { createBiometricStorage } from './db/biometricStorage.js';
 import { getLambdaDb, invalidateLambdaDb } from './db/lambdaDb.js';
 import { isPostgresAuthError } from './db/postgresErrors.js';
@@ -32,9 +33,18 @@ const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 // quality_score. Both clients are constructed with no explicit region/credentials, same as
 // auth/cognitoAdmin.ts's CognitoIdentityProviderClient - the Lambda execution environment supplies
 // both via its own IAM role and AWS_REGION.
+const rekognitionClient = new RekognitionClient({});
 const biometricStorage = createBiometricStorage({
   s3Client: new S3Client({}),
-  rekognitionClient: new RekognitionClient({}),
+  rekognitionClient,
+  bucketName: config.biometricEnrollmentsBucketName,
+});
+// HEZ-85's enrollment-uniqueness check - a separate concern from biometricStorage's DetectFaces
+// quality scoring (see db/biometricFaceCollection.ts's header comment), sharing the same
+// Rekognition client rather than constructing a second one.
+const biometricFaceCollection = createBiometricFaceCollection({
+  rekognitionClient,
+  collectionId: config.biometricFacesCollectionId,
   bucketName: config.biometricEnrollmentsBucketName,
 });
 
@@ -48,6 +58,7 @@ const app = createApp({
   requireVerifiedIdentity,
   cognitoAdmin,
   biometricStorage,
+  biometricFaceCollection,
   resolveDb: getLambdaDb,
 });
 

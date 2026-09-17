@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Express, type RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import type { CognitoAdmin } from './auth/cognitoAdmin.js';
+import type { BiometricFaceCollection } from './db/biometricFaceCollection.js';
 import type { BiometricStorage } from './db/biometricStorage.js';
 import type { Db } from './db/client.js';
 import { sendProblem } from './errors.js';
@@ -50,6 +51,9 @@ export interface AppDependencies {
   // HEZ-31's biometric-enrollment upload/confirm/list routes - only needs requireAuth, not
   // requireVerifiedIdentity/cognitoAdmin (nothing in that router touches Cognito).
   biometricStorage?: BiometricStorage;
+  // HEZ-85's enrollment-uniqueness check (Rekognition Collection search/index), threaded through
+  // the same router.
+  biometricFaceCollection?: BiometricFaceCollection;
 }
 
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
@@ -104,16 +108,40 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   // HEZ-29's users/caregivers endpoints are the first real routes - the temporary /health/db and
   // /auth/whoami diagnostic routes from the two prior issues are now superseded and removed
   // (both were explicitly documented as temporary, pending exactly this).
-  const { requireAuth, requireVerifiedIdentity, cognitoAdmin, biometricStorage } = dependencies;
+  const {
+    requireAuth,
+    requireVerifiedIdentity,
+    cognitoAdmin,
+    biometricStorage,
+    biometricFaceCollection,
+  } = dependencies;
   if (requireAuth && requireVerifiedIdentity && cognitoAdmin) {
     app.use('/users', createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity }));
-    app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
-    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
+    app.use(
+      '/caregivers',
+      createCaregiversRouter({
+        cognitoAdmin,
+        requireAuth,
+        faceCollection: biometricFaceCollection,
+      }),
+    );
+    app.use(
+      '/dependants',
+      createDependantsRouter({
+        cognitoAdmin,
+        requireAuth,
+        faceCollection: biometricFaceCollection,
+      }),
+    );
   }
-  if (requireAuth && biometricStorage) {
+  if (requireAuth && biometricStorage && biometricFaceCollection) {
     app.use(
       '/biometric-enrollments',
-      createBiometricEnrollmentsRouter({ requireAuth, storage: biometricStorage }),
+      createBiometricEnrollmentsRouter({
+        requireAuth,
+        storage: biometricStorage,
+        faceCollection: biometricFaceCollection,
+      }),
     );
   }
 

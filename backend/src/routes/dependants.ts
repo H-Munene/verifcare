@@ -54,6 +54,8 @@ import {
   type CognitoAdmin,
 } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
+import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
@@ -65,6 +67,9 @@ import { parseOrSendProblem } from '../validation.js';
 export interface DependantsRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
+  // Optional so existing callers/tests that don't touch biometric enrollment at all (most of them)
+  // don't need to construct one - offboarding cleanup (HEZ-85) is simply skipped without it.
+  faceCollection?: BiometricFaceCollection;
 }
 
 interface DependantResponse {
@@ -378,7 +383,7 @@ async function resolveFamilyMemberIdentity(
 
 export function createDependantsRouter(dependencies: DependantsRouterDependencies): Router {
   const router = Router();
-  const { cognitoAdmin, requireAuth } = dependencies;
+  const { cognitoAdmin, requireAuth, faceCollection } = dependencies;
   // caregiver is forbidden on every route in this file (see the file header comment); the one
   // route that's narrower still (supervisor-only) adds its own requireRole afterward.
   router.use(requireAuth, requireRole('supervisor', 'family_member'));
@@ -661,6 +666,13 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!updated) {
         throw new Error('Update to dependants returned no row.');
       }
+
+      // Best-effort, after the update above has already committed - see
+      // db/biometricOffboarding.ts's header comment for why this isn't inside a transaction.
+      if (body.status === 'deactivated' && faceCollection) {
+        await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
+      }
+
       res.status(200).json(toDependantResponse(updated));
     } catch (err) {
       next(err);

@@ -1,10 +1,12 @@
 import * as cdk from "aws-cdk-lib/core";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as kms from "aws-cdk-lib/aws-kms";
+import * as rekognition from "aws-cdk-lib/aws-rekognition";
 
 export interface Storage {
   biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
+  biometricFacesCollection: rekognition.CfnCollection;
 }
 
 export function createStorage(stack: cdk.Stack): Storage {
@@ -57,5 +59,15 @@ export function createStorage(stack: cdk.Stack): Storage {
     value: visitAudioBucket.bucketName,
   });
 
-  return { biometricEnrollmentsBucket, visitAudioBucket };
+  // HEZ-85: a face vector store for the enrollment-uniqueness check (SearchFacesByImage/
+  // IndexFaces), a deliberate, narrow exception to architecture.md's otherwise
+  // Collections-free design - see that doc's "Biometric enrollment uniqueness" section for the
+  // full reasoning. A real CloudFormation/CDK resource (confirmed against AWS's own
+  // CloudFormation reference before relying on it), so this stays infrastructure-as-code like
+  // everything else here rather than a manual `create-collection` CLI step.
+  const biometricFacesCollection = new rekognition.CfnCollection(stack, "BiometricFacesCollection", {
+    collectionId: "mzazi-care-biometric-faces",
+  });
+
+  return { biometricEnrollmentsBucket, visitAudioBucket, biometricFacesCollection };
 }

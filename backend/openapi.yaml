@@ -472,6 +472,84 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /biometric-enrollments/flagged:
+    get:
+      tags: [Biometric Enrollments]
+      summary: List enrollments flagged as a possible duplicate of a different subject (HEZ-85)
+      description: |
+        Supervisor-only. A row lands here when confirming it found this face already enrolled
+        under a *different* subject above the duplicate-detection threshold - not hard-rejected
+        (see `matchedSubjectType`/`matchedSubjectId`/`matchedSimilarity` on each row for the
+        context a supervisor needs to approve or reject it via the two endpoints below.
+      operationId: listFlaggedBiometricEnrollments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Flagged enrollments across every subject, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollmentPage'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/{id}/approve:
+    post:
+      tags: [Biometric Enrollments]
+      summary: Approve a flagged enrollment as legitimate (HEZ-85)
+      description: |
+        Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
+        until now, since it wasn't indexed while flagged) and promotes the row to `active`,
+        superseding any existing active row for the same subject/imageOrder.
+      operationId: approveBiometricEnrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The now-active enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/{id}/reject:
+    post:
+      tags: [Biometric Enrollments]
+      summary: Reject a flagged enrollment as a genuine duplicate (HEZ-85)
+      description: |
+        Supervisor-only. Marks the row `deleted` - it was never indexed while flagged, so nothing
+        needs to be removed from the enrollment-uniqueness collection.
+      operationId: rejectBiometricEnrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The now-deleted enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /visit-schedules:
     post:
       tags: [Visit Schedules]
@@ -1045,7 +1123,7 @@ components:
       enum: [caregiver, dependant]
     BiometricEnrollmentStatus:
       type: string
-      enum: [active, superseded, deleted]
+      enum: [active, superseded, deleted, flagged]
     VisitStatus:
       type: string
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated]
@@ -1382,6 +1460,20 @@ components:
           format: float
         status:
           $ref: '#/components/schemas/BiometricEnrollmentStatus'
+        matchedSubjectType:
+          description: |
+            Set only when status is (or was) `flagged` (HEZ-85): the *other* subject this image's
+            face matched above the duplicate-detection threshold at confirm time.
+          oneOf:
+            - $ref: '#/components/schemas/SubjectType'
+            - type: 'null'
+        matchedSubjectId:
+          type: [string, 'null']
+          format: uuid
+        matchedSimilarity:
+          description: The Rekognition similarity score (0-100) for the match above.
+          type: [number, 'null']
+          format: float
         enrolledBy:
           type: string
           format: uuid
@@ -1435,6 +1527,16 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+    BiometricEnrollmentPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BiometricEnrollment'
+        nextCursor:
+          type: [string, 'null']
 
     VisitSchedule:
       type: object

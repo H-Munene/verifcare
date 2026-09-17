@@ -6,6 +6,7 @@ import { createCognitoAdmin } from './auth/cognitoAdmin.js';
 import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
+import { createBiometricFaceCollection } from './db/biometricFaceCollection.js';
 import { createBiometricStorage } from './db/biometricStorage.js';
 import { createDb } from './db/client.js';
 import { errorHandler } from './errors.js';
@@ -34,14 +35,28 @@ const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
 const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 
 // Same reasoning as auth/cognitoAdmin.ts above: no local emulator for S3/Rekognition either, local
-// dev talks to the same real, deployed bucket, using this machine's own AWS CLI credentials.
+// dev talks to the same real, deployed bucket/collection, using this machine's own AWS CLI
+// credentials.
+const rekognitionClient = new RekognitionClient({});
 const biometricStorage = createBiometricStorage({
   s3Client: new S3Client({}),
-  rekognitionClient: new RekognitionClient({}),
+  rekognitionClient,
+  bucketName: config.biometricEnrollmentsBucketName,
+});
+const biometricFaceCollection = createBiometricFaceCollection({
+  rekognitionClient,
+  collectionId: config.biometricFacesCollectionId,
   bucketName: config.biometricEnrollmentsBucketName,
 });
 
-const app = createApp({ db, requireAuth, requireVerifiedIdentity, cognitoAdmin, biometricStorage });
+const app = createApp({
+  db,
+  requireAuth,
+  requireVerifiedIdentity,
+  cognitoAdmin,
+  biometricStorage,
+  biometricFaceCollection,
+});
 app.use(errorHandler);
 
 app.listen(config.port, () => {

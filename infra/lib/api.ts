@@ -5,6 +5,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as rekognition from "aws-cdk-lib/aws-rekognition";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
@@ -20,6 +21,7 @@ export interface ApiParams {
   familyMemberAppUserPoolClient: cognito.UserPoolClient;
   biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
+  biometricFacesCollection: rekognition.CfnCollection;
 }
 
 export interface Api {
@@ -38,6 +40,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     familyMemberAppUserPoolClient,
     biometricEnrollmentsBucket,
     visitAudioBucket,
+    biometricFacesCollection,
   } = params;
 
   // acoustic-model's Lambda function is deliberately not created yet: it's a
@@ -88,6 +91,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       FAMILY_MEMBER_USER_POOL_CLIENT_ID: familyMemberAppUserPoolClient.userPoolClientId,
       BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
+      BIOMETRIC_FACES_COLLECTION_ID: biometricFacesCollection.collectionId,
     },
   });
 
@@ -136,6 +140,19 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     new iam.PolicyStatement({
       actions: ["rekognition:DetectFaces"],
       resources: ["*"],
+    }),
+  );
+
+  // Lets api's biometric-enrollment confirm/approve endpoints (HEZ-85) search and add to the
+  // enrollment-uniqueness Rekognition Collection, and lets offboarding cleanup remove from it.
+  // Unlike DetectFaces above, these three actions DO support resource-level permissions scoped to
+  // a specific collection (confirmed directly against AWS's own "How Amazon Rekognition works with
+  // IAM" guide, which gives exactly this ARN shape as a real example) - scoped to this one
+  // collection, not every collection in the account.
+  apiFunction.addToRolePolicy(
+    new iam.PolicyStatement({
+      actions: ["rekognition:IndexFaces", "rekognition:SearchFacesByImage", "rekognition:DeleteFaces"],
+      resources: [biometricFacesCollection.attrArn],
     }),
   );
 
