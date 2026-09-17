@@ -275,3 +275,48 @@ INTERPRETABILITY_PERMUTATION_N_REPEATS = 30
 # Random Forest/SVM) as Phase 7's own Brier comparison, reused rather than
 # redeclared with the same value under a different name.
 INTERPRETABILITY_COMPARISON_FAMILY_SIZE = CALIBRATION_BRIER_COMPARISON_FAMILY_SIZE
+
+# Phase 9 domain-shift robustness testing (ml-development-spec.md section 9e):
+# CV-fold synthetic degradation (bandpass + noise) applied to validation-fold
+# audio only, on Phase 8's single selected candidate (XGBoost) - Phase 8 already
+# resolved model selection, so this is a robustness check on that one model, not
+# a re-opening of model choice.
+
+ROBUSTNESS_RESULTS_DIR = RESULTS_DIR / "domain_shift_robustness"
+
+# The one candidate this phase tests - Phase 8's final model selection.
+ROBUSTNESS_MODEL_NAME = "xgboost"
+
+# Outer CV: identical to Phase 4/5/6/7/8's fold structure - every numbered fold
+# across every phase holds out the same subjects.
+ROBUSTNESS_OUTER_CV_FOLDS = FEATURE_SELECTION_CV_FOLDS
+
+# Bandpass range: smartphone microphone recording bandwidth, not telephone/PSTN
+# bandwidth (300-3400Hz) - the deployment scenario (README.md) is a caregiver's
+# phone microphone recording directly via an app, not a telephone call, so this
+# is the scenario-faithful simulation (section 9e).
+ROBUSTNESS_BANDPASS_LOW_HZ = 100
+ROBUSTNESS_BANDPASS_HIGH_HZ = 7000
+
+# 4th-order Butterworth is a standard, conservative default for this kind of
+# band-limiting simulation - sharp enough to meaningfully restrict the band,
+# gentle enough not to introduce its own severe ringing artifacts. A
+# well-justified default, not asked as a question, open to objection like
+# Phase 7's sigmoid-vs-isotonic choice.
+ROBUSTNESS_BANDPASS_FILTER_ORDER = 4
+
+# Both noise types are tested, not one - see section 9e for why (a general
+# noise-sensitivity finding vs. one specifically tied to the F0/harmonic
+# frequency range this project already has independent reason to worry about).
+ROBUSTNESS_NOISE_TYPES = ("white", "pink")
+
+# Both severity levels are tested, not one - moderate (20dB) and severe (10dB).
+ROBUSTNESS_SNR_LEVELS_DB = (20, 10)
+
+# The single pre-registered worst-case condition (section 9e) for Phase 9's one
+# formal significance test - decided before any condition was run, not picked
+# after seeing results: pink noise concentrates energy in the low-to-mid
+# frequencies overlapping F0/harmonic structure (where jitter/shimmer/HNR draw
+# their signal), and 10dB is the more severe of the two SNR levels tested.
+ROBUSTNESS_WORST_CASE_NOISE_TYPE = "pink"
+ROBUSTNESS_WORST_CASE_SNR_DB = 10
