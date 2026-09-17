@@ -223,18 +223,69 @@ def aggregate_metrics(fold_metrics: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
-def pairwise_brier_comparison(fold_metrics: pd.DataFrame, model_names: list[str]) -> pd.DataFrame:
-    """Paired t-test (per outer fold, same folds for every model) on Brier score
-    for each of the 3 pairwise comparisons, Bonferroni-corrected across that
-    family of 3 - flat/naive, matching the convention already used in Phases 1
-    and 3 (never Holm-Bonferroni), not a fresh choice."""
+def pairwise_metric_comparison(
+    fold_metrics: pd.DataFrame,
+    model_names: list[str],
+    metric_column: str,
+    family_size: int,
+) -> pd.DataFrame:
+    """Paired t-test on an arbitrary per-(fold, model) metric column, for each
+    pairwise comparison among model_names, Bonferroni-corrected across
+    `family_size` - flat/naive, matching the convention already used in Phases
+    1 and 3 (never Holm-Bonferroni), not a fresh choice. Generalizes what was
+    originally Brier-score-specific (see `pairwise_brier_comparison` below) so
+    Phase 8 (section 9d) can reuse it for `confound_reliance_share` rather than
+    reimplementing the same machinery.
+
+    Each pair is aligned on its own shared *valid* (non-NaN in both models)
+    folds, not a fixed assumed row count - `confound_reliance_share` can be NaN
+    for a given (model, fold) when that fold's total clipped importance drop is
+    zero for that model (section 9d's guarded-division edge case). Reports
+    `n_folds_used` (<=5) per pair, plus which folds were dropped and for which
+    model, so a reduced-n comparison is visible, not silent."""
     rows: list[dict] = []
     pairs = list(combinations(sorted(model_names), 2))
-    family_size = max(len(pairs), CALIBRATION_BRIER_COMPARISON_FAMILY_SIZE)
+    family_size = max(len(pairs), family_size)
     for model_a, model_b in pairs:
-        a = fold_metrics[fold_metrics["model"] == model_a].sort_values("fold")["brier_score"].to_numpy()
-        b = fold_metrics[fold_metrics["model"] == model_b].sort_values("fold")["brier_score"].to_numpy()
-        diffs = a - b  # negative: model_a has the lower (better) Brier score
+        a = fold_metrics[fold_metrics["model"] == model_a][["fold", metric_column]].rename(
+            columns={metric_column: "a"}
+        )
+        b = fold_metrics[fold_metrics["model"] == model_b][["fold", metric_column]].rename(
+            columns={metric_column: "b"}
+        )
+        merged = a.merge(b, on="fold", how="outer")
+        valid_mask = merged["a"].notna() & merged["b"].notna()
+        valid = merged[valid_mask]
+        dropped = merged[~valid_mask]
+
+        dropped_detail = []
+        for _, row in dropped.iterrows():
+            dropped_for = [name for name, col in ((model_a, "a"), (model_b, "b")) if pd.isna(row[col])]
+            dropped_detail.append(f"fold{int(row['fold'])}:{'+'.join(dropped_for)}")
+        dropped_folds = ";".join(dropped_detail)
+
+        n_folds_used = len(valid)
+        if n_folds_used < 2:
+            # Not enough shared valid folds left for a paired t-test's variance
+            # estimate - an explicit NaN/not-significant result, never a bare
+            # computation on too little data.
+            rows.append(
+                {
+                    "model_a": model_a,
+                    "model_b": model_b,
+                    "mean_diff_a_minus_b": float("nan"),
+                    "t_stat": float("nan"),
+                    "p_raw": float("nan"),
+                    "p_bonferroni": float("nan"),
+                    "n_family": family_size,
+                    "n_folds_used": n_folds_used,
+                    "dropped_folds": dropped_folds,
+                    "significant_at_0.05": False,
+                }
+            )
+            continue
+
+        diffs = valid["a"].to_numpy() - valid["b"].to_numpy()  # negative: model_a is lower on this metric
         t_stat, p_raw = ttest_1samp(diffs, 0.0)
         p_bonferroni = min(float(p_raw) * family_size, 1.0)
         rows.append(
@@ -246,10 +297,23 @@ def pairwise_brier_comparison(fold_metrics: pd.DataFrame, model_names: list[str]
                 "p_raw": float(p_raw),
                 "p_bonferroni": p_bonferroni,
                 "n_family": family_size,
+                "n_folds_used": n_folds_used,
+                "dropped_folds": dropped_folds,
                 "significant_at_0.05": p_bonferroni < 0.05,
             }
         )
     return pd.DataFrame(rows)
+
+
+def pairwise_brier_comparison(fold_metrics: pd.DataFrame, model_names: list[str]) -> pd.DataFrame:
+    """Phase 7's own Brier comparison, now a thin wrapper around the
+    generalized `pairwise_metric_comparison` above (section 9d asked for
+    generalization, not a parallel reimplementation). Brier score has no NaNs,
+    so every pair always uses all 5 folds here - behavior unchanged from
+    before generalization."""
+    return pairwise_metric_comparison(
+        fold_metrics, model_names, "brier_score", CALIBRATION_BRIER_COMPARISON_FAMILY_SIZE
+    )
 
 
 def determine_winner(pairwise: pd.DataFrame, model_names: list[str]) -> str | None:

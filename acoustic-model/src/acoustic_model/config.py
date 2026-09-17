@@ -236,3 +236,42 @@ CALIBRATION_INNER_CV_FOLDS = 5
 # comparisons among Phase 6's surviving candidates (flat/naive, matching the
 # convention already used in Phases 1 and 3 - never Holm-Bonferroni).
 CALIBRATION_BRIER_COMPARISON_FAMILY_SIZE = 3
+
+# Phase 8 interpretability (ml-development-spec.md section 9d): permutation
+# importance only, never SHAP - the locked SVM candidate is a hardcoded
+# SVC(kernel="rbf", ...) (baseline_models.py's _make_pipeline(), never tuned to
+# linear), so it has no exact/fast SHAP path, only slow/approximate KernelSHAP;
+# using SHAP here would confound genuine model behavior with unequal
+# explanation quality across model types in a comparison whose whole point is
+# judging relative reliance. Computed on Phase 6/7's three surviving,
+# calibrated candidates to produce confound_reliance_share - Phase 8's
+# tie-break for Phase 7's inconclusive calibrated-Brier three-way comparison.
+
+INTERPRETABILITY_RESULTS_DIR = RESULTS_DIR / "interpretability"
+
+# The one Phase-4-selected feature related to the Phase 1/3 channel-confound
+# triangle - NOT "shimmer/jitter" (a corrected characterization, section 9d):
+# shimmerLocaldB_sma3nz_amean, the triangle's only *confirmed* channel-entangled
+# column, was never selected into the 20 features, so no candidate can be said
+# to lean on it. This jitter functional (variability of jitter) is a different
+# statistic than jitterLocal_sma3nz_amean, the one Phase 3 actually tested
+# against a channel proxy - tracked here as a due-diligence relative of a known
+# risk, not a confirmed confound itself.
+CONFOUND_FEATURE = "jitterLocal_sma3nz_stddevNorm"
+
+# Outer CV: identical to Phase 4/5/6/7's fold structure - every numbered fold
+# across every phase holds out the same subjects.
+INTERPRETABILITY_OUTER_CV_FOLDS = FEATURE_SELECTION_CV_FOLDS
+
+# Permutation-importance repeats per fold, computed on that fold's held-out
+# portion only (~70-75 files, smaller than Phase 4's held-out folds) - higher
+# than Phase 4's PERMUTATION_IMPORTANCE_N_REPEATS (10) since this number feeds
+# a paired significance test between three already-close candidates and needs
+# its own per-fold noise reduced before it reaches that comparison.
+INTERPRETABILITY_PERMUTATION_N_REPEATS = 30
+
+# Family size for the Bonferroni correction across the 3 pairwise
+# confound_reliance_share comparisons - the same 3-candidate family (XGBoost/
+# Random Forest/SVM) as Phase 7's own Brier comparison, reused rather than
+# redeclared with the same value under a different name.
+INTERPRETABILITY_COMPARISON_FAMILY_SIZE = CALIBRATION_BRIER_COMPARISON_FAMILY_SIZE
