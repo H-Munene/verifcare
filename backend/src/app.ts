@@ -11,6 +11,7 @@ import { createBiometricEnrollmentsRouter } from './routes/biometricEnrollments.
 import { createCaregiversRouter } from './routes/caregivers.js';
 import { createDependantsRouter } from './routes/dependants.js';
 import { createUsersRouter } from './routes/users.js';
+import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -143,6 +144,12 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         faceCollection: biometricFaceCollection,
       }),
     );
+  }
+  // HEZ-32's visit-scheduling endpoints - unlike the routers above, this needs only requireAuth
+  // (no cognitoAdmin/requireVerifiedIdentity - nothing here touches Cognito), so it's wired
+  // independently rather than nested inside the users/caregivers/dependants condition.
+  if (requireAuth) {
+    app.use('/visit-schedules', createVisitSchedulesRouter({ requireAuth }));
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.
