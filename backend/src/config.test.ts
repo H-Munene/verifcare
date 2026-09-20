@@ -34,6 +34,7 @@ describe('loadConfig', () => {
       checkinSessionTokenTtlSeconds: 600,
       checkinLivenessFramesBucketName: requiredEnv.CHECKIN_LIVENESS_FRAMES_BUCKET_NAME,
       checkinLivenessMatchThresholdPercent: 80,
+      checkinCoPresenceWindowSeconds: 120,
     });
   });
 
@@ -41,6 +42,22 @@ describe('loadConfig', () => {
     const config = loadConfig({ ...requiredEnv, DATABASE_URL: 'postgres://localhost/db' });
 
     expect(config.checkinLivenessMatchThresholdPercent).toBe(80);
+  });
+
+  it('defaults CHECKIN_CO_PRESENCE_WINDOW_SECONDS to 120 when unset', () => {
+    const config = loadConfig({ ...requiredEnv, DATABASE_URL: 'postgres://localhost/db' });
+
+    expect(config.checkinCoPresenceWindowSeconds).toBe(120);
+  });
+
+  it('parses a custom CHECKIN_CO_PRESENCE_WINDOW_SECONDS', () => {
+    const config = loadConfig({
+      ...requiredEnv,
+      DATABASE_URL: 'postgres://localhost/db',
+      CHECKIN_CO_PRESENCE_WINDOW_SECONDS: '300',
+    });
+
+    expect(config.checkinCoPresenceWindowSeconds).toBe(300);
   });
 
   it('throws when CHECKIN_LIVENESS_FRAMES_BUCKET_NAME is missing', () => {

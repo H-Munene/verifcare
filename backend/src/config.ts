@@ -49,6 +49,11 @@ const envSchema = z
     // Rekognition CompareFaces match threshold - architecture.md's own settled number ("verification's
     // 80%", distinct from enrollment-uniqueness's stricter 95% - see db/faceMatch.ts, HEZ-36).
     CHECKIN_LIVENESS_MATCH_THRESHOLD_PERCENT: z.coerce.number().min(0).max(100).default(80),
+    // How long after the caregiver check-in step passes the dependant step must be submitted
+    // (routes/checkin.ts, HEZ-35) - architecture.md's own "bounded time window... for example two
+    // minutes" framing, confirmed with the user as exactly 2 minutes for now, the same
+    // "configurable, not yet finalized" treatment as the geofence/session pair above.
+    CHECKIN_CO_PRESENCE_WINDOW_SECONDS: z.coerce.number().int().positive().default(120),
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.DATABASE_SECRET_ARN !== undefined, {
     message: 'Either DATABASE_URL (local dev) or DATABASE_SECRET_ARN (Lambda) must be set.',
@@ -67,6 +72,7 @@ export interface Config {
   checkinSessionTokenTtlSeconds: number;
   checkinLivenessFramesBucketName: string;
   checkinLivenessMatchThresholdPercent: number;
+  checkinCoPresenceWindowSeconds: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -93,5 +99,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     checkinSessionTokenTtlSeconds: result.data.CHECKIN_SESSION_TOKEN_TTL_SECONDS,
     checkinLivenessFramesBucketName: result.data.CHECKIN_LIVENESS_FRAMES_BUCKET_NAME,
     checkinLivenessMatchThresholdPercent: result.data.CHECKIN_LIVENESS_MATCH_THRESHOLD_PERCENT,
+    checkinCoPresenceWindowSeconds: result.data.CHECKIN_CO_PRESENCE_WINDOW_SECONDS,
   };
 }

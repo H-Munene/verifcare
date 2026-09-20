@@ -75,6 +75,9 @@ export interface AppDependencies {
   checkinPhotoValidator?: CheckinPhotoValidator;
   checkinFaceMatcher?: FaceMatcher;
   checkinFrameStorage?: CheckinFrameStorage;
+  // HEZ-35's dependant check-in step: how long after the caregiver step passes the dependant step
+  // must be submitted (config.ts's own default - 120s/2min - applies when omitted).
+  checkinCoPresenceWindowSeconds?: number;
 }
 
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
@@ -187,6 +190,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         photoValidator: dependencies.checkinPhotoValidator,
         faceMatcher: dependencies.checkinFaceMatcher,
         frameStorage: dependencies.checkinFrameStorage,
+        coPresenceWindowSeconds: dependencies.checkinCoPresenceWindowSeconds ?? 120,
       }),
     );
   }

@@ -99,6 +99,7 @@ function buildTestApp(
   geofenceAccuracyThresholdMeters = 20,
   sessionTokenTtlSeconds = 600,
   livenessFakes: LivenessFakes = {},
+  coPresenceWindowSeconds = 120,
 ): Express {
   const app = express();
   app.use(express.json());
@@ -126,6 +127,7 @@ function buildTestApp(
       photoValidator: livenessFakes.photoValidator ?? fakePhotoValidator(),
       faceMatcher: livenessFakes.faceMatcher ?? fakeFaceMatcher(),
       frameStorage: livenessFakes.frameStorage ?? fakeFrameStorage(),
+      coPresenceWindowSeconds,
     }),
   );
   app.use(
@@ -237,8 +239,47 @@ async function createTestBiometricEnrollment(
   });
 }
 
-function checkinPhotoS3Key(visitScheduleId: string): string {
-  return `${visitScheduleId}/caregiver/photo.jpg`;
+async function createTestDependantBiometricEnrollment(
+  dependantId: string,
+  enrolledById: string,
+  s3Key: string,
+  qualityScore: number,
+): Promise<void> {
+  const db = getDb();
+  await db.insert(schema.biometricEnrollments).values({
+    subjectType: 'dependant',
+    dependantId,
+    s3Key,
+    imageOrder: 1,
+    qualityScore,
+    status: 'active',
+    enrolledBy: enrolledById,
+  });
+}
+
+function checkinPhotoS3Key(
+  visitScheduleId: string,
+  subject: 'caregiver' | 'dependant' = 'caregiver',
+): string {
+  return `${visitScheduleId}/${subject}/photo.jpg`;
+}
+
+async function passCaregiverLiveness(
+  app: Express,
+  sub: string,
+  visitScheduleId: string,
+  sessionToken: string,
+): Promise<void> {
+  const response = await request(app)
+    .post(`/visit-schedules/${visitScheduleId}/checkin/caregiver-liveness`)
+    .set('x-test-auth', testAuthHeader(sub, 'caregiver'))
+    .set('x-checkin-session-token', sessionToken)
+    .send({ s3Key: checkinPhotoS3Key(visitScheduleId, 'caregiver') });
+  if (response.status !== 200 || !(response.body as { passed?: boolean }).passed) {
+    throw new Error(
+      `Test setup failed to pass the caregiver step: ${response.status} ${JSON.stringify(response.body)}`,
+    );
+  }
 }
 
 async function passGeofenceAndGetSessionToken(
@@ -739,6 +780,191 @@ describe.skipIf(!hasTestDb)('POST .../checkin/caregiver-liveness (real Postgres)
         .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
         .set('x-checkin-session-token', sessionToken)
         .send({ s3Key: checkinPhotoS3Key(visit.id) });
+
+      expect(response.status).toBe(400);
+    });
+  });
+});
+
+describe.skipIf(!hasTestDb)('POST .../checkin/dependant-liveness (real Postgres)', () => {
+  let app: Express;
+
+  beforeAll(async () => {
+    await setupTestDb();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    app = buildTestApp();
+  });
+
+  afterAll(async () => {
+    await teardownTestDb();
+  });
+
+  describe('POST .../dependant-liveness/upload-url', () => {
+    it('presigns a photo upload once a session token is held', async () => {
+      const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+      const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+      const dependant = await createTestDependant(supervisor.id);
+      const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+      const sessionToken = await passGeofenceAndGetSessionToken(app, 'cg-1', visit.id);
+
+      const response = await request(app)
+        .post(`/visit-schedules/${visit.id}/checkin/dependant-liveness/upload-url`)
+        .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+        .set('x-checkin-session-token', sessionToken)
+        .send({ contentType: 'image/jpeg' });
+
+      expect(response.status).toBe(201);
+      expect(uploadUrlBody(response).uploadUrl).toBeTruthy();
+    });
+  });
+
+  describe('POST .../dependant-liveness (submit)', () => {
+    it('rejects the dependant step with 409 before the caregiver step has passed', async () => {
+      const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+      const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+      const dependant = await createTestDependant(supervisor.id);
+      const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+      const sessionToken = await passGeofenceAndGetSessionToken(app, 'cg-1', visit.id);
+
+      const response = await request(app)
+        .post(`/visit-schedules/${visit.id}/checkin/dependant-liveness`)
+        .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+        .set('x-checkin-session-token', sessionToken)
+        .send({ s3Key: checkinPhotoS3Key(visit.id, 'dependant') });
+
+      expect(response.status).toBe(409);
+      expect(problemBody(response).detail).toMatch(/caregiver check-in step must pass/);
+    });
+
+    it('rejects the dependant step with 409 once the co-presence window has expired', async () => {
+      const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+      const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+      const dependant = await createTestDependant(supervisor.id);
+      const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+      await createTestBiometricEnrollment(caregiver.userId, 'enrolled/cg-1/1.jpg', 90);
+      // A window so short it has already elapsed by the time the dependant step is submitted.
+      app = buildTestApp(20, 600, {}, 0);
+      const sessionToken = await passGeofenceAndGetSessionToken(app, 'cg-1', visit.id);
+      await passCaregiverLiveness(app, 'cg-1', visit.id, sessionToken);
+
+      const response = await request(app)
+        .post(`/visit-schedules/${visit.id}/checkin/dependant-liveness`)
+        .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+        .set('x-checkin-session-token', sessionToken)
+        .send({ s3Key: checkinPhotoS3Key(visit.id, 'dependant') });
+
+      expect(response.status).toBe(409);
+      expect(problemBody(response).detail).toMatch(/co-presence|dependant step must be submitted/);
+    });
+
+    it('passes end to end: writes verification_events, flips visit_schedules to in_progress, cleans up the photo', async () => {
+      const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+      const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+      const dependant = await createTestDependant(supervisor.id);
+      const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+      await createTestBiometricEnrollment(caregiver.userId, 'enrolled/cg-1/1.jpg', 90);
+      await createTestDependantBiometricEnrollment(
+        dependant.id,
+        supervisor.id,
+        'enrolled/dep-1/1.jpg',
+        90,
+      );
+      const frameStorage = fakeFrameStorage();
+      app = buildTestApp(20, 600, { frameStorage });
+      const sessionToken = await passGeofenceAndGetSessionToken(app, 'cg-1', visit.id);
+      await passCaregiverLiveness(app, 'cg-1', visit.id, sessionToken);
+
+      const response = await request(app)
+        .post(`/visit-schedules/${visit.id}/checkin/dependant-liveness`)
+        .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+        .set('x-checkin-session-token', sessionToken)
+        .send({ s3Key: checkinPhotoS3Key(visit.id, 'dependant') });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ passed: true, matchConfidence: 95 });
+      expect(frameStorage.deleteObjects).toHaveBeenCalledWith([
+        checkinPhotoS3Key(visit.id, 'dependant'),
+      ]);
+
+      const db = getDb();
+      const [event] = await db
+        .select()
+        .from(schema.verificationEvents)
+        .where(eq(schema.verificationEvents.visitScheduleId, visit.id));
+      expect(event?.dependantLivenessPassed).toBe(true);
+      expect(Number(event?.dependantMatchConfidence)).toBeCloseTo(95, 1);
+      expect(event?.checkinAt).not.toBeNull();
+
+      const [updatedVisit] = await db
+        .select()
+        .from(schema.visitSchedules)
+        .where(eq(schema.visitSchedules.id, visit.id));
+      expect(updatedVisit?.status).toBe('in_progress');
+
+      const attempts = await db
+        .select()
+        .from(schema.verificationAttempts)
+        .where(
+          and(
+            eq(schema.verificationAttempts.visitScheduleId, visit.id),
+            eq(schema.verificationAttempts.attemptType, 'dependant_liveness'),
+          ),
+        );
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]).toMatchObject({ passed: true });
+    });
+
+    it('reports not_enrolled for the dependant without touching visit_schedules.status', async () => {
+      const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+      const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+      const dependant = await createTestDependant(supervisor.id);
+      const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+      await createTestBiometricEnrollment(caregiver.userId, 'enrolled/cg-1/1.jpg', 90);
+      const faceMatcher = fakeFaceMatcher();
+      app = buildTestApp(20, 600, { faceMatcher });
+      const sessionToken = await passGeofenceAndGetSessionToken(app, 'cg-1', visit.id);
+      await passCaregiverLiveness(app, 'cg-1', visit.id, sessionToken);
+      // The caregiver step above already called compareAgainstCandidates once (the caregiver does
+      // have an active enrollment) - the dependant step must add no further calls, since it should
+      // short-circuit on not_enrolled before ever reaching CompareFaces.
+      const callsBeforeDependantStep = vi.mocked(faceMatcher.compareAgainstCandidates).mock.calls
+        .length;
+
+      const response = await request(app)
+        .post(`/visit-schedules/${visit.id}/checkin/dependant-liveness`)
+        .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+        .set('x-checkin-session-token', sessionToken)
+        .send({ s3Key: checkinPhotoS3Key(visit.id, 'dependant') });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ passed: false, failureReason: 'not_enrolled' });
+      expect(faceMatcher.compareAgainstCandidates).toHaveBeenCalledTimes(callsBeforeDependantStep);
+
+      const db = getDb();
+      const [updatedVisit] = await db
+        .select()
+        .from(schema.visitSchedules)
+        .where(eq(schema.visitSchedules.id, visit.id));
+      expect(updatedVisit?.status).toBe('scheduled');
+    });
+
+    it('rejects a dependant photo s3Key that does not belong to this visit/subject with 400', async () => {
+      const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+      const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+      const dependant = await createTestDependant(supervisor.id);
+      const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+      await createTestBiometricEnrollment(caregiver.userId, 'enrolled/cg-1/1.jpg', 90);
+      const sessionToken = await passGeofenceAndGetSessionToken(app, 'cg-1', visit.id);
+      await passCaregiverLiveness(app, 'cg-1', visit.id, sessionToken);
+
+      const response = await request(app)
+        .post(`/visit-schedules/${visit.id}/checkin/dependant-liveness`)
+        .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+        .set('x-checkin-session-token', sessionToken)
+        .send({ s3Key: checkinPhotoS3Key(visit.id, 'caregiver') });
 
       expect(response.status).toBe(400);
     });

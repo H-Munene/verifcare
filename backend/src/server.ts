@@ -77,6 +77,7 @@ const app = createApp({
   checkinPhotoValidator,
   checkinFaceMatcher,
   checkinFrameStorage,
+  checkinCoPresenceWindowSeconds: config.checkinCoPresenceWindowSeconds,
 });
 app.use(errorHandler);
 

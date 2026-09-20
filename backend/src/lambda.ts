@@ -80,6 +80,7 @@ const app = createApp({
   checkinPhotoValidator,
   checkinFaceMatcher,
   checkinFrameStorage,
+  checkinCoPresenceWindowSeconds: config.checkinCoPresenceWindowSeconds,
 });
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,
