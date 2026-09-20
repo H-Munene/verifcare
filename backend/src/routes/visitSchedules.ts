@@ -18,6 +18,13 @@
 //   need. Lives here, not routes/checkin.ts, matching openapi.yaml's own tag scoping - the
 //   "Check-in" tag is explicitly limited to "the geofence, caregiver-liveness, and
 //   dependant-liveness steps," and checkout is tagged "Visit Schedules" instead.
+// - GET /{id}/verification (HEZ-42) uses the exact same ownership rule as GET /{id} - confirmed
+//   with the user rather than assumed, since its own openapi.yaml description ("the admin web
+//   app's visit-history view") could plausibly have meant supervisor-only. A caregiver/family
+//   member can see their own visit's verification_events/verification_attempts audit trail, not
+//   just supervisors. HEZ-42's other half ("live-visits" - REST polling for in_progress status
+//   flags) needed no new endpoint - GET / already supports `?status=in_progress` under the same
+//   ownership rule, confirmed with the user as sufficient rather than building a second one.
 //
 // Double-booking (HEZ-9's excl_visit_schedules_caregiver_overlap/excl_visit_schedules_dependant_
 // overlap EXCLUDE USING gist constraints) is surfaced as a clean 409, not a raw DB error, on both
@@ -47,6 +54,60 @@ import { sendProblem } from '../errors.js';
 import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 import { findFamilyMemberLink } from './dependants.js';
+
+interface VerificationEventResponse {
+  visitScheduleId: string;
+  checkinAt: string | null;
+  checkoutAt: string | null;
+  checkinGpsLat: number | null;
+  checkinGpsLng: number | null;
+  distanceFromGeofenceMeters: number | null;
+  caregiverMatchConfidence: number | null;
+  dependantMatchConfidence: number | null;
+  caregiverLivenessPassed: boolean | null;
+  dependantLivenessPassed: boolean | null;
+}
+
+function toVerificationEventResponse(
+  row: typeof schema.verificationEvents.$inferSelect,
+): VerificationEventResponse {
+  return {
+    visitScheduleId: row.visitScheduleId,
+    checkinAt: row.checkinAt ? row.checkinAt.toISOString() : null,
+    checkoutAt: row.checkoutAt ? row.checkoutAt.toISOString() : null,
+    checkinGpsLat: row.checkinGpsLat,
+    checkinGpsLng: row.checkinGpsLng,
+    distanceFromGeofenceMeters: row.distanceFromGeofenceMeters,
+    caregiverMatchConfidence:
+      row.caregiverMatchConfidence === null ? null : Number(row.caregiverMatchConfidence),
+    dependantMatchConfidence:
+      row.dependantMatchConfidence === null ? null : Number(row.dependantMatchConfidence),
+    caregiverLivenessPassed: row.caregiverLivenessPassed,
+    dependantLivenessPassed: row.dependantLivenessPassed,
+  };
+}
+
+interface VerificationAttemptResponse {
+  id: string;
+  visitScheduleId: string;
+  attemptType: 'geofence' | 'caregiver_liveness' | 'dependant_liveness';
+  passed: boolean;
+  failureReason: string | null;
+  attemptedAt: string;
+}
+
+function toVerificationAttemptResponse(
+  row: typeof schema.verificationAttempts.$inferSelect,
+): VerificationAttemptResponse {
+  return {
+    id: row.id,
+    visitScheduleId: row.visitScheduleId,
+    attemptType: row.attemptType,
+    passed: row.passed,
+    failureReason: row.failureReason,
+    attemptedAt: row.attemptedAt.toISOString(),
+  };
+}
 
 export interface VisitSchedulesRouterDependencies {
   requireAuth: RequestHandler;
@@ -382,6 +443,73 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       }
 
       res.status(200).json(toResponse(row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /{id}/verification (HEZ-42): the verification_events + verification_attempts audit trail
+  // for a visit, under the exact same ownership rule as GET /{id} above (confirmed with the user,
+  // not assumed - see the file header comment). `event` is null when the visit has never reached
+  // even the geofence step (no verification_events row exists yet) - a real gap in openapi.yaml's
+  // own draft schema (VerificationAudit.event wasn't marked nullable), fixed alongside this route.
+  router.get('/:visitScheduleId/verification', async (req, res, next) => {
+    const visitScheduleId = parseOrSendProblem(
+      visitScheduleIdParamSchema,
+      req.params.visitScheduleId,
+      res,
+    );
+    if (!visitScheduleId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [visit] = await db
+        .select()
+        .from(schema.visitSchedules)
+        .where(eq(schema.visitSchedules.id, visitScheduleId));
+      if (!visit) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+
+      if (caller.role === 'caregiver') {
+        const callerRow = await getUserByCognitoSub(db, caller.sub);
+        if (!callerRow || visit.caregiverId !== callerRow.id) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      } else if (caller.role === 'family_member') {
+        const found = await findFamilyMemberLink(db, visit.dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+
+      const [event] = await db
+        .select()
+        .from(schema.verificationEvents)
+        .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
+      const attempts = await db
+        .select()
+        .from(schema.verificationAttempts)
+        .where(eq(schema.verificationAttempts.visitScheduleId, visitScheduleId))
+        .orderBy(asc(schema.verificationAttempts.attemptedAt));
+
+      res.status(200).json({
+        event: event ? toVerificationEventResponse(event) : null,
+        attempts: attempts.map(toVerificationAttemptResponse),
+      });
     } catch (err) {
       next(err);
     }

@@ -42,6 +42,10 @@ interface ProblemBody {
   title: string;
   detail?: string;
 }
+interface VerificationAuditBody {
+  event: { visitScheduleId: string; checkinAt: string | null } | null;
+  attempts: { attemptType: string; passed: boolean }[];
+}
 function visitBody(response: request.Response): VisitScheduleBody {
   return response.body as VisitScheduleBody;
 }
@@ -50,6 +54,9 @@ function pageBody(response: request.Response): VisitSchedulePageBody {
 }
 function problemBody(response: request.Response): ProblemBody {
   return response.body as ProblemBody;
+}
+function verificationAuditBody(response: request.Response): VerificationAuditBody {
+  return response.body as VerificationAuditBody;
 }
 
 function buildTestApp(): Express {
@@ -596,6 +603,115 @@ describe.skipIf(!hasTestDb)(
         const response = await request(app)
           .post('/visit-schedules/01a0bfb1-61b8-7260-b9e3-2d549e1bda49/checkout')
           .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(404);
+      });
+    });
+
+    describe('GET /visit-schedules/{visitScheduleId}/verification (HEZ-42)', () => {
+      it('returns a null event and empty attempts for a visit that has never checked in', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const created = await request(app)
+          .post('/visit-schedules')
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visitBody(created).id}/verification`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ event: null, attempts: [] });
+      });
+
+      it('returns the event and its attempts for an in-progress visit', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+        const db = getDb();
+        await db.insert(schema.verificationAttempts).values({
+          visitScheduleId: visit.id,
+          attemptType: 'geofence',
+          passed: true,
+          attemptedAt: new Date(),
+        });
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+
+        expect(response.status).toBe(200);
+        const body = verificationAuditBody(response);
+        expect(body.event).toMatchObject({ visitScheduleId: visit.id });
+        expect(body.event?.checkinAt).not.toBeNull();
+        expect(body.attempts).toHaveLength(1);
+        expect(body.attempts[0]).toMatchObject({ attemptType: 'geofence', passed: true });
+      });
+
+      it('lets the assigned caregiver view their own visit', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(200);
+      });
+
+      it("rejects a caregiver viewing another caregiver's visit with 403", async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiverA = await createTestCaregiver('cg-a', '+254700000002');
+        await createTestCaregiver('cg-b', '+254700000003');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiverA.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('cg-b', 'caregiver'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('lets a linked family member view a visit for their dependant', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const familyMember = await createTestUser('fam-1', 'family_member', '+254700000004');
+        await linkFamilyMember(dependant.id, familyMember.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('fam-1', 'family_member'));
+
+        expect(response.status).toBe(200);
+      });
+
+      it('rejects a family member not linked to the dependant with 403', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        await createTestUser('fam-1', 'family_member', '+254700000004');
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('fam-1', 'family_member'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('returns 404 for a nonexistent visit', async () => {
+        await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const response = await request(app)
+          .get('/visit-schedules/01a0bfb1-61b8-7260-b9e3-2d549e1bda49/verification')
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
 
         expect(response.status).toBe(404);
       });

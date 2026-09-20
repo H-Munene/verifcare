@@ -15,6 +15,7 @@ import { createCaregiversRouter } from './routes/caregivers.js';
 import { createCheckinRouter } from './routes/checkin.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
 import { createDependantsRouter } from './routes/dependants.js';
+import { createNotificationsRouter } from './routes/notifications.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
 
@@ -196,6 +197,8 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     );
     // HEZ-40's consent-capture endpoints - only needs requireAuth too, same reasoning as above.
     app.use('/consent-records', createConsentRecordsRouter({ requireAuth }));
+    // HEZ-41's notification list/acknowledge endpoints - only needs requireAuth too.
+    app.use('/notifications', createNotificationsRouter({ requireAuth }));
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.

@@ -1719,7 +1719,10 @@ components:
       required: [event, attempts]
       properties:
         event:
-          $ref: '#/components/schemas/VerificationEvent'
+          description: Null when the visit has never reached the geofence step (no verification_events row exists yet).
+          oneOf:
+            - $ref: '#/components/schemas/VerificationEvent'
+            - type: 'null'
         attempts:
           type: array
           items:
