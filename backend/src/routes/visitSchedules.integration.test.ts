@@ -144,6 +144,35 @@ function visitPayload(overrides: Record<string, unknown> = {}): Record<string, u
   };
 }
 
+async function createInProgressVisit(
+  caregiverId: string,
+  dependantId: string,
+  createdById: string,
+): Promise<typeof schema.visitSchedules.$inferSelect> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.visitSchedules)
+    .values({
+      caregiverId,
+      dependantId,
+      scheduledStart: new Date('2026-10-01T09:00:00Z'),
+      scheduledEnd: new Date('2026-10-01T10:00:00Z'),
+      status: 'in_progress',
+      createdBy: createdById,
+    })
+    .returning();
+  if (!row) {
+    throw new Error('Failed to insert test visit.');
+  }
+  // Mirrors HEZ-35's own effect on a real check-in: verification_events.checkin_at is always set
+  // before visit_schedules.status ever becomes 'in_progress' - checkout's own CHECK constraint
+  // (chk_verification_events_checkout_after_checkin) requires it.
+  await db
+    .insert(schema.verificationEvents)
+    .values({ visitScheduleId: row.id, checkinAt: new Date() });
+  return row;
+}
+
 describe.skipIf(!hasTestDb)(
   'POST/GET /visit-schedules, GET/PATCH /visit-schedules/{visitScheduleId} (real Postgres)',
   () => {
@@ -477,6 +506,98 @@ describe.skipIf(!hasTestDb)(
           .from(schema.visitSchedules)
           .where(eq(schema.visitSchedules.id, visitBody(created).id));
         expect(row?.scheduledEnd.toISOString()).toBe(visitBody(created).scheduledEnd);
+      });
+    });
+
+    describe('POST /visit-schedules/{visitScheduleId}/checkout (HEZ-39)', () => {
+      it('checks the assigned caregiver out: sets checkout_at, flips status to completed', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(200);
+        expect(visitBody(response).status).toBe('completed');
+
+        const db = getDb();
+        const [event] = await db
+          .select()
+          .from(schema.verificationEvents)
+          .where(eq(schema.verificationEvents.visitScheduleId, visit.id));
+        expect(event?.checkoutAt).not.toBeNull();
+      });
+
+      it('rejects a supervisor caller with 403 - no supervisor override', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('rejects a caregiver checking out a visit assigned to someone else with 403', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiverA = await createTestCaregiver('cg-a', '+254700000002');
+        await createTestCaregiver('cg-b', '+254700000003');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiverA.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-b', 'caregiver'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('rejects a visit that has not been checked in yet with 409', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const created = await request(app)
+          .post('/visit-schedules')
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visitBody(created).id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(409);
+      });
+
+      it('rejects checking out a visit that is already completed with 409', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+        const first = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+        expect(first.status).toBe(200);
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(409);
+      });
+
+      it('returns 404 for a nonexistent visit', async () => {
+        await createTestCaregiver('cg-1', '+254700000002');
+        const response = await request(app)
+          .post('/visit-schedules/01a0bfb1-61b8-7260-b9e3-2d549e1bda49/checkout')
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(404);
       });
     });
   },

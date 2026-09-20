@@ -10,6 +10,14 @@
 //   caregiver; a family_member sees only visits for a dependant they're linked to (the same
 //   dependant_family_members ownership check routes/dependants.ts's findFamilyMemberLink already
 //   establishes, reused here rather than re-derived).
+// - POST /{id}/checkout (HEZ-39) is caregiver-only, own visit, no supervisor override - confirmed
+//   with the user rather than assumed, since checkout is a plain status flip (not an identity
+//   check like the rest of the check-in flow) and a supervisor override was at least plausible.
+//   Kept consistent with the rest of the check-in flow (HEZ-33/34/35: same caregiver-only-own-
+//   visit rule) rather than introducing a new authorization branch this flow doesn't otherwise
+//   need. Lives here, not routes/checkin.ts, matching openapi.yaml's own tag scoping - the
+//   "Check-in" tag is explicitly limited to "the geofence, caregiver-liveness, and
+//   dependant-liveness steps," and checkout is tagged "Visit Schedules" instead.
 //
 // Double-booking (HEZ-9's excl_visit_schedules_caregiver_overlap/excl_visit_schedules_dependant_
 // overlap EXCLUDE USING gist constraints) is surfaced as a clean 409, not a raw DB error, on both
@@ -459,6 +467,87 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         });
         return;
       }
+      next(err);
+    }
+  });
+
+  // POST /{id}/checkout (HEZ-39): the final step of the check-in flow (architecture.md step 5) -
+  // sets verification_events.checkout_at and flips visit_schedules.status to 'completed'.
+  // Deliberately does not depend on HEZ-38 (audio upload + acoustic-model call), which is
+  // separately deferred (milestone 4) - nothing here checks for an audio_records row.
+  router.post('/:visitScheduleId/checkout', async (req, res, next) => {
+    const visitScheduleId = parseOrSendProblem(
+      visitScheduleIdParamSchema,
+      req.params.visitScheduleId,
+      res,
+    );
+    if (!visitScheduleId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+    if (caller.role !== 'caregiver') {
+      sendProblem(res, {
+        type: 'about:blank',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'Only the assigned caregiver may check out of a visit.',
+      });
+      return;
+    }
+
+    try {
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+      if (!callerRow) {
+        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
+      }
+
+      const [visit] = await db
+        .select()
+        .from(schema.visitSchedules)
+        .where(eq(schema.visitSchedules.id, visitScheduleId));
+      if (!visit) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (visit.caregiverId !== callerRow.id) {
+        sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+        return;
+      }
+      if (visit.status !== 'in_progress') {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: `This visit hasn't been checked in yet, or is already completed/cancelled (current status: ${visit.status}).`,
+        });
+        return;
+      }
+
+      const now = new Date();
+      const [updated] = await db.transaction(async (tx) => {
+        await tx
+          .update(schema.verificationEvents)
+          .set({ checkoutAt: now })
+          .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
+        return tx
+          .update(schema.visitSchedules)
+          .set({ status: 'completed', updatedAt: now })
+          .where(eq(schema.visitSchedules.id, visitScheduleId))
+          .returning();
+      });
+      if (!updated) {
+        throw new Error('Update to visit_schedules returned no row.');
+      }
+      res.status(200).json(toResponse(updated));
+    } catch (err) {
       next(err);
     }
   });
