@@ -725,22 +725,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/challenge:
+  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
-    get:
+    post:
       tags: [Check-in]
-      summary: Get a randomized liveness challenge for the caregiver
-      operationId: getCaregiverLivenessChallenge
+      summary: Get a presigned URL to upload the caregiver's check-in photo
+      description: Called once, before POST .../caregiver-liveness. Uploads go to a separate, short-retention bucket from biometric-enrollments - see architecture.md's storage notes.
+      operationId: createCaregiverLivenessFrameUploadUrl
       security:
-        - bearerAuth: [sessionToken]
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
       responses:
-        '200':
-          description: The challenge to perform on-camera.
+        '201':
+          description: A presigned PUT URL, short-lived.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessChallenge'
+                $ref: '#/components/schemas/PresignedUpload'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -749,14 +757,21 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the caregiver's captured liveness frames
+      summary: Submit the caregiver's check-in photo
       description: |
-        `DetectFaces` runs across the captured frame burst (pose/eye/mouth attribute checks,
-        frame-to-frame movement), then `CompareFaces` against the caregiver's enrolled reference
-        images. Writes a `verification_attempts` row (`attempt_type: caregiver_liveness`) and, on
-        success, updates `verification_events.caregiver_liveness_passed` /
-        `caregiver_match_confidence`.
+        A single photo, not a liveness/anti-spoofing check - the user explicitly decided to drop
+        multi-frame challenge-response liveness detection in favor of one photo, for caregiver
+        mobile app build simplicity (a deliberate, informed tradeoff - see architecture.md's "Key
+        design decisions"). `DetectFaces` confirms exactly one face is present, then `CompareFaces`
+        runs against the caregiver's enrolled reference images. Writes a `verification_attempts`
+        row (`attempt_type: caregiver_liveness`) and, on success, updates
+        `verification_events.caregiver_liveness_passed` / `caregiver_match_confidence`. The photo
+        is deleted from storage right after processing, pass or fail - it is never needed again
+        either way.
       operationId: submitCaregiverLiveness
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -765,7 +780,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Liveness result.
+          description: Result.
           content:
             application/json:
               schema:
@@ -773,21 +788,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/challenge:
+  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
-    get:
+    post:
       tags: [Check-in]
-      summary: Get a randomized liveness challenge for the dependant
-      description: Only reachable once the caregiver liveness step has passed, and within the configurable bounded co-presence time window.
-      operationId: getDependantLivenessChallenge
+      summary: Get a presigned URL to upload the dependant's check-in photo
+      description: Same flow as the caregiver step's upload-url endpoint.
+      operationId: createDependantLivenessFrameUploadUrl
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
       responses:
-        '200':
-          description: The challenge to perform on-camera.
+        '201':
+          description: A presigned PUT URL, short-lived.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessChallenge'
+                $ref: '#/components/schemas/PresignedUpload'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -796,9 +820,12 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the dependant's captured liveness frames
-      description: 'Same flow as the caregiver step. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both liveness steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
+      summary: Submit the dependant's check-in photo
+      description: 'Same flow as the caregiver step (see its own description for the single-photo-not-liveness reasoning). Only reachable once the caregiver step has passed, within the configurable bounded co-presence time window. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
       operationId: submitDependantLiveness
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -807,7 +834,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Liveness result. On pass, check-in is complete.
+          description: Result. On pass, check-in is complete.
           content:
             application/json:
               schema:
@@ -1020,6 +1047,21 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: A Cognito-issued ID token (not the access token - the `custom:role` custom attribute this API's RBAC relies on is only present in the ID token by default, confirmed against AWS's Cognito documentation; the access token's default claim set does not include custom attributes without a Pre Token Generation Lambda trigger, which this project does not use). The `custom:role` claim drives RBAC.
+    checkinSessionToken:
+      type: apiKey
+      in: header
+      name: X-Checkin-Session-Token
+      description: |
+        The short-lived session token returned by `POST .../checkin/geofence`, required in
+        addition to (not instead of) the normal `bearerAuth` Cognito token on every remaining
+        check-in step (photo upload, submit - caregiver and dependant). Proves this specific
+        visit's geofence step was passed recently, not just that the caller is a valid caregiver in
+        general - defense in depth, confirmed with the user as the more robust of two designs over
+        a session-token-only approach (HEZ-34). A previous draft of this file used
+        `security: [{bearerAuth: [sessionToken]}]` on one endpoint only, an ambiguous OAuth2-style
+        scopes annotation that doesn't apply to an `http`/`bearer` scheme and was never a
+        considered design - superseded by this explicit second scheme, applied consistently to
+        every step past the geofence check.
 
   parameters:
     Cursor:
@@ -1713,38 +1755,20 @@ components:
           type: string
           format: date-time
 
-    LivenessChallenge:
+    LivenessFrameUploadUrlRequest:
       type: object
-      required: [challengeId, instructions, expiresAt]
+      required: [contentType]
       properties:
-        challengeId:
+        contentType:
           type: string
-          format: uuid
-        instructions:
-          type: string
-          example: Turn your head left, then right.
-        expiresAt:
-          type: string
-          format: date-time
+          enum: [image/jpeg, image/png]
     LivenessSubmission:
       type: object
-      required: [challengeId, frames]
+      required: [s3Key]
+      description: A single check-in photo, not a multi-frame burst - see submitCaregiverLiveness's own description for why.
       properties:
-        challengeId:
+        s3Key:
           type: string
-          format: uuid
-        frames:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [s3Key, capturedAt]
-            properties:
-              s3Key:
-                type: string
-              capturedAt:
-                type: string
-                format: date-time
     LivenessResult:
       type: object
       required: [passed]

@@ -21,6 +21,7 @@ export interface ApiParams {
   familyMemberAppUserPoolClient: cognito.UserPoolClient;
   biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
+  checkinLivenessFramesBucket: s3.Bucket;
   biometricFacesCollection: rekognition.CfnCollection;
 }
 
@@ -40,6 +41,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     familyMemberAppUserPoolClient,
     biometricEnrollmentsBucket,
     visitAudioBucket,
+    checkinLivenessFramesBucket,
     biometricFacesCollection,
   } = params;
 
@@ -92,6 +94,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
       BIOMETRIC_FACES_COLLECTION_ID: biometricFacesCollection.collectionId,
+      CHECKIN_LIVENESS_FRAMES_BUCKET_NAME: checkinLivenessFramesBucket.bucketName,
     },
   });
 
@@ -128,17 +131,27 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   biometricEnrollmentsBucket.grantPut(apiFunction);
   biometricEnrollmentsBucket.grantRead(apiFunction);
 
-  // Lets api's biometric-enrollment confirm endpoint (HEZ-31) call
-  // Rekognition DetectFaces to compute biometric_enrollments.quality_score.
-  // rekognition:DetectFaces does not support resource-level permissions
-  // (confirmed against AWS's Service Authorization Reference - every
-  // Rekognition action with no resource type listed there requires
-  // Resource: "*"), so the only controllable least-privilege axis is the
-  // action itself - scoped to this one action, not a wildcard
-  // "rekognition:*" grant.
+  // Lets api's check-in liveness flow (HEZ-34) sign presigned PUT URLs for capture frames
+  // (grantPut, same "the signing principal needs its own PutObject permission" reasoning as
+  // biometricEnrollmentsBucket above), run DetectFaces/CompareFaces against them via S3Object
+  // references (grantRead), and delete each frame right after it's processed - pass or fail, these
+  // frames are never needed again, per infra/lib/storage.ts's own retention reasoning
+  // (grantDelete, a grant biometricEnrollmentsBucket deliberately does NOT have, since enrollment
+  // images are deleted only via the application's offboarding path, not a general-purpose delete).
+  checkinLivenessFramesBucket.grantPut(apiFunction);
+  checkinLivenessFramesBucket.grantRead(apiFunction);
+  checkinLivenessFramesBucket.grantDelete(apiFunction);
+
+  // Lets api's biometric-enrollment confirm endpoint (HEZ-31) and check-in liveness endpoint
+  // (HEZ-34) call Rekognition DetectFaces/CompareFaces. Neither action supports resource-level
+  // permissions (confirmed against AWS's Service Authorization Reference for DetectFaces when
+  // HEZ-31 was built - CompareFaces is the same class of plain image-comparison API, with no
+  // resource type listed there either, so it requires Resource: "*" the same way), so the only
+  // controllable least-privilege axis is the action list itself - scoped to exactly these two
+  // actions, not a wildcard "rekognition:*" grant.
   apiFunction.addToRolePolicy(
     new iam.PolicyStatement({
-      actions: ["rekognition:DetectFaces"],
+      actions: ["rekognition:DetectFaces", "rekognition:CompareFaces"],
       resources: ["*"],
     }),
   );

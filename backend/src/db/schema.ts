@@ -303,6 +303,18 @@ export const verificationEvents = pgTable(
     dependantLivenessPassed: boolean(),
     // Hash of the short-lived session token, not the token itself (see schema.sql's file header).
     sessionTokenHash: text(),
+    // When the current sessionTokenHash was issued (HEZ-33 originally derived this indirectly from
+    // the matching passing 'geofence' verification_attempts row's attemptedAt instead of a direct
+    // column - revisited while building HEZ-34's actual session-token verification, which needs
+    // this on every one of the four remaining check-in requests: a direct column avoids an extra
+    // cross-table query on every check-in request and decouples the auth check from
+    // verification_attempts' own audit-log shape).
+    sessionTokenIssuedAt: timestamp({ withTimezone: true }),
+    // No pending-challenge columns here (a HEZ-34 first draft had them, dropped in the same
+    // session): caregiver/dependant verification is a single-photo check now, not a
+    // challenge-response flow, so there is no pending challenge to track between the upload-url
+    // and submit calls - see routes/checkin.ts's header comment for the full reasoning behind the
+    // reversal.
   },
   (table) => [
     check(

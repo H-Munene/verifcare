@@ -8,7 +8,10 @@ import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
 import { createBiometricFaceCollection } from './db/biometricFaceCollection.js';
 import { createBiometricStorage } from './db/biometricStorage.js';
+import { createCheckinFrameStorage } from './db/checkinFrameStorage.js';
+import { createCheckinPhotoValidator } from './db/checkinLiveness.js';
 import { createDb } from './db/client.js';
+import { createFaceMatcher } from './db/faceMatch.js';
 import { errorHandler } from './errors.js';
 import { logger } from './logger.js';
 
@@ -38,8 +41,9 @@ const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 // dev talks to the same real, deployed bucket/collection, using this machine's own AWS CLI
 // credentials.
 const rekognitionClient = new RekognitionClient({});
+const s3Client = new S3Client({});
 const biometricStorage = createBiometricStorage({
-  s3Client: new S3Client({}),
+  s3Client,
   rekognitionClient,
   bucketName: config.biometricEnrollmentsBucketName,
 });
@@ -49,6 +53,15 @@ const biometricFaceCollection = createBiometricFaceCollection({
   bucketName: config.biometricEnrollmentsBucketName,
 });
 
+// HEZ-34's check-in flow - shares the same rekognitionClient/s3Client instances above, same
+// reasoning db/biometricFaceCollection.ts already gave for reusing cognitoAdmin.ts's pattern.
+const checkinFrameStorage = createCheckinFrameStorage({
+  s3Client,
+  bucketName: config.checkinLivenessFramesBucketName,
+});
+const checkinPhotoValidator = createCheckinPhotoValidator({ rekognitionClient });
+const checkinFaceMatcher = createFaceMatcher({ rekognitionClient });
+
 const app = createApp({
   db,
   requireAuth,
@@ -56,6 +69,14 @@ const app = createApp({
   cognitoAdmin,
   biometricStorage,
   biometricFaceCollection,
+  geofenceAccuracyThresholdMeters: config.geofenceAccuracyThresholdMeters,
+  checkinSessionTokenTtlSeconds: config.checkinSessionTokenTtlSeconds,
+  checkinLivenessFramesBucketName: config.checkinLivenessFramesBucketName,
+  biometricEnrollmentsBucketName: config.biometricEnrollmentsBucketName,
+  checkinLivenessMatchThresholdPercent: config.checkinLivenessMatchThresholdPercent,
+  checkinPhotoValidator,
+  checkinFaceMatcher,
+  checkinFrameStorage,
 });
 app.use(errorHandler);
 

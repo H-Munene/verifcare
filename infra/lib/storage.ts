@@ -6,6 +6,7 @@ import * as rekognition from "aws-cdk-lib/aws-rekognition";
 export interface Storage {
   biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
+  checkinLivenessFramesBucket: s3.Bucket;
   biometricFacesCollection: rekognition.CfnCollection;
 }
 
@@ -70,11 +71,56 @@ export function createStorage(stack: cdk.Stack): Storage {
     ],
   });
 
+  const checkinLivenessFramesKey = new kms.Key(stack, "CheckinLivenessFramesKey", {
+    alias: "mzazi-care/checkin-liveness-frames",
+    description: "Encrypts the checkin-liveness-frames S3 bucket",
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+  });
+
+  // Deliberately a separate bucket from biometricEnrollmentsBucket above (HEZ-34, confirmed with
+  // the user as a senior-AWS-architect recommendation, not deferred to a suggested default): these
+  // frames are purely transient verification artifacts (routes/checkin.ts explicitly deletes each
+  // frame right after DetectFaces/CompareFaces processes it, pass or fail - they're never needed
+  // again either way), unlike biometricEnrollmentsBucket's long-lived reference images that exist
+  // until offboarding. Mixing the two under one bucket/retention policy would force a wrong
+  // tradeoff on one of them; separating them lets each bucket's lifecycle match its own actual data
+  // lifetime, and keeps this bucket's blast radius (a much higher write volume of raw face photos)
+  // isolated from the enrollment bucket's. The 1-day lifecycle rule is a safety-net backstop for an
+  // orphaned upload (a client that got a presigned URL but never completed the submit call) -
+  // application-triggered deletion after processing is the primary mechanism, matching
+  // architecture.md's stated "time-boxed, auto-deleting" retention philosophy for biometric data,
+  // applied even more conservatively here since these frames serve no purpose at all once verified.
+  const checkinLivenessFramesBucket = new s3.Bucket(stack, "CheckinLivenessFramesBucket", {
+    encryption: s3.BucketEncryption.KMS,
+    encryptionKey: checkinLivenessFramesKey,
+    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    enforceSSL: true,
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+    lifecycleRules: [
+      {
+        expiration: cdk.Duration.days(1),
+      },
+    ],
+    // Same CORS reasoning as biometricEnrollmentsBucket above - a browser PUT straight to a
+    // presigned URL needs it, and the presigned URL's own signature (obtainable only via the
+    // bearer-token-gated upload-url endpoint) is what actually authorizes the upload.
+    cors: [
+      {
+        allowedMethods: [s3.HttpMethods.PUT],
+        allowedOrigins: ["*"],
+        allowedHeaders: ["*"],
+      },
+    ],
+  });
+
   new cdk.CfnOutput(stack, "BiometricEnrollmentsBucketName", {
     value: biometricEnrollmentsBucket.bucketName,
   });
   new cdk.CfnOutput(stack, "VisitAudioBucketName", {
     value: visitAudioBucket.bucketName,
+  });
+  new cdk.CfnOutput(stack, "CheckinLivenessFramesBucketName", {
+    value: checkinLivenessFramesBucket.bucketName,
   });
 
   // HEZ-85: a face vector store for the enrollment-uniqueness check (SearchFacesByImage/
@@ -87,5 +133,10 @@ export function createStorage(stack: cdk.Stack): Storage {
     collectionId: "mzazi-care-biometric-faces",
   });
 
-  return { biometricEnrollmentsBucket, visitAudioBucket, biometricFacesCollection };
+  return {
+    biometricEnrollmentsBucket,
+    visitAudioBucket,
+    checkinLivenessFramesBucket,
+    biometricFacesCollection,
+  };
 }

@@ -18,8 +18,12 @@ export class MzaziCareStack extends cdk.Stack {
     const { userPool, userPoolClient, caregiverAppUserPoolClient, familyMemberAppUserPoolClient } =
       createAuth(this);
     const { database, databaseSecret } = createDatabase(this, vpc);
-    const { biometricEnrollmentsBucket, visitAudioBucket, biometricFacesCollection } =
-      createStorage(this);
+    const {
+      biometricEnrollmentsBucket,
+      visitAudioBucket,
+      checkinLivenessFramesBucket,
+      biometricFacesCollection,
+    } = createStorage(this);
     createRegistry(this);
 
     const { apiFunction, restApi } = createApi(this, {
@@ -32,6 +36,7 @@ export class MzaziCareStack extends cdk.Stack {
       familyMemberAppUserPoolClient,
       biometricEnrollmentsBucket,
       visitAudioBucket,
+      checkinLivenessFramesBucket,
       biometricFacesCollection,
     });
 

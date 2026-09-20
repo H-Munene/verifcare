@@ -34,6 +34,21 @@ const envSchema = z
     // The Rekognition Collection ID enrollment uniqueness checks search/index against
     // (db/biometricFaceCollection.ts, HEZ-85).
     BIOMETRIC_FACES_COLLECTION_ID: z.string().min(1),
+    // routes/checkin.ts's geofence check (HEZ-33). Both are the "configurable numeric defaults"
+    // architecture.md itself flags as tunable, not fixed - confirmed with the user as 20m/600s
+    // (10 minutes) for now; HEZ-74 (device testing pass, milestone 6) is expected to revisit both
+    // against real device behavior.
+    GEOFENCE_ACCURACY_THRESHOLD_METERS: z.coerce.number().positive().default(20),
+    CHECKIN_SESSION_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+    // The S3 bucket check-in photos are uploaded to (routes/checkin.ts, HEZ-34) - a separate
+    // bucket from BIOMETRIC_ENROLLMENTS_BUCKET_NAME on purpose (see infra/lib/storage.ts's comment
+    // on CheckinLivenessFramesBucket): these photos are purely transient verification artifacts,
+    // never needed again once a pass/fail result is computed, unlike long-lived enrollment
+    // reference images.
+    CHECKIN_LIVENESS_FRAMES_BUCKET_NAME: z.string().min(1),
+    // Rekognition CompareFaces match threshold - architecture.md's own settled number ("verification's
+    // 80%", distinct from enrollment-uniqueness's stricter 95% - see db/faceMatch.ts, HEZ-36).
+    CHECKIN_LIVENESS_MATCH_THRESHOLD_PERCENT: z.coerce.number().min(0).max(100).default(80),
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.DATABASE_SECRET_ARN !== undefined, {
     message: 'Either DATABASE_URL (local dev) or DATABASE_SECRET_ARN (Lambda) must be set.',
@@ -48,6 +63,10 @@ export interface Config {
   userPoolClientIds: [string, string, string];
   biometricEnrollmentsBucketName: string;
   biometricFacesCollectionId: string;
+  geofenceAccuracyThresholdMeters: number;
+  checkinSessionTokenTtlSeconds: number;
+  checkinLivenessFramesBucketName: string;
+  checkinLivenessMatchThresholdPercent: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -70,5 +89,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ],
     biometricEnrollmentsBucketName: result.data.BIOMETRIC_ENROLLMENTS_BUCKET_NAME,
     biometricFacesCollectionId: result.data.BIOMETRIC_FACES_COLLECTION_ID,
+    geofenceAccuracyThresholdMeters: result.data.GEOFENCE_ACCURACY_THRESHOLD_METERS,
+    checkinSessionTokenTtlSeconds: result.data.CHECKIN_SESSION_TOKEN_TTL_SECONDS,
+    checkinLivenessFramesBucketName: result.data.CHECKIN_LIVENESS_FRAMES_BUCKET_NAME,
+    checkinLivenessMatchThresholdPercent: result.data.CHECKIN_LIVENESS_MATCH_THRESHOLD_PERCENT,
   };
 }

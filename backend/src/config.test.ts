@@ -8,6 +8,7 @@ const requiredEnv = {
   FAMILY_MEMBER_USER_POOL_CLIENT_ID: '7b63vkbmrooqvu4g5to6c1gtvk',
   BIOMETRIC_ENROLLMENTS_BUCKET_NAME: 'mzazicarestack-biometricenrollmentsbucket-abc123',
   BIOMETRIC_FACES_COLLECTION_ID: 'mzazi-care-biometric-faces',
+  CHECKIN_LIVENESS_FRAMES_BUCKET_NAME: 'mzazicarestack-checkinlivenessframesbucket-abc123',
 };
 
 describe('loadConfig', () => {
@@ -29,7 +30,45 @@ describe('loadConfig', () => {
       ],
       biometricEnrollmentsBucketName: requiredEnv.BIOMETRIC_ENROLLMENTS_BUCKET_NAME,
       biometricFacesCollectionId: requiredEnv.BIOMETRIC_FACES_COLLECTION_ID,
+      geofenceAccuracyThresholdMeters: 20,
+      checkinSessionTokenTtlSeconds: 600,
+      checkinLivenessFramesBucketName: requiredEnv.CHECKIN_LIVENESS_FRAMES_BUCKET_NAME,
+      checkinLivenessMatchThresholdPercent: 80,
     });
+  });
+
+  it('defaults CHECKIN_LIVENESS_MATCH_THRESHOLD_PERCENT when unset', () => {
+    const config = loadConfig({ ...requiredEnv, DATABASE_URL: 'postgres://localhost/db' });
+
+    expect(config.checkinLivenessMatchThresholdPercent).toBe(80);
+  });
+
+  it('throws when CHECKIN_LIVENESS_FRAMES_BUCKET_NAME is missing', () => {
+    expect(() =>
+      loadConfig({
+        ...withoutKey('CHECKIN_LIVENESS_FRAMES_BUCKET_NAME'),
+        DATABASE_URL: 'postgres://localhost/db',
+      }),
+    ).toThrow(/CHECKIN_LIVENESS_FRAMES_BUCKET_NAME/);
+  });
+
+  it('defaults GEOFENCE_ACCURACY_THRESHOLD_METERS/CHECKIN_SESSION_TOKEN_TTL_SECONDS when unset', () => {
+    const config = loadConfig({ ...requiredEnv, DATABASE_URL: 'postgres://localhost/db' });
+
+    expect(config.geofenceAccuracyThresholdMeters).toBe(20);
+    expect(config.checkinSessionTokenTtlSeconds).toBe(600);
+  });
+
+  it('parses custom GEOFENCE_ACCURACY_THRESHOLD_METERS/CHECKIN_SESSION_TOKEN_TTL_SECONDS', () => {
+    const config = loadConfig({
+      ...requiredEnv,
+      DATABASE_URL: 'postgres://localhost/db',
+      GEOFENCE_ACCURACY_THRESHOLD_METERS: '50',
+      CHECKIN_SESSION_TOKEN_TTL_SECONDS: '300',
+    });
+
+    expect(config.geofenceAccuracyThresholdMeters).toBe(50);
+    expect(config.checkinSessionTokenTtlSeconds).toBe(300);
   });
 
   it('accepts DATABASE_SECRET_ARN alone (Lambda shape)', () => {

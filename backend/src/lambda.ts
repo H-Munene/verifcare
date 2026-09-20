@@ -9,6 +9,9 @@ import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
 import { createBiometricFaceCollection } from './db/biometricFaceCollection.js';
 import { createBiometricStorage } from './db/biometricStorage.js';
+import { createCheckinFrameStorage } from './db/checkinFrameStorage.js';
+import { createCheckinPhotoValidator } from './db/checkinLiveness.js';
+import { createFaceMatcher } from './db/faceMatch.js';
 import { getLambdaDb, invalidateLambdaDb } from './db/lambdaDb.js';
 import { isPostgresAuthError } from './db/postgresErrors.js';
 import { errorHandler } from './errors.js';
@@ -34,8 +37,9 @@ const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 // auth/cognitoAdmin.ts's CognitoIdentityProviderClient - the Lambda execution environment supplies
 // both via its own IAM role and AWS_REGION.
 const rekognitionClient = new RekognitionClient({});
+const s3Client = new S3Client({});
 const biometricStorage = createBiometricStorage({
-  s3Client: new S3Client({}),
+  s3Client,
   rekognitionClient,
   bucketName: config.biometricEnrollmentsBucketName,
 });
@@ -47,6 +51,14 @@ const biometricFaceCollection = createBiometricFaceCollection({
   collectionId: config.biometricFacesCollectionId,
   bucketName: config.biometricEnrollmentsBucketName,
 });
+
+// HEZ-34's check-in flow - shares the same rekognitionClient/s3Client instances above.
+const checkinFrameStorage = createCheckinFrameStorage({
+  s3Client,
+  bucketName: config.checkinLivenessFramesBucketName,
+});
+const checkinPhotoValidator = createCheckinPhotoValidator({ rekognitionClient });
+const checkinFaceMatcher = createFaceMatcher({ rekognitionClient });
 
 // resolveDb (not db) - see app.ts's AppDependencies.resolveDb comment for why this needs to be a
 // per-request resolver createApp() wires in itself, before its routers, rather than middleware
@@ -60,6 +72,14 @@ const app = createApp({
   biometricStorage,
   biometricFaceCollection,
   resolveDb: getLambdaDb,
+  geofenceAccuracyThresholdMeters: config.geofenceAccuracyThresholdMeters,
+  checkinSessionTokenTtlSeconds: config.checkinSessionTokenTtlSeconds,
+  checkinLivenessFramesBucketName: config.checkinLivenessFramesBucketName,
+  biometricEnrollmentsBucketName: config.biometricEnrollmentsBucketName,
+  checkinLivenessMatchThresholdPercent: config.checkinLivenessMatchThresholdPercent,
+  checkinPhotoValidator,
+  checkinFaceMatcher,
+  checkinFrameStorage,
 });
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,

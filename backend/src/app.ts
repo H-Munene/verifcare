@@ -2,13 +2,17 @@ import cors from 'cors';
 import express, { type Express, type RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import type { CognitoAdmin } from './auth/cognitoAdmin.js';
+import type { CheckinFrameStorage } from './db/checkinFrameStorage.js';
+import type { CheckinPhotoValidator } from './db/checkinLiveness.js';
 import type { BiometricFaceCollection } from './db/biometricFaceCollection.js';
 import type { BiometricStorage } from './db/biometricStorage.js';
 import type { Db } from './db/client.js';
+import type { FaceMatcher } from './db/faceMatch.js';
 import { sendProblem } from './errors.js';
 import { logger } from './logger.js';
 import { createBiometricEnrollmentsRouter } from './routes/biometricEnrollments.js';
 import { createCaregiversRouter } from './routes/caregivers.js';
+import { createCheckinRouter } from './routes/checkin.js';
 import { createDependantsRouter } from './routes/dependants.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
@@ -55,6 +59,22 @@ export interface AppDependencies {
   // HEZ-85's enrollment-uniqueness check (Rekognition Collection search/index), threaded through
   // the same router.
   biometricFaceCollection?: BiometricFaceCollection;
+  // HEZ-33's geofence check-in endpoint (config.ts's own configurable defaults - 20m/600s - apply
+  // when omitted, so app.test.ts/most callers don't need to pass these explicitly).
+  geofenceAccuracyThresholdMeters?: number;
+  checkinSessionTokenTtlSeconds?: number;
+  // HEZ-34's caregiver check-in upload-url/submit endpoints - all optional together (see
+  // routes/checkin.ts's CheckinRouterDependencies comment); the numeric one defaults the same way
+  // the geofence pair above does when omitted.
+  checkinLivenessFramesBucketName?: string;
+  // Raw bucket name, not the already-constructed `biometricStorage` object above - db/faceMatch.ts
+  // needs to build {bucket, s3Key} pairs for CompareFaces' TargetImage, not presign/DetectFaces
+  // calls, so it has no use for biometricStorage's own createUploadUrl/assessFaceQuality methods.
+  biometricEnrollmentsBucketName?: string;
+  checkinLivenessMatchThresholdPercent?: number;
+  checkinPhotoValidator?: CheckinPhotoValidator;
+  checkinFaceMatcher?: FaceMatcher;
+  checkinFrameStorage?: CheckinFrameStorage;
 }
 
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
@@ -150,6 +170,25 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   // independently rather than nested inside the users/caregivers/dependants condition.
   if (requireAuth) {
     app.use('/visit-schedules', createVisitSchedulesRouter({ requireAuth }));
+    // HEZ-33's check-in flow - mounted at the same '/visit-schedules' prefix as a separate router
+    // (see routes/checkin.ts's header comment for why), only needs requireAuth too.
+    app.use(
+      '/visit-schedules',
+      createCheckinRouter({
+        requireAuth,
+        geofenceAccuracyThresholdMeters: dependencies.geofenceAccuracyThresholdMeters ?? 20,
+        sessionTokenTtlSeconds: dependencies.checkinSessionTokenTtlSeconds ?? 600,
+        // HEZ-34's caregiver check-in routes - createCheckinRouter() itself only registers them
+        // once every one of these is actually present (see its own dependencies comment), so
+        // passing possibly-undefined values through here is safe.
+        livenessFramesBucketName: dependencies.checkinLivenessFramesBucketName,
+        biometricEnrollmentsBucketName: dependencies.biometricEnrollmentsBucketName,
+        livenessMatchThresholdPercent: dependencies.checkinLivenessMatchThresholdPercent ?? 80,
+        photoValidator: dependencies.checkinPhotoValidator,
+        faceMatcher: dependencies.checkinFaceMatcher,
+        frameStorage: dependencies.checkinFrameStorage,
+      }),
+    );
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.
