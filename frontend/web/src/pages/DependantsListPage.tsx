@@ -1,17 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
-import { Switch } from '../design-system/Switch';
 import './DependantsListPage.css';
 
 export function DependantsListPage() {
   const { dependants } = useApi();
   const { identity } = useAuth();
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   // Simple back/forward cursor history - this list is small and bounded (cursor pagination, per
   // pagination.ts's design), so a plain stack is enough rather than a full pagination library.
@@ -21,14 +19,6 @@ export function DependantsListPage() {
   const query = useQuery({
     queryKey: ['dependants', currentCursor],
     queryFn: () => dependants.listDependants({ cursor: currentCursor, limit: 20 }),
-  });
-
-  const toggleMonitoring = useMutation({
-    mutationFn: (params: { id: string; enabled: boolean }) =>
-      dependants.updateDependant(params.id, { cognitiveMonitoringEnabled: params.enabled }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['dependants'] });
-    },
   });
 
   return (
@@ -67,7 +57,6 @@ export function DependantsListPage() {
                 <th>Name</th>
                 <th>DOB</th>
                 <th>Gender</th>
-                <th>Cognitive Monitoring</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -83,13 +72,6 @@ export function DependantsListPage() {
                   <td>{dependant.fullName}</td>
                   <td>{dependant.dob}</td>
                   <td>{dependant.gender ?? '-'}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <Switch
-                      checked={dependant.cognitiveMonitoringEnabled}
-                      disabled={toggleMonitoring.isPending}
-                      onChange={(enabled) => toggleMonitoring.mutate({ id: dependant.id, enabled })}
-                    />
-                  </td>
                   <td>
                     <Badge tone={dependant.status === 'active' ? 'success' : 'neutral'}>
                       {dependant.status}
@@ -99,7 +81,7 @@ export function DependantsListPage() {
               ))}
               {query.data.items.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="dependants-page__empty">
+                  <td colSpan={4} className="dependants-page__empty">
                     No dependants registered yet.
                   </td>
                 </tr>

@@ -1504,6 +1504,11 @@ components:
           description: 'Creates a brand-new Cognito identity and sends it a real invitation email. Mutually exclusive with cognitoSub.'
         phoneNumber:
           type: string
+          description: >-
+            Required in E.164 format (e.g. +254712345678) only when email is also set - that's the
+            only path that sends this value to Cognito's AdminCreateUser, which rejects any other
+            format. Not validated against this format when cognitoSub is set instead (linking an
+            existing identity never uses this field).
         fullName:
           type: string
         idType:

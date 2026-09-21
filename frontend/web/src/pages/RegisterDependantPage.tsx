@@ -26,33 +26,32 @@ import './RegisterDependantPage.css';
 //
 // Presented as a stepper (2026-09-14, user request - modeled on a standard e-commerce checkout
 // stepper) rather than one long scrolling form: Details -> Location -> Exact Location -> [Primary
-// Contact, registration only] -> Additional Contacts -> Photo. Only Primary Contact is
-// registration-only (2026-09-21 revision - editing now has every other step too): the primary
-// family member is a one-time choice made atomically at `POST /dependants` (HEZ-30's own
-// "primaryFamilyMember" field), never revisited on an edit, but Additional Contacts and Photo are
-// both just as meaningful for an already-registered dependant as for a brand-new one - a supervisor
-// editing an existing dependant may still need to link another family member or enroll/replace the
-// dependant's check-in photo, and forcing them out to DependantDetailPage's separate UI for either
-// was never a deliberate design choice, just an oversight from when those two steps were built
-// registration-only. Location and Exact Location are two separate steps, not two sections of one
-// step (confirmed with the user) - the county/constituency/ward cascade and the bounded Google Maps
-// pin are different enough concerns to warrant their own steps, and combining them into one page was
-// also part of what caused the Leaflet map's rendering to break (see
-// components/LocationSelectorMap.tsx's own fix).
+// Contact, Additional Contacts - registration only] -> Photo. Primary Contact is registration-only
+// since it's a one-time choice made atomically at `POST /dependants` (HEZ-30's own
+// "primaryFamilyMember" field), never revisited on an edit. Additional Contacts was briefly added
+// to editing too (2026-09-21), then reverted the same day: DependantDetailPage's own "+ Add Family
+// Member" is already the edit-time entry point for the identical addFamilyMember call, and having
+// two separate UI paths to it was confirmed as unwanted, not an oversight worth fixing. Photo is the
+// one step editing keeps alongside registration - enrolling/replacing a check-in photo is just as
+// meaningful for an already-registered dependant as for a brand-new one. Location and Exact Location
+// are two separate steps, not two sections of one step (confirmed with the user) - the
+// county/constituency/ward cascade and the bounded Google Maps pin are different enough concerns to
+// warrant their own steps, and combining them into one page was also part of what caused the Leaflet
+// map's rendering to break (see components/LocationSelectorMap.tsx's own fix).
 //
-// Photo is a trailing step after Additional Contacts, not folded into Details - POST
-// /biometric-enrollments requires the dependant to already exist (it looks the subject up by id
-// before allowing an enrollment), which registration doesn't have until Additional Contacts' own
-// "Save" creates it. "Save" on the Additional Contacts step therefore creates/updates the dependant
-// and advances into the Photo step instead of navigating away; the Photo step's own Skip/Finish
-// actions do the navigation. Why this dependant photo needs to exist at all: check-in's dependant
-// co-presence step (HEZ-35) CompareFaces-matches the live check-in photo against this subject's own
-// active enrollment, and fails with not_enrolled if there isn't one. Confirmed with the user as a
-// single required photo (matches the caregiver check-in step's own single-photo design), not the
-// full 1-3 image slots DependantDetailPage's Biometric Enrollment section supports - that page
-// remains where a skipped photo (or a 2nd/3rd image) gets added later, imageOrder fixed at 1 here
-// rather than exposed as a choice. Editing shows whatever's already enrolled at imageOrder 1 (if
-// any) before the upload form, so this step doesn't look like "no photo exists" when one does.
+// Photo is a trailing step, not folded into Details - POST /biometric-enrollments requires the
+// dependant to already exist (it looks the subject up by id before allowing an enrollment), which
+// registration doesn't have until the step before Photo's own "Save" creates it. "Save" on that step
+// (Additional Contacts for registration, Exact Location for editing) therefore creates/updates the
+// dependant and advances into the Photo step instead of navigating away; the Photo step's own
+// Skip/Finish actions do the navigation. Why this dependant photo needs to exist at all: check-in's
+// dependant co-presence step (HEZ-35) CompareFaces-matches the live check-in photo against this
+// subject's own active enrollment, and fails with not_enrolled if there isn't one. Confirmed with
+// the user as a single required photo (matches the caregiver check-in step's own single-photo
+// design), not the full 1-3 image slots DependantDetailPage's Biometric Enrollment section supports
+// - that page remains where a skipped photo (or a 2nd/3rd image) gets added later, imageOrder fixed
+// at 1 here rather than exposed as a choice. Editing shows whatever's already enrolled at imageOrder
+// 1 (if any) before the upload form, so this step doesn't look like "no photo exists" when one does.
 //
 // Consent capture (biometric-verification / audio-cognitive-monitoring, shown in the wireframe)
 // is deliberately not built here - HEZ-40 ("Consent capture endpoints") is a separate, not-yet-
@@ -130,23 +129,30 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
+  // Additional Contacts is registration-only (2026-09-21 revision, reverted the same day it was
+  // added to editing) - DependantDetailPage's own "+ Add Family Member" is already the edit-time
+  // entry point for this, and having two separate UI paths to the same addFamilyMember call was
+  // confirmed as unwanted, not an oversight to fix. Primary Contact remains registration-only too,
+  // for the original reason (a one-time choice made atomically at `POST /dependants`). Photo is the
+  // one step editing keeps alongside registration - enrolling/replacing a check-in photo is just as
+  // meaningful for an already-registered dependant.
   const steps = isEdit
-    ? ['Details', 'Location', 'Exact Location', 'Additional Contacts', 'Photo']
+    ? ['Details', 'Location', 'Exact Location', 'Photo']
     : ['Details', 'Location', 'Exact Location', 'Primary Contact', 'Additional Contacts', 'Photo'];
   const [step, setStep] = useState(0);
-  // Named positions, not magic numbers - registration and editing use different step orders (only
-  // registration has Primary Contact), so a step's meaning can't be inferred from its index alone.
+  // Named positions, not magic numbers - registration and editing use different step orders.
   const detailsStepIndex = 0;
   const locationStepIndex = 1;
   const exactLocationStepIndex = 2;
   const primaryContactStepIndex = isEdit ? -1 : 3;
-  const additionalContactsStepIndex = isEdit ? 3 : 4;
+  const additionalContactsStepIndex = isEdit ? -1 : 4;
   // Always the last step in both orderings.
   const photoStepIndex = steps.length - 1;
-  // The step that actually creates/updates the dependant - Additional Contacts in both modes now
-  // (Photo, after it, is a trailing step with its own Skip/Finish actions, not part of this "Save"
-  // gate).
-  const isDataEntryLastStep = step === additionalContactsStepIndex;
+  // The step that actually creates/updates the dependant - Exact Location for editing (no
+  // Additional Contacts step to defer to), Additional Contacts for registration (Photo, after it,
+  // is a trailing step with its own Skip/Finish actions, not part of this "Save" gate).
+  const isDataEntryLastStep =
+    step === (isEdit ? exactLocationStepIndex : additionalContactsStepIndex);
   const isPhotoStep = step === photoStepIndex;
 
   const initialName = splitFullName(initial?.fullName ?? '');
@@ -404,7 +410,6 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
             ...(identity?.role === 'supervisor' ? { status } : {}),
           });
         }
-        await linkAdditionalContacts(dependantId!);
         void queryClient.invalidateQueries({ queryKey: ['dependants'] });
         void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
         // Don't navigate yet - advance into the Photo step instead, matching registration's own
@@ -627,7 +632,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
             {additionalContacts.map((contact, index) => (
               <Card key={index} className="register-dependant-page__section">
                 <div className="register-dependant-page__section-title">
-                  {isEdit ? `Family contact ${index + 1}` : `Family contact ${index + 2}`}
+                  Family contact {index + 2}
                 </div>
                 <FamilyMemberResolver
                   selection={contact.selection}

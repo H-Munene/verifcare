@@ -262,6 +262,9 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
             <Input
               id="newFamilyMemberPhone"
               label="Phone Number"
+              type="tel"
+              placeholder="+254712345678"
+              hint="E.164 format, e.g. +254712345678"
               value={newFields.phoneNumber}
               onChange={(e) => updateNewFields({ phoneNumber: e.target.value })}
               required

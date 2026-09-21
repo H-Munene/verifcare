@@ -58,6 +58,23 @@ export function isCognitoUserAlreadyExistsError(err: unknown): boolean {
   return name === 'UsernameExistsException' || name === 'AliasExistsException';
 }
 
+// Classifies an AdminCreateUser rejection caused by one of the submitted attributes failing
+// Cognito's own validation (most commonly phone_number not being E.164 - found via a real
+// "Internal Server Error" report where a locally-formatted phone number reached AdminCreateUser
+// unvalidated, since routes/dependants.ts's own zod schema didn't check the format at the time).
+// zod-level validation now catches the common phone-format case before Cognito is ever called;
+// this stays as a fallback for whatever that regex doesn't anticipate, so a rejection here still
+// becomes a clean 400 instead of an unhandled 500. Cognito's own message (e.g. "Invalid phone
+// number format.") is not sensitive - it's Cognito describing its own validation rule, not
+// leaking anything about this account or user pool - so it's safe to relay directly to the caller.
+export function isCognitoInvalidParameterError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { name?: unknown }).name === 'InvalidParameterException'
+  );
+}
+
 export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
   const client = new CognitoIdentityProviderClient({});
   return {

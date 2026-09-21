@@ -59,6 +59,9 @@
 
 .register-dependant-page__name-row > * {
   flex: 1;
+  /* Same flexbox min-width:auto overflow fix as FamilyMemberResolver.css's identical row pattern -
+     latent here too (a narrower viewport could overflow this page the same way the modal did). */
+  min-width: 0;
 }
 
 /* .ds-input's own height is a fixed single-line control height (components.css) - overridden here

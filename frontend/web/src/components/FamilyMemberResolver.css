@@ -21,6 +21,10 @@
 
 .family-member-resolver__row > * {
   flex: 1;
+  /* Without this, a flex item's default min-width:auto floors its shrinking at its content's
+     intrinsic width - for a text input that's wide enough to overflow a narrow container like
+     Modal's 400px, which is exactly what pushed Last Name/Email Address outside the modal. */
+  min-width: 0;
 }
 
 .family-member-resolver__field {

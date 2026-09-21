@@ -49,6 +49,7 @@ import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import {
+  isCognitoInvalidParameterError,
   isCognitoUserAlreadyExistsError,
   isCognitoUserNotFoundError,
   type CognitoAdmin,
@@ -163,6 +164,17 @@ function dependantColumns() {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+// E.164 (a leading +, then 1-15 digits, first digit non-zero) - Cognito's own `phone_number`
+// attribute requires exactly this format and rejects anything else with an opaque
+// InvalidParameterException. When email is set (the "new user" path below actually calls
+// AdminCreateUser with this value), a locally-formatted number like "0712345678" used to reach
+// Cognito unvalidated and surface as a raw 500 - found via a real "Internal Server Error" report,
+// not assumed. Validating here gives a clean, immediate 400 on the exact field, instead of waiting
+// for Cognito's own rejection (still classified defensively in resolveFamilyMemberIdentity's catch
+// block below, in case some other Cognito-side rejection this regex doesn't anticipate slips
+// through).
+const E164_PHONE_NUMBER = /^\+[1-9]\d{6,14}$/;
+
 // Exactly one of cognitoSub/email identifies the family member - cognitoSub links an identity
 // that already exists in Cognito (resolved by the frontend's search-by-phone/email against our
 // own users table, or supplied directly by any other caller that already knows it); email creates
@@ -179,6 +191,15 @@ const addFamilyMemberRequestSchema = z
     idNumber: z.string().min(1).optional(),
     relationship: z.string().min(1).optional(),
     isPrimaryContact: z.boolean().default(false),
+  })
+  // Only enforced when email is set - that's the only path that actually calls Cognito's
+  // AdminCreateUser with this value (see resolveFamilyMemberIdentity below); the cognitoSub path
+  // (linking an existing identity) never uses body.phoneNumber at all, and the frontend resends
+  // whatever that existing user's own stored phone number happens to be (possibly empty) - a field-
+  // level regex here would wrongly reject linking an existing user over a value that's never used.
+  .refine((data) => !data.email || E164_PHONE_NUMBER.test(data.phoneNumber), {
+    message: 'phoneNumber must be in E.164 format, e.g. +254712345678.',
+    path: ['phoneNumber'],
   })
   .refine((data) => Boolean(data.cognitoSub) !== Boolean(data.email), {
     message:
@@ -412,6 +433,16 @@ async function resolveFamilyMemberIdentity(
         title: 'Conflict',
         status: 409,
         detail: `${fieldPath}.email already has a Cognito identity with no linked account here - this needs its Cognito sub to link directly, since it can't be found by searching.`,
+      });
+      return undefined;
+    }
+    if (isCognitoInvalidParameterError(err)) {
+      sendProblem(res, {
+        type: 'about:blank',
+        title: 'Bad Request',
+        status: 400,
+        detail:
+          (err as { message?: string }).message ?? 'Cognito rejected one of the submitted fields.',
       });
       return undefined;
     }
