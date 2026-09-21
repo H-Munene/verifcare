@@ -5,10 +5,12 @@ import { ApiError } from '../api/client';
 import type { Dependant, DependantGender, DependantStatus } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { ExactLocationMap } from '../components/ExactLocationMap';
 import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
 } from '../components/FamilyMemberResolver';
+import { LocationSelector, type ResolvedWard } from '../components/LocationSelector';
 import { Button } from '../design-system/Button';
 import { Card } from '../design-system/Card';
 import { Input } from '../design-system/Input';
@@ -24,9 +26,13 @@ import './RegisterDependantPage.css';
 // added separately" design.
 //
 // Presented as a stepper (2026-09-14, user request - modeled on a standard e-commerce checkout
-// stepper) rather than one long scrolling form: Details -> Geofence -> Primary Contact
-// (registration only; editing has no primary-contact step, since that's not part of
-// PATCH /dependants/{id} at all - it's managed from DependantDetailPage instead).
+// stepper) rather than one long scrolling form: Details -> Location -> Exact Location -> Primary
+// Contact (registration only; editing has no primary-contact step, since that's not part of
+// PATCH /dependants/{id} at all - it's managed from DependantDetailPage instead). Location and
+// Exact Location are two separate steps, not two sections of one step (confirmed with the user) -
+// the county/constituency/ward cascade and the bounded Google Maps pin are different enough
+// concerns to warrant their own steps, and combining them into one page was also part of what
+// caused the Leaflet map's rendering to break (see components/LocationSelectorMap.tsx's own fix).
 //
 // Consent capture (biometric-verification / audio-cognitive-monitoring, shown in the wireframe)
 // is deliberately not built here - HEZ-40 ("Consent capture endpoints") is a separate, not-yet-
@@ -57,6 +63,46 @@ export function RegisterDependantPage() {
   return <DependantForm dependantId={dependantId} initial={existing.data} />;
 }
 
+// Whole years, not a rough day-count division - matches how "age" is normally understood (a
+// person turns N on their birthday, not 365.25*N days after birth).
+function calculateAge(dobText: string): number | null {
+  if (!dobText) {
+    return null;
+  }
+  const dob = new Date(dobText);
+  if (Number.isNaN(dob.getTime())) {
+    return null;
+  }
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const beforeBirthdayThisYear =
+    today.getMonth() < dob.getMonth() ||
+    (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate());
+  if (beforeBirthdayThisYear) {
+    age -= 1;
+  }
+  return age;
+}
+
+// The backend only ever stores one fullName string - splitting it into two display fields is a
+// pure UI convenience (confirmed as the scope of the request, not a data-model change), so editing
+// an existing dependant needs to re-derive first/last from that one string. Ambiguous for anyone
+// with more than two name parts, same as any first/last split would be - the first space is the
+// boundary, matching how the fields are laid out (First Name, then everything else as Last Name).
+function splitFullName(fullName: string): { firstName: string; lastName: string } {
+  const trimmed = fullName.trim();
+  const spaceIndex = trimmed.indexOf(' ');
+  if (spaceIndex === -1) {
+    return { firstName: trimmed, lastName: '' };
+  }
+  return { firstName: trimmed.slice(0, spaceIndex), lastName: trimmed.slice(spaceIndex + 1) };
+}
+
+interface AdditionalContactDraft {
+  selection: FamilyMemberSelection | null;
+  relationship: string;
+}
+
 function DependantForm({ dependantId, initial }: { dependantId?: string; initial?: Dependant }) {
   const isEdit = Boolean(dependantId);
   const { dependants } = useApi();
@@ -64,16 +110,71 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const steps = isEdit ? ['Details', 'Geofence'] : ['Details', 'Geofence', 'Primary Contact'];
+  const steps = isEdit
+    ? ['Details', 'Location', 'Exact Location']
+    : ['Details', 'Location', 'Exact Location', 'Primary Contact', 'Additional Contacts'];
   const [step, setStep] = useState(0);
   const isLastStep = step === steps.length - 1;
 
-  const [fullName, setFullName] = useState(initial?.fullName ?? '');
+  const initialName = splitFullName(initial?.fullName ?? '');
+  const [firstName, setFirstName] = useState(initialName.firstName);
+  const [lastName, setLastName] = useState(initialName.lastName);
   const [dob, setDob] = useState(initial?.dob ?? '');
   const [gender, setGender] = useState<DependantGender | ''>(initial?.gender ?? '');
-  const [homeAddressText, setHomeAddressText] = useState(initial?.homeAddressText ?? '');
-  const [geofenceLat, setGeofenceLat] = useState(initial ? String(initial.geofenceLat) : '');
-  const [geofenceLng, setGeofenceLng] = useState(initial ? String(initial.geofenceLng) : '');
+  const [primaryConditionSummary, setPrimaryConditionSummary] = useState(
+    initial?.primaryConditionSummary ?? '',
+  );
+
+  // Cognitive monitoring can only be enabled for a dependant over 65 (confirmed with the user) -
+  // lives in the Details step, alongside dob, since dob is what gates it. Derived at render time,
+  // not synced via an effect + setState: a dob edited down to 65-or-under during this same session
+  // must not leave a stale `true` behind, and computing the *effective* value here (rather than
+  // forcing the underlying state itself to false) means the Switch and the submit payload can
+  // never disagree, with no risk of an effect running one render late.
+  const age = calculateAge(dob);
+  const cognitiveMonitoringAllowed = age !== null && age > 65;
+  const [cognitiveMonitoringEnabled, setCognitiveMonitoringEnabled] = useState(
+    initial?.cognitiveMonitoringEnabled ?? false,
+  );
+  const effectiveCognitiveMonitoringEnabled =
+    cognitiveMonitoringAllowed && cognitiveMonitoringEnabled;
+
+  // HEZ-86 (revised): county/constituency/ward are now chosen explicitly via cascading dropdowns
+  // (components/LocationSelector.tsx) against OpenStreetMap boundary data, forward - not resolved
+  // by reverse-geocoding a dropped pin. The ward's own geometry is kept alongside the plain name,
+  // since components/ExactLocationMap.tsx (a separate step) needs it to bound the Google Maps view
+  // and validate the pin actually falls inside it.
+  const [county, setCounty] = useState(initial?.county ?? '');
+  const [constituency, setConstituency] = useState(initial?.constituency ?? '');
+  const [ward, setWard] = useState(initial?.ward ?? '');
+  const [wardFeature, setWardFeature] = useState<ResolvedWard['wardFeature'] | null>(null);
+
+  function handleWardResolved(resolved: ResolvedWard | null): void {
+    if (!resolved) {
+      setCounty('');
+      setConstituency('');
+      setWard('');
+      setWardFeature(null);
+      return;
+    }
+    setCounty(resolved.countyName);
+    setConstituency(resolved.constituencyName);
+    setWard(resolved.wardName);
+    setWardFeature(resolved.wardFeature);
+  }
+
+  // The exact pin (Google Maps, bounded to the selected ward, its own step) - lat/lng inputs were
+  // removed for UX reasons (confirmed with the user); the pin is the only way to set them now.
+  const [geofenceLat, setGeofenceLat] = useState<number | null>(initial?.geofenceLat ?? null);
+  const [geofenceLng, setGeofenceLng] = useState<number | null>(initial?.geofenceLng ?? null);
+  const [exactLocationValid, setExactLocationValid] = useState(false);
+
+  function handleExactLocationChange(lat: number, lng: number, isInsideWard: boolean): void {
+    setGeofenceLat(lat);
+    setGeofenceLng(lng);
+    setExactLocationValid(isInsideWard);
+  }
+
   // 20m default - confirmed with the user 2026-09-14 (originally proposed at 10m, revised up after
   // flagging that typical smartphone GPS accuracy, ~5m under open sky and substantially worse
   // indoors/urban, leaves too thin a margin at 10m against a genuinely-present caregiver). See
@@ -81,38 +182,72 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(
     initial ? String(initial.geofenceRadiusMeters) : '20',
   );
-  const [cognitiveMonitoringEnabled, setCognitiveMonitoringEnabled] = useState(
-    initial?.cognitiveMonitoringEnabled ?? false,
-  );
   const [status, setStatus] = useState<DependantStatus>(initial?.status ?? 'active');
 
   const [primarySelection, setPrimarySelection] = useState<FamilyMemberSelection | null>(null);
   const [primaryRelationship, setPrimaryRelationship] = useState('');
 
-  const createMutation = useMutation({
-    mutationFn: dependants.createDependant,
-    onSuccess: (created) => {
-      void queryClient.invalidateQueries({ queryKey: ['dependants'] });
-      void navigate(`/dependants/${created.id}`);
-    },
-  });
+  // Additional family contacts (2026-09-21, HEZ-86 revision) - optional, unlike the primary
+  // contact above: POST /dependants only ever links one family member atomically, so each of
+  // these is sent as its own POST /dependants/{id}/family-members call after the dependant itself
+  // is created (see submitForm below), not folded into the create request.
+  const [additionalContacts, setAdditionalContacts] = useState<AdditionalContactDraft[]>([]);
+  const [additionalContactError, setAdditionalContactError] = useState<string | null>(null);
+
+  function addAdditionalContact() {
+    setAdditionalContacts((prev) => [...prev, { selection: null, relationship: '' }]);
+  }
+  function updateAdditionalContactSelection(
+    index: number,
+    selection: FamilyMemberSelection | null,
+  ) {
+    setAdditionalContacts((prev) => prev.map((c, i) => (i === index ? { ...c, selection } : c)));
+  }
+  function updateAdditionalContactRelationship(index: number, relationship: string) {
+    setAdditionalContacts((prev) => prev.map((c, i) => (i === index ? { ...c, relationship } : c)));
+  }
+
+  // Neither mutation navigates from its own onSuccess (unlike most other forms in this app) -
+  // registration must first fire off each additional family contact's own POST (see submitForm
+  // below), and navigating before those settle would abandon them mid-flight if the page unmounts.
+  const createMutation = useMutation({ mutationFn: dependants.createDependant });
   const updateMutation = useMutation({
     mutationFn: (body: Parameters<typeof dependants.updateDependant>[1]) =>
       dependants.updateDependant(dependantId!, body),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['dependants'] });
-      void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
-      void navigate(`/dependants/${dependantId}`);
-    },
   });
 
   // Per-step validity, gating the "Next step" button the same way the final Save button was
   // already gated - a step's own required fields must be filled before moving on, rather than
   // discovering a validation problem only after reaching the end.
-  const detailsValid = fullName.trim() !== '' && dob !== '';
-  const geofenceValid = geofenceLat !== '' && geofenceLng !== '' && geofenceRadiusMeters !== '';
+  const detailsValid = firstName.trim() !== '' && lastName.trim() !== '' && dob !== '';
+  // A brand-new registration must resolve county/constituency/ward and place a valid pin before it
+  // can proceed (confirmed with the user) - editing an existing dependant is not blocked on either,
+  // since the backend only requires them at creation, not on every update.
+  const locationSelectorValid = county !== '' && constituency !== '' && ward !== '';
+  const exactLocationStepValid =
+    geofenceLat !== null &&
+    geofenceLng !== null &&
+    exactLocationValid &&
+    geofenceRadiusMeters !== '';
   const primaryContactValid = Boolean(primarySelection);
-  const currentStepValid = [detailsValid, geofenceValid, primaryContactValid][step] ?? true;
+  // Additional Contacts (step 4) is deliberately not included here - the user confirmed it's
+  // optional and skippable with no validation, so the `?? true` fallback below covers it.
+  const currentStepValid =
+    [
+      detailsValid,
+      isEdit || locationSelectorValid,
+      isEdit || exactLocationStepValid,
+      primaryContactValid,
+    ][step] ?? true;
+  // Surfaces *why* Next/Save is disabled, rather than leaving a disabled button as the only signal
+  // - the underlying gate above is what actually enforces this; this is purely to make it visible.
+  const stepHints = [
+    'Enter first name, last name, and date of birth to continue.',
+    'Select a county, constituency, and ward to continue.',
+    'Place a pin inside the ward boundary to continue.',
+    'Select a primary family member to continue.',
+  ];
+  const currentStepHint = currentStepValid ? null : stepHints[step];
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -122,31 +257,89 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       // with no visible submit button.
       return;
     }
+    void submitForm();
+  }
 
+  async function submitForm() {
     const common = {
-      fullName,
+      fullName: `${firstName} ${lastName}`.trim(),
       dob,
       gender: gender || undefined,
-      homeAddressText: homeAddressText || undefined,
-      geofenceLat: Number(geofenceLat),
-      geofenceLng: Number(geofenceLng),
+      primaryConditionSummary: primaryConditionSummary || undefined,
       geofenceRadiusMeters: Number(geofenceRadiusMeters),
-      cognitiveMonitoringEnabled,
+      cognitiveMonitoringEnabled: effectiveCognitiveMonitoringEnabled,
     };
 
     if (isEdit) {
-      updateMutation.mutate({
+      try {
+        await updateMutation.mutateAsync({
+          ...common,
+          // Sent only when the supervisor actually re-resolved these on this edit (e.g. by
+          // picking a new ward and pin) - an unrelated field edit must not overwrite existing
+          // county/constituency/ward/coordinates, and the backend's own zod schema rejects an
+          // empty county/constituency/ward string outright.
+          ...(county ? { county } : {}),
+          ...(constituency ? { constituency } : {}),
+          ...(ward ? { ward } : {}),
+          ...(geofenceLat !== null ? { geofenceLat } : {}),
+          ...(geofenceLng !== null ? { geofenceLng } : {}),
+          ...(identity?.role === 'supervisor' ? { status } : {}),
+        });
+        void queryClient.invalidateQueries({ queryKey: ['dependants'] });
+        void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
+        void navigate(`/dependants/${dependantId}`);
+      } catch {
+        // updateMutation's own `error` state (surfaced via mutationError below) already reports
+        // this - nothing further to do here.
+      }
+      return;
+    }
+
+    if (!primarySelection) {
+      return;
+    }
+
+    try {
+      const created = await createMutation.mutateAsync({
         ...common,
-        ...(identity?.role === 'supervisor' ? { status } : {}),
-      });
-    } else if (primarySelection) {
-      createMutation.mutate({
-        ...common,
+        county,
+        constituency,
+        ward,
+        geofenceLat: geofenceLat!,
+        geofenceLng: geofenceLng!,
         primaryFamilyMember: {
           ...primarySelection,
           relationship: primaryRelationship || undefined,
         },
       });
+
+      // Each additional contact is its own linking call, made only now that a dependantId
+      // exists - POST /dependants can only ever link one (the primary) family member atomically.
+      // A failure here must not undo the registration that already succeeded; it's surfaced as a
+      // separate, non-blocking notice instead, since the contact can still be added afterward
+      // from the dependant's own detail page.
+      setAdditionalContactError(null);
+      for (const contact of additionalContacts) {
+        if (!contact.selection) {
+          continue;
+        }
+        try {
+          await dependants.addFamilyMember(created.id, {
+            ...contact.selection,
+            relationship: contact.relationship || undefined,
+          });
+        } catch {
+          setAdditionalContactError(
+            "The dependant was registered, but one or more additional family contacts could not be added. Add them from the dependant's detail page instead.",
+          );
+        }
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ['dependants'] });
+      void navigate(`/dependants/${created.id}`);
+    } catch {
+      // createMutation's own `error` state (surfaced via mutationError below) already reports
+      // this - nothing further to do here.
     }
   }
 
@@ -162,13 +355,22 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       <form onSubmit={handleSubmit} className="register-dependant-page__form" autoComplete="off">
         {step === 0 ? (
           <Card className="register-dependant-page__section">
-            <Input
-              id="fullName"
-              label="Dependant Full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
+            <div className="register-dependant-page__name-row">
+              <Input
+                id="firstName"
+                label="First name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+              />
+              <Input
+                id="lastName"
+                label="Last name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+              />
+            </div>
             <Input
               id="dob"
               label="Dependant Date of birth"
@@ -192,41 +394,70 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                 <option value="female">Female</option>
               </select>
             </div>
-            <Input
-              id="homeAddressText"
-              label="Home address"
-              value={homeAddressText}
-              onChange={(e) => setHomeAddressText(e.target.value)}
+            <div className="register-dependant-page__field">
+              <label className="ds-label" htmlFor="primaryConditionSummary">
+                Primary condition summary
+              </label>
+              <textarea
+                id="primaryConditionSummary"
+                className="ds-input register-dependant-page__textarea"
+                rows={3}
+                placeholder="General description of the dependant's condition (e.g. early-stage dementia, mobility aid required)"
+                value={primaryConditionSummary}
+                onChange={(e) => setPrimaryConditionSummary(e.target.value)}
+              />
+            </div>
+            <Switch
+              checked={effectiveCognitiveMonitoringEnabled}
+              onChange={setCognitiveMonitoringEnabled}
+              label="Enable cognitive monitoring"
+              disabled={!cognitiveMonitoringAllowed}
+              hint={
+                cognitiveMonitoringAllowed
+                  ? undefined
+                  : 'Available only for dependants over the age of 65.'
+              }
             />
           </Card>
         ) : null}
 
         {step === 1 ? (
-          <Card className="register-dependant-page__section">
+          <div className="register-dependant-page__section">
+            {/* LocationSelector owns the cascading dropdown UI state itself, but unmounts and
+                remounts fresh every time the wizard leaves and returns to this step (this ternary
+                returns null while step !== 1) - passing this page's own already-resolved
+                county/constituency/ward (falling back to the edited dependant's existing values)
+                as the hydration seed makes it re-select the same cascade on remount, instead of
+                coming back visually empty even though a selection was already made this session. */}
+            <LocationSelector
+              initialCountyName={county || initial?.county}
+              initialConstituencyName={constituency || initial?.constituency}
+              initialWardName={ward || initial?.ward}
+              onWardResolved={handleWardResolved}
+            />
+          </div>
+        ) : null}
+
+        {step === 2 ? (
+          <div className="register-dependant-page__section">
+            {wardFeature ? (
+              <ExactLocationMap
+                apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+                wardFeature={wardFeature}
+                lat={geofenceLat}
+                lng={geofenceLng}
+                radiusMeters={Number(geofenceRadiusMeters) || 0}
+                onPositionChange={handleExactLocationChange}
+              />
+            ) : (
+              <p className="register-dependant-page__resolution-hint">
+                Go back and select a county, constituency, and ward before pinning the exact
+                location.
+              </p>
+            )}
+
             <div className="register-dependant-page__geofence">
-              {/* Placeholder for the embedded Google Maps pin-drag picker - no platform-restricted
-                  API key has been created yet (see docs/project-state.md). Lat/lng/radius are
-                  still fully editable as plain number inputs. */}
-              <div className="register-dependant-page__map-placeholder">Map (placeholder)</div>
               <div className="register-dependant-page__geofence-fields">
-                <Input
-                  id="geofenceLat"
-                  label="Geofence latitude"
-                  type="number"
-                  step="any"
-                  value={geofenceLat}
-                  onChange={(e) => setGeofenceLat(e.target.value)}
-                  required
-                />
-                <Input
-                  id="geofenceLng"
-                  label="Geofence longitude"
-                  type="number"
-                  step="any"
-                  value={geofenceLng}
-                  onChange={(e) => setGeofenceLng(e.target.value)}
-                  required
-                />
                 <Input
                   id="geofenceRadiusMeters"
                   label="Geofence radius (meters)"
@@ -238,11 +469,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                 />
               </div>
             </div>
-            <Switch
-              checked={cognitiveMonitoringEnabled}
-              onChange={setCognitiveMonitoringEnabled}
-              label="Enable cognitive monitoring"
-            />
+
             {isEdit && identity?.role === 'supervisor' ? (
               <div className="register-dependant-page__field">
                 <label className="ds-label" htmlFor="status">
@@ -259,20 +486,49 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                 </select>
               </div>
             ) : null}
-          </Card>
+          </div>
         ) : null}
 
-        {step === 2 && !isEdit ? (
+        {step === 3 && !isEdit ? (
           <Card className="register-dependant-page__section">
             <div className="register-dependant-page__section-title">Primary family member</div>
             <FamilyMemberResolver selection={primarySelection} onSelect={setPrimarySelection} />
             <Input
               id="primaryRelationship"
-              label="Relationship"
+              label="Relationship with Dependant"
               value={primaryRelationship}
               onChange={(e) => setPrimaryRelationship(e.target.value)}
             />
           </Card>
+        ) : null}
+
+        {step === 4 && !isEdit ? (
+          <div className="register-dependant-page__section">
+            <p className="register-dependant-page__resolution-hint">
+              Optional - add any other family members who should have access to this dependant. You
+              can skip this step and add them later from the dependant&rsquo;s detail page.
+            </p>
+            {additionalContacts.map((contact, index) => (
+              <Card key={index} className="register-dependant-page__section">
+                <div className="register-dependant-page__section-title">
+                  Family contact {index + 2}
+                </div>
+                <FamilyMemberResolver
+                  selection={contact.selection}
+                  onSelect={(selection) => updateAdditionalContactSelection(index, selection)}
+                />
+                <Input
+                  id={`additionalContactRelationship-${index}`}
+                  label="Relationship with Dependant"
+                  value={contact.relationship}
+                  onChange={(e) => updateAdditionalContactRelationship(index, e.target.value)}
+                />
+              </Card>
+            ))}
+            <Button type="button" onClick={addAdditionalContact}>
+              Add another family contact
+            </Button>
+          </div>
         ) : null}
 
         {mutationError ? (
@@ -281,6 +537,14 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
               ? (mutationError.problem.detail ?? mutationError.problem.title)
               : 'Something went wrong.'}
           </div>
+        ) : null}
+
+        {additionalContactError ? (
+          <div className="register-dependant-page__error">{additionalContactError}</div>
+        ) : null}
+
+        {currentStepHint ? (
+          <p className="register-dependant-page__step-hint">{currentStepHint}</p>
         ) : null}
 
         <div className="register-dependant-page__step-actions">

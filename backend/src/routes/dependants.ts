@@ -78,6 +78,10 @@ interface DependantResponse {
   dob: string;
   gender: 'male' | 'female' | null;
   homeAddressText: string | null;
+  primaryConditionSummary: string | null;
+  county: string | null;
+  constituency: string | null;
+  ward: string | null;
   geofenceLat: number;
   geofenceLng: number;
   geofenceRadiusMeters: number;
@@ -95,6 +99,10 @@ function toDependantResponse(row: typeof schema.dependants.$inferSelect): Depend
     dob: row.dob,
     gender: row.gender,
     homeAddressText: row.homeAddressText,
+    primaryConditionSummary: row.primaryConditionSummary,
+    county: row.county,
+    constituency: row.constituency,
+    ward: row.ward,
     geofenceLat: row.geofenceLat,
     geofenceLng: row.geofenceLng,
     geofenceRadiusMeters: row.geofenceRadiusMeters,
@@ -138,6 +146,10 @@ function dependantColumns() {
     dob: schema.dependants.dob,
     gender: schema.dependants.gender,
     homeAddressText: schema.dependants.homeAddressText,
+    primaryConditionSummary: schema.dependants.primaryConditionSummary,
+    county: schema.dependants.county,
+    constituency: schema.dependants.constituency,
+    ward: schema.dependants.ward,
     geofenceLat: schema.dependants.geofenceLat,
     geofenceLng: schema.dependants.geofenceLng,
     geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
@@ -163,6 +175,8 @@ const addFamilyMemberRequestSchema = z
     email: z.string().email().optional(),
     phoneNumber: z.string().min(1),
     fullName: z.string().min(1),
+    idType: z.enum(['national_id', 'passport']).optional(),
+    idNumber: z.string().min(1).optional(),
     relationship: z.string().min(1).optional(),
     isPrimaryContact: z.boolean().default(false),
   })
@@ -170,6 +184,19 @@ const addFamilyMemberRequestSchema = z
     message:
       'Provide exactly one of cognitoSub (link an existing identity) or email (create a new one).',
     path: ['cognitoSub'],
+  })
+  .refine((data) => Boolean(data.idType) === Boolean(data.idNumber), {
+    message: 'idType and idNumber must be provided together.',
+    path: ['idType'],
+  })
+  // Only enforced on the email path (registering a brand-new user, the admin web app's "New
+  // user" mode) - the cognitoSub path can also create a brand-new `users` row (see
+  // resolveFamilyMemberIdentity's own comment) for a Cognito identity that was created outside
+  // this admin flow entirely, where the admin app never collects an ID document at all. Requiring
+  // it unconditionally would reject that legitimate, already-exercised path.
+  .refine((data) => !data.email || Boolean(data.idType), {
+    message: 'idType and idNumber are required when registering a brand-new user by email.',
+    path: ['idType'],
   });
 type AddFamilyMemberBody = z.infer<typeof addFamilyMemberRequestSchema>;
 
@@ -178,6 +205,13 @@ const createDependantRequestSchema = z.object({
   dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
   gender: z.enum(['male', 'female']).optional(),
   homeAddressText: z.string().min(1).optional(),
+  primaryConditionSummary: z.string().min(1).optional(),
+  // Required for every new registration (confirmed with the user, not assumed) - resolved
+  // client-side in the admin web app as the geofence pin is placed, unlike homeAddressText's own
+  // optional free-text treatment. Nullable at the DB level regardless (see schema.ts's comment).
+  county: z.string().min(1),
+  constituency: z.string().min(1),
+  ward: z.string().min(1),
   geofenceLat: z.number(),
   geofenceLng: z.number(),
   geofenceRadiusMeters: z.number().int().min(1),
@@ -189,6 +223,10 @@ const updateDependantRequestSchema = z.object({
   fullName: z.string().min(1).optional(),
   gender: z.enum(['male', 'female']).optional(),
   homeAddressText: z.string().min(1).optional(),
+  primaryConditionSummary: z.string().min(1).optional(),
+  county: z.string().min(1).optional(),
+  constituency: z.string().min(1).optional(),
+  ward: z.string().min(1).optional(),
   geofenceLat: z.number().optional(),
   geofenceLng: z.number().optional(),
   geofenceRadiusMeters: z.number().int().min(1).optional(),
@@ -439,6 +477,10 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             dob: body.dob,
             gender: body.gender,
             homeAddressText: body.homeAddressText,
+            primaryConditionSummary: body.primaryConditionSummary,
+            county: body.county,
+            constituency: body.constituency,
+            ward: body.ward,
             geofenceLat: body.geofenceLat,
             geofenceLng: body.geofenceLng,
             geofenceRadiusMeters: body.geofenceRadiusMeters,
@@ -462,6 +504,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
+              idType: resolved.body.idType,
+              idNumber: resolved.body.idNumber,
               role: 'family_member',
             })
             .returning();
@@ -748,6 +792,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
+              idType: resolved.body.idType,
+              idNumber: resolved.body.idNumber,
               role: 'family_member',
             })
             .returning();

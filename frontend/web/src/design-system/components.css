@@ -72,6 +72,10 @@
   color: var(--color-ink-default);
 }
 
+.ds-label__required {
+  color: var(--color-danger-text);
+}
+
 .ds-input {
   height: var(--control-height);
   border: 1px solid var(--color-border-structural);
@@ -224,6 +228,12 @@
 }
 
 /* ---------- Switch ---------- */
+
+.ds-switch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 .ds-switch-row {
   display: inline-flex;

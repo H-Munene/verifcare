@@ -1160,6 +1160,9 @@ components:
     DependantGender:
       type: string
       enum: [male, female]
+    IdType:
+      type: string
+      enum: [national_id, passport]
     SubjectType:
       type: string
       enum: [caregiver, dependant]
@@ -1339,6 +1342,16 @@ components:
             - type: 'null'
         homeAddressText:
           type: [string, 'null']
+        primaryConditionSummary:
+          description: Free-text clinical/care context for caregivers/supervisors - not a structured diagnosis field.
+          type: [string, 'null']
+        county:
+          description: Resolved client-side (admin web app) via a point-in-polygon lookup against IEBC ward boundary GeoJSON as the geofence pin is placed. Null for dependants registered before this field existed.
+          type: [string, 'null']
+        constituency:
+          type: [string, 'null']
+        ward:
+          type: [string, 'null']
         geofenceLat:
           type: number
           format: double
@@ -1363,7 +1376,18 @@ components:
           format: date-time
     CreateDependantRequest:
       type: object
-      required: [fullName, dob, geofenceLat, geofenceLng, geofenceRadiusMeters, primaryFamilyMember]
+      required:
+        [
+          fullName,
+          dob,
+          county,
+          constituency,
+          ward,
+          geofenceLat,
+          geofenceLng,
+          geofenceRadiusMeters,
+          primaryFamilyMember,
+        ]
       properties:
         fullName:
           type: string
@@ -1373,6 +1397,15 @@ components:
         gender:
           $ref: '#/components/schemas/DependantGender'
         homeAddressText:
+          type: string
+        primaryConditionSummary:
+          type: string
+        county:
+          description: Required for every new registration, unlike homeAddressText's own optional free-text treatment - resolved client-side as the geofence pin is placed.
+          type: string
+        constituency:
+          type: string
+        ward:
           type: string
         geofenceLat:
           type: number
@@ -1396,6 +1429,14 @@ components:
         gender:
           $ref: '#/components/schemas/DependantGender'
         homeAddressText:
+          type: string
+        primaryConditionSummary:
+          type: string
+        county:
+          type: string
+        constituency:
+          type: string
+        ward:
           type: string
         geofenceLat:
           type: number
@@ -1465,6 +1506,12 @@ components:
           type: string
         fullName:
           type: string
+        idType:
+          allOf: [{ $ref: '#/components/schemas/IdType' }]
+          description: 'Required together with idNumber when registering a brand-new user via email.'
+        idNumber:
+          type: string
+          description: 'Required together with idType when registering a brand-new user via email.'
         relationship:
           type: string
         isPrimaryContact:

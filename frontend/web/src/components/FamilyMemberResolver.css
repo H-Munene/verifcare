@@ -14,6 +14,21 @@
   flex: 1;
 }
 
+.family-member-resolver__row {
+  display: flex;
+  gap: 16px;
+}
+
+.family-member-resolver__row > * {
+  flex: 1;
+}
+
+.family-member-resolver__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .family-member-resolver__not-found {
   display: flex;
   align-items: center;

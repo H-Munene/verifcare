@@ -58,6 +58,11 @@ export const consentTypeEnum = pgEnum('consent_type', [
   'biometric_verification',
   'audio_cognitive_monitoring',
 ]);
+// Kenyan identity document types accepted when registering a brand-new family-member user
+// (HEZ-86 revision, 2026-09-21) - confirmed with the user as exactly these two, an enum rather
+// than text+CHECK since (unlike biometric_enrollments.status) there is no near-term need to add a
+// value inside the same migration that also uses it.
+export const idTypeEnum = pgEnum('id_type', ['national_id', 'passport']);
 
 // ============================================================================
 // users
@@ -75,6 +80,12 @@ export const users = pgTable(
     fullName: text().notNull(),
     role: text().notNull(),
     status: text().notNull().default('active'),
+    // Identity document captured when a supervisor/family_member registers a brand-new
+    // family-member user (HEZ-86 revision) - nullable since existing rows and every other role
+    // predate this and have no backfill mechanism, matching dependants.county's own
+    // nullable-column-but-validated-at-the-API-layer treatment for the same reason.
+    idType: idTypeEnum(),
+    idNumber: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -84,6 +95,10 @@ export const users = pgTable(
     check(
       'chk_users_phone_required_unless_supervisor',
       sql`${table.role} = 'supervisor' OR ${table.phoneNumber} IS NOT NULL`,
+    ),
+    check(
+      'chk_users_id_type_number_together',
+      sql`(${table.idType} IS NULL) = (${table.idNumber} IS NULL)`,
     ),
     index('idx_users_role').on(table.role),
   ],
@@ -118,6 +133,20 @@ export const dependants = pgTable(
     dob: date().notNull(),
     gender: dependantGenderEnum(),
     homeAddressText: text(),
+    // Free-text clinical/care context (e.g. "early-stage dementia, lives alone, mobility aid
+    // required") - a general description of the dependant's condition for caregivers/supervisors,
+    // not a structured diagnosis field. Optional, same nullable-free-text treatment as
+    // homeAddressText.
+    primaryConditionSummary: text(),
+    // Kenyan administrative geography (HEZ-86) - resolved client-side in the admin web app via a
+    // point-in-polygon lookup against IEBC ward boundary GeoJSON as the supervisor places the
+    // geofence pin, then sent here as plain names. Nullable at the DB level (existing rows
+    // predate this feature and have no backfill mechanism yet), even though the create endpoint
+    // requires all three for every new registration - matches homeAddressText's own
+    // nullable-column-but-validated-at-the-API-layer treatment for the same reason.
+    county: text(),
+    constituency: text(),
+    ward: text(),
     geofenceLat: doublePrecision().notNull(),
     geofenceLng: doublePrecision().notNull(),
     geofenceRadiusMeters: integer().notNull(),

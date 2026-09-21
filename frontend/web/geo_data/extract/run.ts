@@ -1,7 +1,7 @@
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import * as shapefile from "shapefile";
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as shapefile from 'shapefile';
 import type {
   ConstituencyFeature,
   ConstituencyFeatureCollection,
@@ -16,18 +16,21 @@ import type {
   WardFeature,
   WardFeatureCollection,
   WardRecord,
-} from "./types.js";
+} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const SOURCE_DIR = resolve(__dirname, "../source");
-const CONSTITUENCIES_SOURCE = resolve(SOURCE_DIR, "constituencies");
-const COUNTIES_SOURCE = resolve(SOURCE_DIR, "counties");
-const WARDS_SOURCE = resolve(SOURCE_DIR, "wards");
-const CONSTITUENCIES_OUT = resolve(__dirname, "../constituencies");
-const COUNTIES_OUT = resolve(__dirname, "../counties");
-const WARDS_OUT = resolve(__dirname, "../wards");
+const SOURCE_DIR = resolve(__dirname, '../source');
+const CONSTITUENCIES_SOURCE = resolve(SOURCE_DIR, 'constituencies');
+const COUNTIES_SOURCE = resolve(SOURCE_DIR, 'counties');
+const WARDS_SOURCE = resolve(SOURCE_DIR, 'wards');
+// Writes into public/geo_data/, not geo_data/ itself - Vite only serves files under public/ as
+// static assets at runtime, which is what the dependant registration map (HEZ-86) fetches from.
+// This directory (geo_data/extract/) holds the extraction tooling only, not runtime assets.
+const CONSTITUENCIES_OUT = resolve(__dirname, '../../public/geo_data/constituencies');
+const COUNTIES_OUT = resolve(__dirname, '../../public/geo_data/counties');
+const WARDS_OUT = resolve(__dirname, '../../public/geo_data/wards');
 
 const COORD_PRECISION = 6;
 const MERCATOR_MAX = 20037508.342789244;
@@ -35,17 +38,14 @@ const MERCATOR_MAX = 20037508.342789244;
 function mercatorToWgs84(x: number, y: number): [number, number] {
   const lng = (x / MERCATOR_MAX) * 180;
   const lat =
-    (180 / Math.PI) *
-    (2 * Math.atan(Math.exp((y / MERCATOR_MAX) * Math.PI)) - Math.PI / 2);
+    (180 / Math.PI) * (2 * Math.atan(Math.exp((y / MERCATOR_MAX) * Math.PI)) - Math.PI / 2);
   return [lng, lat];
 }
 
-function reprojectFromMercator(
-  geometry: AnyPolygonGeometry,
-): AnyPolygonGeometry {
-  if (geometry.type === "Polygon") {
+function reprojectFromMercator(geometry: AnyPolygonGeometry): AnyPolygonGeometry {
+  if (geometry.type === 'Polygon') {
     return {
-      type: "Polygon",
+      type: 'Polygon',
       coordinates: geometry.coordinates.map((ring) =>
         ring.map((coord) => {
           const [lng, lat] = mercatorToWgs84(coord[0]!, coord[1]!);
@@ -55,7 +55,7 @@ function reprojectFromMercator(
     };
   }
   return {
-    type: "MultiPolygon",
+    type: 'MultiPolygon',
     coordinates: geometry.coordinates.map((polygon) =>
       polygon.map((ring) =>
         ring.map((coord) => {
@@ -74,7 +74,7 @@ function ensureDir(dir: string): void {
 function assertSourceExists(dir: string, label: string): void {
   if (!existsSync(dir)) {
     throw new Error(
-      `Source directory not found: ${dir}\nRun "pnpm download-source" first to fetch the ${label} data.`
+      `Source directory not found: ${dir}\nRun "pnpm download-source" first to fetch the ${label} data.`,
     );
   }
 }
@@ -84,20 +84,18 @@ function roundCoord(n: number): number {
 }
 
 function roundCoordinates(geometry: AnyPolygonGeometry): AnyPolygonGeometry {
-  if (geometry.type === "Polygon") {
+  if (geometry.type === 'Polygon') {
     return {
-      type: "Polygon",
+      type: 'Polygon',
       coordinates: geometry.coordinates.map((ring) =>
-        ring.map((coord) => [roundCoord(coord[0]!), roundCoord(coord[1]!)])
+        ring.map((coord) => [roundCoord(coord[0]!), roundCoord(coord[1]!)]),
       ),
     };
   }
   return {
-    type: "MultiPolygon",
+    type: 'MultiPolygon',
     coordinates: geometry.coordinates.map((polygon) =>
-      polygon.map((ring) =>
-        ring.map((coord) => [roundCoord(coord[0]!), roundCoord(coord[1]!)])
-      )
+      polygon.map((ring) => ring.map((coord) => [roundCoord(coord[0]!), roundCoord(coord[1]!)])),
     ),
   };
 }
@@ -106,11 +104,11 @@ async function readConstituenciesFromShapefile(): Promise<{
   geojson: ConstituencyFeatureCollection;
   records: ConstituencyRecord[];
 }> {
-  assertSourceExists(CONSTITUENCIES_SOURCE, "constituencies");
+  assertSourceExists(CONSTITUENCIES_SOURCE, 'constituencies');
 
   const source = await shapefile.open(
-    resolve(CONSTITUENCIES_SOURCE, "constituencies.shp"),
-    resolve(CONSTITUENCIES_SOURCE, "constituencies.dbf")
+    resolve(CONSTITUENCIES_SOURCE, 'constituencies.shp'),
+    resolve(CONSTITUENCIES_SOURCE, 'constituencies.dbf'),
   );
 
   const features: ConstituencyFeature[] = [];
@@ -123,7 +121,7 @@ async function readConstituenciesFromShapefile(): Promise<{
 
     if (props.CONST_CODE > 0 && props.CONSTITUEN) {
       features.push({
-        type: "Feature",
+        type: 'Feature',
         properties: {
           constituency_code: props.CONST_CODE,
           constituency_name: props.CONSTITUEN,
@@ -148,7 +146,7 @@ async function readConstituenciesFromShapefile(): Promise<{
   records.sort((a, b) => a.constituency_code - b.constituency_code);
 
   return {
-    geojson: { type: "FeatureCollection", features },
+    geojson: { type: 'FeatureCollection', features },
     records,
   };
 }
@@ -157,11 +155,11 @@ async function readCountiesFromShapefile(): Promise<{
   geojson: CountyFeatureCollection;
   records: CountyRecord[];
 }> {
-  assertSourceExists(COUNTIES_SOURCE, "counties");
+  assertSourceExists(COUNTIES_SOURCE, 'counties');
 
   const source = await shapefile.open(
-    resolve(COUNTIES_SOURCE, "counties.shp"),
-    resolve(COUNTIES_SOURCE, "counties.dbf")
+    resolve(COUNTIES_SOURCE, 'counties.shp'),
+    resolve(COUNTIES_SOURCE, 'counties.dbf'),
   );
 
   const features: CountyFeature[] = [];
@@ -174,7 +172,7 @@ async function readCountiesFromShapefile(): Promise<{
 
     if (props.COUNTY_COD > 0) {
       features.push({
-        type: "Feature",
+        type: 'Feature',
         properties: {
           county_code: props.COUNTY_COD,
           county_name: props.COUNTY_NAM,
@@ -195,7 +193,7 @@ async function readCountiesFromShapefile(): Promise<{
   records.sort((a, b) => a.county_code - b.county_code);
 
   return {
-    geojson: { type: "FeatureCollection", features },
+    geojson: { type: 'FeatureCollection', features },
     records,
   };
 }
@@ -204,11 +202,11 @@ async function readWardsFromShapefile(): Promise<{
   geojson: WardFeatureCollection;
   records: WardRecord[];
 }> {
-  assertSourceExists(WARDS_SOURCE, "wards");
+  assertSourceExists(WARDS_SOURCE, 'wards');
 
   const source = await shapefile.open(
-    resolve(WARDS_SOURCE, "ward.results.formatted.shp"),
-    resolve(WARDS_SOURCE, "ward.results.formatted.dbf")
+    resolve(WARDS_SOURCE, 'ward.results.formatted.shp'),
+    resolve(WARDS_SOURCE, 'ward.results.formatted.dbf'),
   );
 
   const features: WardFeature[] = [];
@@ -230,7 +228,7 @@ async function readWardsFromShapefile(): Promise<{
       };
 
       features.push({
-        type: "Feature",
+        type: 'Feature',
         properties: mapped,
         geometry: roundCoordinates(reprojectFromMercator(geometry)),
       });
@@ -245,18 +243,18 @@ async function readWardsFromShapefile(): Promise<{
   records.sort((a, b) => a.ward_code.localeCompare(b.ward_code));
 
   return {
-    geojson: { type: "FeatureCollection", features },
+    geojson: { type: 'FeatureCollection', features },
     records,
   };
 }
 
 function writeJSON(filepath: string, data: unknown): void {
-  writeFileSync(filepath, JSON.stringify(data, null, 2), "utf-8");
+  writeFileSync(filepath, JSON.stringify(data, null, 2), 'utf-8');
   console.log(`Written: ${filepath}`);
 }
 
 function writeGeoJSON(filepath: string, data: unknown): void {
-  writeFileSync(filepath, JSON.stringify(data), "utf-8");
+  writeFileSync(filepath, JSON.stringify(data), 'utf-8');
   console.log(`Written: ${filepath}`);
 }
 
@@ -265,28 +263,25 @@ async function main(): Promise<void> {
   ensureDir(COUNTIES_OUT);
   ensureDir(WARDS_OUT);
 
-  console.log("Reading constituencies from shapefile...");
-  const { geojson: constGeoJSON, records: constRecords } =
-    await readConstituenciesFromShapefile();
-  writeJSON(resolve(CONSTITUENCIES_OUT, "constituencies.json"), constRecords);
-  writeGeoJSON(resolve(CONSTITUENCIES_OUT, "constituencies.geojson"), constGeoJSON);
+  console.log('Reading constituencies from shapefile...');
+  const { geojson: constGeoJSON, records: constRecords } = await readConstituenciesFromShapefile();
+  writeJSON(resolve(CONSTITUENCIES_OUT, 'constituencies.json'), constRecords);
+  writeGeoJSON(resolve(CONSTITUENCIES_OUT, 'constituencies.geojson'), constGeoJSON);
   console.log(`Constituencies: ${constRecords.length} records\n`);
 
-  console.log("Reading counties from shapefile...");
-  const { geojson: countyGeoJSON, records: countyRecords } =
-    await readCountiesFromShapefile();
-  writeJSON(resolve(COUNTIES_OUT, "counties.json"), countyRecords);
-  writeGeoJSON(resolve(COUNTIES_OUT, "counties.geojson"), countyGeoJSON);
+  console.log('Reading counties from shapefile...');
+  const { geojson: countyGeoJSON, records: countyRecords } = await readCountiesFromShapefile();
+  writeJSON(resolve(COUNTIES_OUT, 'counties.json'), countyRecords);
+  writeGeoJSON(resolve(COUNTIES_OUT, 'counties.geojson'), countyGeoJSON);
   console.log(`Counties: ${countyRecords.length} records\n`);
 
-  console.log("Reading wards from shapefile...");
-  const { geojson: wardGeoJSON, records: wardRecords } =
-    await readWardsFromShapefile();
-  writeJSON(resolve(WARDS_OUT, "wards.json"), wardRecords);
-  writeGeoJSON(resolve(WARDS_OUT, "wards.geojson"), wardGeoJSON);
+  console.log('Reading wards from shapefile...');
+  const { geojson: wardGeoJSON, records: wardRecords } = await readWardsFromShapefile();
+  writeJSON(resolve(WARDS_OUT, 'wards.json'), wardRecords);
+  writeGeoJSON(resolve(WARDS_OUT, 'wards.geojson'), wardGeoJSON);
   console.log(`Wards: ${wardRecords.length} records\n`);
 
-  console.log("Extraction complete.");
+  console.log('Extraction complete.');
 }
 
 main();
