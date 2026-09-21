@@ -192,10 +192,27 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // traffic is negligible. LambdaRestApi (proxy: true) mirrors the same
   // "route everything to the Lambda" shape the HTTP API had; the Express
   // app's own router still decides what to do with each path.
+  // A browser's CORS preflight is an unauthenticated OPTIONS request by definition - without this,
+  // it would hit the same Cognito-authorized proxy method every other verb does and get rejected
+  // before ever reaching Express, which is exactly the gap frontend/web/.env's own comment flagged
+  // ("pointing this at the real deployed ApiUrl... needs a CORS entry added... first - not done
+  // yet"). `defaultCorsPreflightOptions` makes CDK add a separate, unauthenticated mock OPTIONS
+  // integration per resource just for this. Origin left wide open deliberately, not restricted to
+  // one deployed frontend origin: this API's real authorization boundary is the Cognito JWT
+  // authorizer on every actual method, never CORS itself (a non-browser client can already call it
+  // from anywhere regardless of these headers) - the same reasoning app.ts's own permissive cors()
+  // and storage.ts's biometric-enrollments bucket CORS already rely on. X-Checkin-Session-Token
+  // added on top of the default header allowlist since the check-in flow (HEZ-33/34/35) sends it
+  // as a real custom header, not one of API Gateway's own CORS defaults.
   const restApi = new apigateway.LambdaRestApi(stack, "RestApi", {
     restApiName: "mzazi-care-api",
     handler: apiFunction,
     proxy: true,
+    defaultCorsPreflightOptions: {
+      allowOrigins: apigateway.Cors.ALL_ORIGINS,
+      allowMethods: apigateway.Cors.ALL_METHODS,
+      allowHeaders: [...apigateway.Cors.DEFAULT_HEADERS, "X-Checkin-Session-Token"],
+    },
     defaultMethodOptions: {
       authorizationType: apigateway.AuthorizationType.COGNITO,
       authorizer: cognitoAuthorizer,

@@ -13,6 +13,11 @@ coverage/
 .env.*
 !.env.example
 /temp_images
+
+# aws lambda invoke's own local output file (e.g. MigrationRunnerFunction invocations) - never
+# meaningful to commit, just whatever the last invoke happened to return.
+infra/out.json
+
 CLAUDE.md
 /.claude
 .agents
