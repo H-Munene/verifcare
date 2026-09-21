@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { BiometricEnrollment } from '../api/biometricEnrollments';
 import { uploadFileToPresignedUrl } from '../api/biometricEnrollments';
@@ -22,32 +22,37 @@ import './RegisterDependantPage.css';
 
 // Handles both registration (no :dependantId in the route) and editing (wireframe page 5 combines
 // both into one form, and PATCH /dependants/{id} already existed from HEZ-30, so this costs
-// nothing extra). The primaryFamilyMember mini-form only appears when registering - later family
-// members are added from the Dependant Detail page (DependantDetailPage.tsx, HEZ-56), matching
-// architecture.md's "first family member is linked atomically at registration, later members
-// added separately" design.
+// nothing extra).
 //
 // Presented as a stepper (2026-09-14, user request - modeled on a standard e-commerce checkout
-// stepper) rather than one long scrolling form: Details -> Location -> Exact Location -> Primary
-// Contact (registration only; editing has no primary-contact step, since that's not part of
-// PATCH /dependants/{id} at all - it's managed from DependantDetailPage instead). Location and
-// Exact Location are two separate steps, not two sections of one step (confirmed with the user) -
-// the county/constituency/ward cascade and the bounded Google Maps pin are different enough
-// concerns to warrant their own steps, and combining them into one page was also part of what
-// caused the Leaflet map's rendering to break (see components/LocationSelectorMap.tsx's own fix).
+// stepper) rather than one long scrolling form: Details -> Location -> Exact Location -> [Primary
+// Contact, registration only] -> Additional Contacts -> Photo. Only Primary Contact is
+// registration-only (2026-09-21 revision - editing now has every other step too): the primary
+// family member is a one-time choice made atomically at `POST /dependants` (HEZ-30's own
+// "primaryFamilyMember" field), never revisited on an edit, but Additional Contacts and Photo are
+// both just as meaningful for an already-registered dependant as for a brand-new one - a supervisor
+// editing an existing dependant may still need to link another family member or enroll/replace the
+// dependant's check-in photo, and forcing them out to DependantDetailPage's separate UI for either
+// was never a deliberate design choice, just an oversight from when those two steps were built
+// registration-only. Location and Exact Location are two separate steps, not two sections of one
+// step (confirmed with the user) - the county/constituency/ward cascade and the bounded Google Maps
+// pin are different enough concerns to warrant their own steps, and combining them into one page was
+// also part of what caused the Leaflet map's rendering to break (see
+// components/LocationSelectorMap.tsx's own fix).
 //
-// Photo (registration only, 2026-09-21) is a trailing step after Additional Contacts, not folded
-// into Details - POST /biometric-enrollments requires the dependant to already exist (it looks the
-// subject up by id before allowing an enrollment), so the dependant record has to be created first.
-// "Save" on the Additional Contacts step therefore now creates the dependant and advances into this
-// step instead of navigating away; the Photo step's own Skip/Finish actions do the navigation. Why
-// this dependant photo needs to exist at all: check-in's dependant co-presence step (HEZ-35)
-// CompareFaces-matches the live check-in photo against this subject's own active enrollment, and
-// fails with not_enrolled if there isn't one. Confirmed with the user as a single required photo
-// (matches the caregiver check-in step's own single-photo design), not the full 1-3 image slots
-// DependantDetailPage's Biometric Enrollment section supports - that page remains where a skipped
-// or re-taken photo gets added/updated later, imageOrder fixed at 1 here rather than exposed as a
-// choice.
+// Photo is a trailing step after Additional Contacts, not folded into Details - POST
+// /biometric-enrollments requires the dependant to already exist (it looks the subject up by id
+// before allowing an enrollment), which registration doesn't have until Additional Contacts' own
+// "Save" creates it. "Save" on the Additional Contacts step therefore creates/updates the dependant
+// and advances into the Photo step instead of navigating away; the Photo step's own Skip/Finish
+// actions do the navigation. Why this dependant photo needs to exist at all: check-in's dependant
+// co-presence step (HEZ-35) CompareFaces-matches the live check-in photo against this subject's own
+// active enrollment, and fails with not_enrolled if there isn't one. Confirmed with the user as a
+// single required photo (matches the caregiver check-in step's own single-photo design), not the
+// full 1-3 image slots DependantDetailPage's Biometric Enrollment section supports - that page
+// remains where a skipped photo (or a 2nd/3rd image) gets added later, imageOrder fixed at 1 here
+// rather than exposed as a choice. Editing shows whatever's already enrolled at imageOrder 1 (if
+// any) before the upload form, so this step doesn't look like "no photo exists" when one does.
 //
 // Consent capture (biometric-verification / audio-cognitive-monitoring, shown in the wireframe)
 // is deliberately not built here - HEZ-40 ("Consent capture endpoints") is a separate, not-yet-
@@ -126,14 +131,23 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const navigate = useNavigate();
 
   const steps = isEdit
-    ? ['Details', 'Location', 'Exact Location']
+    ? ['Details', 'Location', 'Exact Location', 'Additional Contacts', 'Photo']
     : ['Details', 'Location', 'Exact Location', 'Primary Contact', 'Additional Contacts', 'Photo'];
   const [step, setStep] = useState(0);
-  // The step that actually creates/updates the dependant - Additional Contacts for a new
-  // registration (Photo, after it, is a trailing post-creation step with its own Skip/Finish
-  // actions, not part of this "Save" gate), Exact Location for an edit (no Photo step at all).
-  const isDataEntryLastStep = step === steps.length - (isEdit ? 1 : 2);
-  const isPhotoStep = !isEdit && step === steps.length - 1;
+  // Named positions, not magic numbers - registration and editing use different step orders (only
+  // registration has Primary Contact), so a step's meaning can't be inferred from its index alone.
+  const detailsStepIndex = 0;
+  const locationStepIndex = 1;
+  const exactLocationStepIndex = 2;
+  const primaryContactStepIndex = isEdit ? -1 : 3;
+  const additionalContactsStepIndex = isEdit ? 3 : 4;
+  // Always the last step in both orderings.
+  const photoStepIndex = steps.length - 1;
+  // The step that actually creates/updates the dependant - Additional Contacts in both modes now
+  // (Photo, after it, is a trailing step with its own Skip/Finish actions, not part of this "Save"
+  // gate).
+  const isDataEntryLastStep = step === additionalContactsStepIndex;
+  const isPhotoStep = step === photoStepIndex;
 
   const initialName = splitFullName(initial?.fullName ?? '');
   const [firstName, setFirstName] = useState(initialName.firstName);
@@ -269,9 +283,21 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     onSuccess: (enrollment) => setPhotoResult(enrollment),
   });
 
+  // Editing reaches the Photo step with a dependant that may already have an enrolled photo - shown
+  // above the upload form so this step doesn't look like "no photo exists" when one does (a fresh
+  // registration has nothing to find yet, but the query is harmless either way).
+  const existingEnrollmentQuery = useQuery({
+    queryKey: ['dependant', createdDependantId, 'biometric-enrollments', 'photo-step'],
+    queryFn: () => biometricEnrollments.listEnrollments('dependant', createdDependantId!),
+    enabled: isPhotoStep && Boolean(createdDependantId),
+  });
+  const existingEnrollment = existingEnrollmentQuery.data?.find((e) => e.imageOrder === 1);
+
   // Per-step validity, gating the "Next step" button the same way the final Save button was
   // already gated - a step's own required fields must be filled before moving on, rather than
-  // discovering a validation problem only after reaching the end.
+  // discovering a validation problem only after reaching the end. Additional Contacts and Photo are
+  // deliberately not included in either array - both are optional/skippable with no validation, so
+  // the `?? true` fallback below covers them regardless of mode.
   const detailsValid = firstName.trim() !== '' && lastName.trim() !== '' && dob !== '';
   // A brand-new registration must resolve county/constituency/ward and place a valid pin before it
   // can proceed (confirmed with the user) - editing an existing dependant is not blocked on either,
@@ -283,34 +309,69 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     exactLocationValid &&
     geofenceRadiusMeters !== '';
   const primaryContactValid = Boolean(primarySelection);
-  // Additional Contacts (step 4) is deliberately not included here - the user confirmed it's
-  // optional and skippable with no validation, so the `?? true` fallback below covers it.
-  const currentStepValid =
-    [
-      detailsValid,
-      isEdit || locationSelectorValid,
-      isEdit || exactLocationStepValid,
-      primaryContactValid,
-    ][step] ?? true;
+  const stepValidityByIndex = isEdit
+    ? [detailsValid, true, true]
+    : [detailsValid, locationSelectorValid, exactLocationStepValid, primaryContactValid];
+  const currentStepValid = stepValidityByIndex[step] ?? true;
   // Surfaces *why* Next/Save is disabled, rather than leaving a disabled button as the only signal
   // - the underlying gate above is what actually enforces this; this is purely to make it visible.
-  const stepHints = [
-    'Enter first name, last name, and date of birth to continue.',
-    'Select a county, constituency, and ward to continue.',
-    'Place a pin inside the ward boundary to continue.',
-    'Select a primary family member to continue.',
-  ];
+  const stepHints = isEdit
+    ? ['Enter first name, last name, and date of birth to continue.']
+    : [
+        'Enter first name, last name, and date of birth to continue.',
+        'Select a county, constituency, and ward to continue.',
+        'Place a pin inside the ward boundary to continue.',
+        'Select a primary family member to continue.',
+      ];
   const currentStepHint = currentStepValid ? null : stepHints[step];
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!isDataEntryLastStep) {
-      // Defensive only - the submit button doesn't exist in the DOM before the last step, so this
-      // shouldn't normally fire, but an Enter keypress in some browsers can still submit a form
-      // with no visible submit button.
+      // Defensive only - preventEnterSubmit below already stops the real-world case (Enter inside
+      // a text input), this only guards a submit reaching here some other way.
       return;
     }
     void submitForm();
+  }
+
+  // Pressing Enter inside a plain text input implicitly submits its form when a submit button
+  // exists anywhere in it - the Additional Contacts step's own Save button qualifies, so without
+  // this, pressing Enter while typing a new family member's name/email/etc. immediately fired
+  // Save and jumped to the Photo step mid-entry (a real bug found by testing, not a guess).
+  // Buttons are deliberately not excluded here - Enter on a focused button should still activate
+  // it normally, and its target.tagName is "BUTTON", not "INPUT".
+  function preventEnterSubmit(event: KeyboardEvent<HTMLFormElement>): void {
+    if (event.key === 'Enter' && (event.target as HTMLElement).tagName === 'INPUT') {
+      event.preventDefault();
+    }
+  }
+
+  // Each additional contact is its own linking call (POST /dependants only ever links the primary
+  // contact atomically) - a failure here must not undo the save that already succeeded, so it's
+  // surfaced as a separate, non-blocking notice instead, since the contact can still be added
+  // afterward from the dependant's own detail page. Submitted drafts are cleared afterward (success
+  // or failure) so that going Back to this step and saving again - now possible since the Photo
+  // step has its own Back button too - never resends the same contact a second time.
+  async function linkAdditionalContacts(id: string) {
+    const drafts = additionalContacts.filter((c) => c.selection);
+    if (drafts.length === 0) {
+      return;
+    }
+    setAdditionalContactError(null);
+    for (const contact of drafts) {
+      try {
+        await dependants.addFamilyMember(id, {
+          ...contact.selection!,
+          relationship: contact.relationship || undefined,
+        });
+      } catch {
+        setAdditionalContactError(
+          "The dependant was saved, but one or more additional family contacts could not be added. Add them from the dependant's detail page instead.",
+        );
+      }
+    }
+    setAdditionalContacts([]);
   }
 
   async function submitForm() {
@@ -325,22 +386,31 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
 
     if (isEdit) {
       try {
-        await updateMutation.mutateAsync({
-          ...common,
-          // Sent only when the supervisor actually re-resolved these on this edit (e.g. by
-          // picking a new ward and pin) - an unrelated field edit must not overwrite existing
-          // county/constituency/ward/coordinates, and the backend's own zod schema rejects an
-          // empty county/constituency/ward string outright.
-          ...(county ? { county } : {}),
-          ...(constituency ? { constituency } : {}),
-          ...(ward ? { ward } : {}),
-          ...(geofenceLat !== null ? { geofenceLat } : {}),
-          ...(geofenceLng !== null ? { geofenceLng } : {}),
-          ...(identity?.role === 'supervisor' ? { status } : {}),
-        });
+        // Only PATCH the first time this step is saved - revisiting it (via the Photo step's own
+        // Back button) after createdDependantId is already set should just link any newly-added
+        // contacts, not resend the same update again.
+        if (!createdDependantId) {
+          await updateMutation.mutateAsync({
+            ...common,
+            // Sent only when the supervisor actually re-resolved these on this edit (e.g. by
+            // picking a new ward and pin) - an unrelated field edit must not overwrite existing
+            // county/constituency/ward/coordinates, and the backend's own zod schema rejects an
+            // empty county/constituency/ward string outright.
+            ...(county ? { county } : {}),
+            ...(constituency ? { constituency } : {}),
+            ...(ward ? { ward } : {}),
+            ...(geofenceLat !== null ? { geofenceLat } : {}),
+            ...(geofenceLng !== null ? { geofenceLng } : {}),
+            ...(identity?.role === 'supervisor' ? { status } : {}),
+          });
+        }
+        await linkAdditionalContacts(dependantId!);
         void queryClient.invalidateQueries({ queryKey: ['dependants'] });
         void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
-        void navigate(`/dependants/${dependantId}`);
+        // Don't navigate yet - advance into the Photo step instead, matching registration's own
+        // flow (see submitForm's create branch below for why Photo can't be reached any other way).
+        setCreatedDependantId(dependantId!);
+        setStep((s) => s + 1);
       } catch {
         // updateMutation's own `error` state (surfaced via mutationError below) already reports
         // this - nothing further to do here.
@@ -353,45 +423,30 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     }
 
     try {
-      const created = await createMutation.mutateAsync({
-        ...common,
-        county,
-        constituency,
-        ward,
-        geofenceLat: geofenceLat!,
-        geofenceLng: geofenceLng!,
-        primaryFamilyMember: {
-          ...primarySelection,
-          relationship: primaryRelationship || undefined,
-        },
-      });
+      // Only actually create once - revisiting this step (via the Photo step's own Back button)
+      // after createdDependantId is already set must not POST a second, duplicate dependant.
+      const id =
+        createdDependantId ??
+        (
+          await createMutation.mutateAsync({
+            ...common,
+            county,
+            constituency,
+            ward,
+            geofenceLat: geofenceLat!,
+            geofenceLng: geofenceLng!,
+            primaryFamilyMember: {
+              ...primarySelection,
+              relationship: primaryRelationship || undefined,
+            },
+          })
+        ).id;
 
-      // Each additional contact is its own linking call, made only now that a dependantId
-      // exists - POST /dependants can only ever link one (the primary) family member atomically.
-      // A failure here must not undo the registration that already succeeded; it's surfaced as a
-      // separate, non-blocking notice instead, since the contact can still be added afterward
-      // from the dependant's own detail page.
-      setAdditionalContactError(null);
-      for (const contact of additionalContacts) {
-        if (!contact.selection) {
-          continue;
-        }
-        try {
-          await dependants.addFamilyMember(created.id, {
-            ...contact.selection,
-            relationship: contact.relationship || undefined,
-          });
-        } catch {
-          setAdditionalContactError(
-            "The dependant was registered, but one or more additional family contacts could not be added. Add them from the dependant's detail page instead.",
-          );
-        }
-      }
-
+      await linkAdditionalContacts(id);
       void queryClient.invalidateQueries({ queryKey: ['dependants'] });
       // Don't navigate yet - advance into the Photo step instead, now that a real dependantId
       // exists for it to enroll a photo against.
-      setCreatedDependantId(created.id);
+      setCreatedDependantId(id);
       setStep((s) => s + 1);
     } catch {
       // createMutation's own `error` state (surfaced via mutationError below) already reports
@@ -408,8 +463,13 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         {isEdit ? 'Edit Dependant' : 'Register Dependant'}
       </h1>
       <Stepper steps={steps} currentStepIndex={step} />
-      <form onSubmit={handleSubmit} className="register-dependant-page__form" autoComplete="off">
-        {step === 0 ? (
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={preventEnterSubmit}
+        className="register-dependant-page__form"
+        autoComplete="off"
+      >
+        {step === detailsStepIndex ? (
           <Card className="register-dependant-page__section">
             <div className="register-dependant-page__name-row">
               <Input
@@ -477,7 +537,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           </Card>
         ) : null}
 
-        {step === 1 ? (
+        {step === locationStepIndex ? (
           <div className="register-dependant-page__section">
             {/* LocationSelector owns the cascading dropdown UI state itself, but unmounts and
                 remounts fresh every time the wizard leaves and returns to this step (this ternary
@@ -494,7 +554,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           </div>
         ) : null}
 
-        {step === 2 ? (
+        {step === exactLocationStepIndex ? (
           <div className="register-dependant-page__section">
             {wardFeature ? (
               <ExactLocationMap
@@ -545,7 +605,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           </div>
         ) : null}
 
-        {step === 3 && !isEdit ? (
+        {!isEdit && step === primaryContactStepIndex ? (
           <Card className="register-dependant-page__section">
             <div className="register-dependant-page__section-title">Primary family member</div>
             <FamilyMemberResolver selection={primarySelection} onSelect={setPrimarySelection} />
@@ -558,7 +618,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           </Card>
         ) : null}
 
-        {step === 4 && !isEdit ? (
+        {step === additionalContactsStepIndex ? (
           <div className="register-dependant-page__section">
             <p className="register-dependant-page__resolution-hint">
               Optional - add any other family members who should have access to this dependant. You
@@ -567,7 +627,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
             {additionalContacts.map((contact, index) => (
               <Card key={index} className="register-dependant-page__section">
                 <div className="register-dependant-page__section-title">
-                  Family contact {index + 2}
+                  {isEdit ? `Family contact ${index + 1}` : `Family contact ${index + 2}`}
                 </div>
                 <FamilyMemberResolver
                   selection={contact.selection}
@@ -614,6 +674,13 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
               </>
             ) : (
               <>
+                {existingEnrollment ? (
+                  <p className="register-dependant-page__resolution-hint">
+                    {existingEnrollment.status === 'flagged'
+                      ? 'The current photo is flagged for a supervisor to review on the Flagged Enrollments page.'
+                      : `Already enrolled - quality score ${existingEnrollment.qualityScore?.toFixed(1) ?? 'n/a'}. Uploading a new photo replaces it.`}
+                  </p>
+                ) : null}
                 <Input
                   id="dependantPhoto"
                   type="file"
@@ -633,7 +700,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                     type="button"
                     onClick={() => void navigate(`/dependants/${createdDependantId}`)}
                   >
-                    Skip for now
+                    {existingEnrollment ? 'Keep current photo' : 'Skip for now'}
                   </Button>
                   <Button
                     type="button"
@@ -641,7 +708,11 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                     disabled={photoMutation.isPending || !photoFile}
                     onClick={() => photoMutation.mutate()}
                   >
-                    {photoMutation.isPending ? 'Uploading...' : 'Upload & Finish'}
+                    {photoMutation.isPending
+                      ? 'Uploading...'
+                      : existingEnrollment
+                        ? 'Replace & Finish'
+                        : 'Upload & Finish'}
                   </Button>
                 </div>
               </>
@@ -665,29 +736,27 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           <p className="register-dependant-page__step-hint">{currentStepHint}</p>
         ) : null}
 
-        {isPhotoStep ? null : (
-          <div className="register-dependant-page__step-actions">
-            {step > 0 ? (
-              <Button type="button" onClick={() => setStep((s) => s - 1)}>
-                Back
-              </Button>
-            ) : null}
-            {isDataEntryLastStep ? (
-              <Button type="submit" variant="primary" disabled={pending || !currentStepValid}>
-                {pending ? 'Saving...' : 'Save'}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="primary"
-                disabled={!currentStepValid}
-                onClick={() => setStep((s) => s + 1)}
-              >
-                Next step
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="register-dependant-page__step-actions">
+          {step > 0 ? (
+            <Button type="button" onClick={() => setStep((s) => s - 1)}>
+              Back
+            </Button>
+          ) : null}
+          {isPhotoStep ? null : isDataEntryLastStep ? (
+            <Button type="submit" variant="primary" disabled={pending || !currentStepValid}>
+              {pending ? 'Saving...' : 'Save'}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="primary"
+              disabled={!currentStepValid}
+              onClick={() => setStep((s) => s + 1)}
+            >
+              Next step
+            </Button>
+          )}
+        </div>
       </form>
     </div>
   );

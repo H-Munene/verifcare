@@ -15,8 +15,9 @@ coverage/
 /temp_images
 
 # aws lambda invoke's own local output file (e.g. MigrationRunnerFunction invocations) - never
-# meaningful to commit, just whatever the last invoke happened to return.
-infra/out.json
+# meaningful to commit, just whatever the last invoke happened to return. Not scoped to one
+# directory since `aws lambda invoke` gets run from wherever it's convenient (infra/, repo root).
+out.json
 
 CLAUDE.md
 /.claude
