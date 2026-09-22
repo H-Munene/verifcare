@@ -1,10 +1,13 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppShell } from './components/AppShell';
+import { CaregiverDetailPage } from './pages/CaregiverDetailPage';
+import { CaregiversListPage } from './pages/CaregiversListPage';
 import { DependantDetailPage } from './pages/DependantDetailPage';
 import { DependantsListPage } from './pages/DependantsListPage';
 import { FlaggedEnrollmentsPage } from './pages/FlaggedEnrollmentsPage';
 import { LoginPage } from './pages/LoginPage';
+import { RegisterCaregiverPage } from './pages/RegisterCaregiverPage';
 import { RegisterDependantPage } from './pages/RegisterDependantPage';
 
 export function App() {
@@ -22,6 +25,10 @@ export function App() {
                 <Route path="/dependants/new" element={<RegisterDependantPage />} />
                 <Route path="/dependants/:dependantId" element={<DependantDetailPage />} />
                 <Route path="/dependants/:dependantId/edit" element={<RegisterDependantPage />} />
+                <Route path="/caregivers" element={<CaregiversListPage />} />
+                <Route path="/caregivers/new" element={<RegisterCaregiverPage />} />
+                <Route path="/caregivers/:caregiverId" element={<CaregiverDetailPage />} />
+                <Route path="/caregivers/:caregiverId/edit" element={<RegisterCaregiverPage />} />
                 <Route path="/flagged-enrollments" element={<FlaggedEnrollmentsPage />} />
               </Routes>
             </AppShell>

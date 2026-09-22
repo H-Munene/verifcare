@@ -1,0 +1,48 @@
+/* Renamed copy of DependantDetailPage.css's equivalent rules (dependant-detail__section-header/
+   -title/-empty and dependant-detail__modal-*), kept as its own prefix since this component is
+   shared by CaregiverDetailPage too, which doesn't import DependantDetailPage.css. */
+
+.biometric-enrollment-section {
+  margin-bottom: 24px;
+}
+
+.biometric-enrollment-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.biometric-enrollment-section__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+  margin: 0;
+}
+
+.biometric-enrollment-section__empty {
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}
+
+.biometric-enrollment-section__modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.biometric-enrollment-section__modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.biometric-enrollment-section__modal-error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-default);
+  padding: 8px 10px;
+}

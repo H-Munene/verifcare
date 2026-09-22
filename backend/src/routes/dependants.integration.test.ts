@@ -148,6 +148,7 @@ describe.skipIf(!hasTestDb)(
           .mockImplementation(({ email }: { email: string }) =>
             Promise.resolve(`created-sub-${email}`),
           ),
+        lookupUserByEmail: vi.fn().mockResolvedValue(null),
       };
       app = buildTestApp(cognitoAdmin);
     });

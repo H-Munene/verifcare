@@ -99,6 +99,7 @@ describe.skipIf(!hasTestDb)(
       cognitoAdmin = {
         assignRole: vi.fn().mockResolvedValue(undefined),
         createUser: vi.fn().mockResolvedValue('unused-sub'),
+        lookupUserByEmail: vi.fn().mockResolvedValue(null),
       };
       app = buildTestApp(cognitoAdmin);
     });
@@ -170,6 +171,61 @@ describe.skipIf(!hasTestDb)(
           });
 
         expect(response.status).toBe(400);
+      });
+    });
+
+    describe('GET /caregivers/cognito-lookup', () => {
+      it('returns the resolved Cognito identity for a found email', async () => {
+        cognitoAdmin.lookupUserByEmail = vi.fn().mockResolvedValue({
+          cognitoSub: 'looked-up-sub',
+          email: 'amina@example.com',
+          phoneNumber: '+254700000099',
+          fullName: 'Amina Wanjiru',
+        });
+
+        const response = await request(app)
+          .get('/caregivers/cognito-lookup')
+          .query({ email: 'amina@example.com' })
+          .set('x-test-auth', supervisorAuth);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+          cognitoSub: 'looked-up-sub',
+          email: 'amina@example.com',
+          phoneNumber: '+254700000099',
+          fullName: 'Amina Wanjiru',
+        });
+        expect(cognitoAdmin.lookupUserByEmail).toHaveBeenCalledWith('amina@example.com');
+      });
+
+      it('returns 404 when no Cognito user has that email', async () => {
+        cognitoAdmin.lookupUserByEmail = vi.fn().mockResolvedValue(null);
+
+        const response = await request(app)
+          .get('/caregivers/cognito-lookup')
+          .query({ email: 'nobody@example.com' })
+          .set('x-test-auth', supervisorAuth);
+
+        expect(response.status).toBe(404);
+      });
+
+      it('returns 400 for a malformed email', async () => {
+        const response = await request(app)
+          .get('/caregivers/cognito-lookup')
+          .query({ email: 'not-an-email' })
+          .set('x-test-auth', supervisorAuth);
+
+        expect(response.status).toBe(400);
+      });
+
+      it('returns 403 for a non-supervisor caller', async () => {
+        const response = await request(app)
+          .get('/caregivers/cognito-lookup')
+          .query({ email: 'amina@example.com' })
+          .set('x-test-auth', caregiverAuth);
+
+        expect(response.status).toBe(403);
+        expect(cognitoAdmin.lookupUserByEmail).not.toHaveBeenCalled();
       });
     });
 

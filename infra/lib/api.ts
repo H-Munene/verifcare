@@ -89,12 +89,15 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       // calls with a generic 401, even though the token itself was perfectly valid. See
       // backend/src/config.ts and backend/src/auth/verifier.ts.
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
-      CAREGIVER_USER_POOL_CLIENT_ID: caregiverAppUserPoolClient.userPoolClientId,
-      FAMILY_MEMBER_USER_POOL_CLIENT_ID: familyMemberAppUserPoolClient.userPoolClientId,
+      CAREGIVER_USER_POOL_CLIENT_ID:
+        caregiverAppUserPoolClient.userPoolClientId,
+      FAMILY_MEMBER_USER_POOL_CLIENT_ID:
+        familyMemberAppUserPoolClient.userPoolClientId,
       BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
       BIOMETRIC_FACES_COLLECTION_ID: biometricFacesCollection.collectionId,
-      CHECKIN_LIVENESS_FRAMES_BUCKET_NAME: checkinLivenessFramesBucket.bucketName,
+      CHECKIN_LIVENESS_FRAMES_BUCKET_NAME:
+        checkinLivenessFramesBucket.bucketName,
     },
   });
 
@@ -120,6 +123,13 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // Scoped to this user pool only, not a wildcard - same pattern as the
   // grant above.
   userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
+
+  // Lets GET /caregivers/cognito-lookup (HEZ-54) resolve a caregiver's email to their Cognito sub
+  // before POST /caregivers, which requires one - there's no caregiver self-signup flow yet
+  // (HEZ-63/64 still Backlog) to create that identity through this app, so a supervisor has to
+  // look up one that already exists elsewhere in the pool. Scoped to this user pool only, same
+  // pattern as the two grants above.
+  userPool.grant(apiFunction, "cognito-idp:ListUsers");
 
   // Lets api's biometric-enrollment upload flow (HEZ-31) sign a presigned PUT
   // URL that S3 will actually honor - a presigned URL is only valid if the
@@ -164,7 +174,11 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // collection, not every collection in the account.
   apiFunction.addToRolePolicy(
     new iam.PolicyStatement({
-      actions: ["rekognition:IndexFaces", "rekognition:SearchFacesByImage", "rekognition:DeleteFaces"],
+      actions: [
+        "rekognition:IndexFaces",
+        "rekognition:SearchFacesByImage",
+        "rekognition:DeleteFaces",
+      ],
       resources: [biometricFacesCollection.attrArn],
     }),
   );
@@ -211,7 +225,10 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     defaultCorsPreflightOptions: {
       allowOrigins: apigateway.Cors.ALL_ORIGINS,
       allowMethods: apigateway.Cors.ALL_METHODS,
-      allowHeaders: [...apigateway.Cors.DEFAULT_HEADERS, "X-Checkin-Session-Token"],
+      allowHeaders: [
+        ...apigateway.Cors.DEFAULT_HEADERS,
+        "X-Checkin-Session-Token",
+      ],
     },
     defaultMethodOptions: {
       authorizationType: apigateway.AuthorizationType.COGNITO,

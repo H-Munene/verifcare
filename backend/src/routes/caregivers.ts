@@ -1,13 +1,20 @@
-// POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId} (HEZ-29). Every endpoint here is
-// supervisor-only (confirmed with the user before implementing) - architecture.md frames caregiver
-// registration as a supervisor action, unlike family_member/supervisor self-signup, and nothing
-// currently needs a caregiver to self-view or self-edit their own record. Adding that later is a
-// small, additive change (one requireRole call becoming an ownership check, the same shape
-// routes/users.ts already has) once the caregiver mobile app actually needs it - not built ahead
-// of that real need.
+// POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId}, GET /caregivers/cognito-lookup
+// (HEZ-29, HEZ-54). Every endpoint here is supervisor-only (confirmed with the user before
+// implementing) - architecture.md frames caregiver registration as a supervisor action, unlike
+// family_member/supervisor self-signup, and nothing currently needs a caregiver to self-view or
+// self-edit their own record. Adding that later is a small, additive change (one requireRole call
+// becoming an ownership check, the same shape routes/users.ts already has) once the caregiver
+// mobile app actually needs it - not built ahead of that real need.
 //
 // caregivers is a 1:1 shared-PK extension of users (caregivers.userId === users.id), so every
 // response here is a join, and POST /caregivers creates both rows in one transaction.
+//
+// GET /caregivers/cognito-lookup (2026-09-22, HEZ-54) exists because POST /caregivers requires an
+// already-existing cognitoSub, and there's no caregiver self-signup flow anywhere in this product
+// yet (HEZ-63/64 still Backlog) - a supervisor registering a caregiver needs a way to resolve
+// "this caregiver's email" into their Cognito sub first. Registered before the /:caregiverId
+// routes below, not after - Express matches routes in registration order, and /:caregiverId would
+// otherwise swallow "cognito-lookup" as a (invalid) caregiverId value.
 
 import { and, asc, eq } from 'drizzle-orm';
 import { Router, type RequestHandler } from 'express';
@@ -72,6 +79,10 @@ const listCaregiversQuerySchema = z.object({
     .transform((v) => (v === undefined ? undefined : v === 'true')),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+const cognitoLookupQuerySchema = z.object({
+  email: z.string().email(),
 });
 
 function caregiverSelection() {
@@ -194,6 +205,30 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         });
         return;
       }
+      next(err);
+    }
+  });
+
+  // Registered before GET /:caregiverId - see this file's header comment for why the ordering
+  // matters here specifically.
+  router.get('/cognito-lookup', async (req, res, next) => {
+    const query = parseOrSendProblem(cognitoLookupQuerySchema, req.query, res);
+    if (!query) {
+      return;
+    }
+    try {
+      const identity = await cognitoAdmin.lookupUserByEmail(query.email);
+      if (!identity) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail: 'No Cognito user has this email.',
+        });
+        return;
+      }
+      res.status(200).json(identity);
+    } catch (err) {
       next(err);
     }
   });

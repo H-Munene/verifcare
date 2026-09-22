@@ -5,13 +5,13 @@ import { NavItem } from '../design-system/NavItem';
 import './AppShell.css';
 
 // Matches the wireframe's global chrome (temp_images's design prompt): left sidebar nav with all
-// 7 sections, top bar with the signed-in user's identity and sign-out. Only "Dependants" is a
-// real route this pass (see docs/project-state.md's HEZ-52/53/55/56 entry) - every other section
-// renders present-but-disabled, so the shell matches the design without claiming functionality
-// that doesn't exist yet.
+// 7 sections, top bar with the signed-in user's identity and sign-out. "Dependants" and
+// "Caregivers" are real routes (see docs/project-state.md's HEZ-52/53/54/55/56 entry) - every
+// other section renders present-but-disabled, so the shell matches the design without claiming
+// functionality that doesn't exist yet.
 const NAV_SECTIONS = [
   { label: 'Overview', path: undefined },
-  { label: 'Caregivers', path: undefined },
+  { label: 'Caregivers', path: '/caregivers' },
   { label: 'Dependants', path: '/dependants' },
   { label: 'Scheduling', path: undefined },
   { label: 'Visits', path: undefined },
@@ -23,6 +23,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { identity, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  // Every /caregivers route is supervisor-only on the backend (requireRole('supervisor') covers
+  // the whole router, not just registration - a caregiver can never self-register, confirmed with
+  // the user) - disabled here too for a signed-in non-supervisor, rather than only finding out via
+  // a failed request, the same "hide what you can't use" treatment Flagged Enrollments/Make
+  // Primary/the dependant status field already get elsewhere in this app.
+  const isSupervisor = identity?.role === 'supervisor';
+  const navSections = NAV_SECTIONS.map((section) =>
+    section.label === 'Caregivers' && !isSupervisor ? { ...section, path: undefined } : section,
+  );
 
   return (
     <div className="app-shell">
@@ -32,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="app-shell__brand-subtitle">Supervisor Console</div>
         </div>
         <nav className="app-shell__nav">
-          {NAV_SECTIONS.map((section) => (
+          {navSections.map((section) => (
             <NavItem
               key={section.label}
               label={section.label}
