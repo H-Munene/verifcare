@@ -32,9 +32,10 @@ export interface CaregiverPage {
 
 // employeeNumber/hireDate are deliberately absent here - the backend now auto-generates both at
 // creation (server-generated "CG-0001" style number, registration date), with no way for the
-// client to set either on POST. They remain settable via UpdateCaregiverRequest below.
+// client to set either on POST. They remain settable via UpdateCaregiverRequest below. No
+// cognitoSub either - POST /caregivers creates the Cognito identity itself (2026-09-22, HEZ-54) -
+// a caregiver never self-registers, so a pre-existing Cognito account can never be assumed.
 export interface CreateCaregiverRequest {
-  cognitoSub: string;
   fullName: string;
   email: string;
   phoneNumber: string;
@@ -65,16 +66,6 @@ export interface ListCaregiversParams {
   limit?: number;
 }
 
-// Raw Cognito attributes for an identity that exists in the user pool but has never been
-// registered as a caregiver here - phoneNumber/fullName can be null if that Cognito identity
-// never set those attributes (see the new GET /caregivers/cognito-lookup contract).
-export interface CognitoLookupResult {
-  cognitoSub: string;
-  email: string;
-  phoneNumber: string | null;
-  fullName: string | null;
-}
-
 function toQueryString(params: ListCaregiversParams): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -94,10 +85,6 @@ export function createCaregiversApi(client: ApiClient) {
     getCaregiver: (caregiverId: string) => client.get<Caregiver>(`/caregivers/${caregiverId}`),
     updateCaregiver: (caregiverId: string, body: UpdateCaregiverRequest) =>
       client.patch<Caregiver>(`/caregivers/${caregiverId}`, body),
-    lookupCognitoByEmail: (email: string) =>
-      client.get<CognitoLookupResult>(
-        `/caregivers/cognito-lookup?email=${encodeURIComponent(email)}`,
-      ),
   };
 }
 

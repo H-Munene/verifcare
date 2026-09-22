@@ -95,7 +95,6 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
     cognitoAdmin = {
       assignRole: vi.fn().mockResolvedValue(undefined),
       createUser: vi.fn().mockResolvedValue('unused-sub'),
-      lookupUserByEmail: vi.fn().mockResolvedValue(null),
     };
     app = buildTestApp(cognitoAdmin);
   });

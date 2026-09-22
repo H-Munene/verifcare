@@ -9,7 +9,6 @@ import type {
   CaregiverGender,
   CaregiverIdType,
   CaregiverOccupation,
-  CognitoLookupResult,
 } from '../api/caregivers';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
@@ -95,48 +94,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
   const photoStepIndex = steps.length - 1;
   const isPhotoStep = !isEdit && step === photoStepIndex;
 
-  // Registration-only: cognitoSub is set once at creation and never changes, so editing skips the
-  // lookup step entirely - there's no self-signup flow yet, so a supervisor must resolve an
-  // already-existing Cognito identity by email before POST /caregivers will accept it.
-  const [lookupEmail, setLookupEmail] = useState('');
-  const [cognitoSub, setCognitoSub] = useState<string | null>(null);
-  const [lookupResult, setLookupResult] = useState<CognitoLookupResult | null>(null);
-  const [lookupNotFound, setLookupNotFound] = useState(false);
-
-  const lookupMutation = useMutation({
-    mutationFn: () => caregivers.lookupCognitoByEmail(lookupEmail),
-    onSuccess: (result) => {
-      setLookupNotFound(false);
-      setLookupResult(result);
-      setCognitoSub(result.cognitoSub);
-      if (result.fullName) {
-        const split = splitFullName(result.fullName);
-        setFirstName(split.firstName);
-        setLastName(split.lastName);
-      }
-      if (result.phoneNumber) {
-        setPhoneNumber(result.phoneNumber);
-      }
-      setEmail(result.email);
-    },
-    onError: (error) => {
-      setLookupResult(null);
-      setCognitoSub(null);
-      setLookupNotFound(error instanceof ApiError && error.problem.status === 404);
-    },
-  });
-
-  function resetLookup() {
-    setLookupResult(null);
-    setCognitoSub(null);
-    setLookupNotFound(false);
-    setLookupEmail('');
-    setFirstName('');
-    setLastName('');
-    setPhoneNumber('');
-    setEmail('');
-  }
-
   const initialName = splitFullName(initial?.fullName ?? '');
   const [firstName, setFirstName] = useState(initialName.firstName);
   const [lastName, setLastName] = useState(initialName.lastName);
@@ -188,9 +145,7 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
     onSuccess: (enrollment) => setPhotoResult(enrollment),
   });
 
-  const formUnlocked = isEdit || Boolean(cognitoSub);
   const detailsValid =
-    formUnlocked &&
     firstName.trim() !== '' &&
     lastName.trim() !== '' &&
     email.trim() !== '' &&
@@ -231,12 +186,8 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
       return;
     }
 
-    if (!cognitoSub) {
-      return;
-    }
-
     try {
-      const caregiver = await createMutation.mutateAsync({ ...common, cognitoSub });
+      const caregiver = await createMutation.mutateAsync(common);
       void queryClient.invalidateQueries({ queryKey: ['caregivers'] });
       // Don't navigate yet - advance into the Photo step instead, now that a real caregiver id
       // exists for it to enroll a photo against.
@@ -279,65 +230,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
       >
         {step === detailsStepIndex ? (
           <>
-            {!isEdit ? (
-              <Card className="register-caregiver-page__section">
-                <div className="register-caregiver-page__section-title">Caregiver identity</div>
-                {cognitoSub && lookupResult ? (
-                  <div className="register-caregiver-page__lookup-confirmed">
-                    <div>
-                      Linking existing Cognito user: <strong>{lookupResult.email}</strong>
-                    </div>
-                    <Button type="button" onClick={resetLookup}>
-                      Change
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <p className="register-caregiver-page__hint">
-                      The caregiver must already have a Cognito account (there is no caregiver
-                      self-signup flow yet) - look them up by the email address they use to sign in.
-                    </p>
-                    <div className="register-caregiver-page__lookup-row">
-                      <Input
-                        id="lookupEmail"
-                        label="Email address"
-                        type="email"
-                        value={lookupEmail}
-                        onChange={(e) => {
-                          setLookupEmail(e.target.value);
-                          setLookupNotFound(false);
-                        }}
-                        autoComplete="off"
-                      />
-                      <Button
-                        type="button"
-                        onClick={() => lookupMutation.mutate()}
-                        disabled={!lookupEmail || lookupMutation.isPending}
-                      >
-                        {lookupMutation.isPending ? 'Looking up...' : 'Look up'}
-                      </Button>
-                    </div>
-                    {lookupNotFound ? (
-                      <p className="register-caregiver-page__error">
-                        No Cognito user found with this email - the caregiver must already have a
-                        Cognito account before they can be registered here. There is currently no
-                        way to create one from this UI (a known gap tied to the caregiver mobile app
-                        not existing yet, HEZ-63/64).
-                      </p>
-                    ) : null}
-                    {lookupMutation.error && !lookupNotFound ? (
-                      <p className="register-caregiver-page__error">
-                        {lookupMutation.error instanceof ApiError
-                          ? (lookupMutation.error.problem.detail ??
-                            lookupMutation.error.problem.title)
-                          : 'Something went wrong.'}
-                      </p>
-                    ) : null}
-                  </>
-                )}
-              </Card>
-            ) : null}
-
             <Card className="register-caregiver-page__section">
               <div className="register-caregiver-page__name-row">
                 <Input
@@ -345,7 +237,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                   label="First Name"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  disabled={!formUnlocked}
                   required
                 />
                 <Input
@@ -353,7 +244,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                   label="Last Name"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
-                  disabled={!formUnlocked}
                   required
                 />
               </div>
@@ -366,7 +256,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                   className="ds-input"
                   value={idType}
                   onChange={(e) => setIdType(e.target.value as CaregiverIdType | '')}
-                  disabled={!formUnlocked}
                   required
                 >
                   <option value="">Select ID type</option>
@@ -379,7 +268,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                 label="ID Number"
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
-                disabled={!formUnlocked}
                 required
               />
               <Input
@@ -388,7 +276,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                disabled={!formUnlocked}
                 required
               />
               <Input
@@ -397,7 +284,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                 type="tel"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
-                disabled={!formUnlocked}
                 required
               />
               <Input
@@ -406,7 +292,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                 type="date"
                 value={dob}
                 onChange={(e) => setDob(e.target.value)}
-                disabled={!formUnlocked}
                 required
               />
               <div className="register-caregiver-page__field">
@@ -418,7 +303,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                   className="ds-input"
                   value={gender}
                   onChange={(e) => setGender(e.target.value as CaregiverGender | '')}
-                  disabled={!formUnlocked}
                   required
                 >
                   <option value="">Select gender</option>
@@ -435,7 +319,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                   className="ds-input"
                   value={occupation}
                   onChange={(e) => setOccupation(e.target.value as CaregiverOccupation | '')}
-                  disabled={!formUnlocked}
                   required
                 >
                   <option value="">Select occupation</option>

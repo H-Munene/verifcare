@@ -56,24 +56,6 @@
   margin: 0;
 }
 
-.register-caregiver-page__lookup-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.register-caregiver-page__lookup-row > *:first-child {
-  flex: 1;
-}
-
-.register-caregiver-page__lookup-confirmed {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 14px;
-  color: var(--color-ink-primary);
-}
-
 .register-caregiver-page__error {
   font-size: 13px;
   color: var(--color-danger-text);

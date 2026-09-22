@@ -46,12 +46,12 @@ interface CaregiverPageBody {
 }
 
 // Every field createCaregiverRequestSchema now requires (2026-09-22, HEZ-54) - a shared base so
-// each test only has to spell out what it's actually varying, not all eight required fields every
-// time. cognitoSub/email/phoneNumber default to obviously-overridable placeholders since most
-// tests need unique values per call (cognitoSub/email/phoneNumber are all unique-constrained).
+// each test only has to spell out what it's actually varying, not all seven required fields every
+// time. email/phoneNumber default to obviously-overridable placeholders since most tests need
+// unique values per call (both are unique-constrained). No cognitoSub field - POST /caregivers
+// creates the Cognito identity itself now, a caregiver never self-registers.
 function validCaregiverBody(overrides: Record<string, unknown> = {}) {
   return {
-    cognitoSub: 'caregiver-sub',
     fullName: 'Grace Hopper',
     email: 'grace@example.com',
     phoneNumber: '+254700000000',
@@ -122,10 +122,24 @@ describe.skipIf(!hasTestDb)(
 
     beforeEach(async () => {
       await truncateAllTables();
+      // Mimics real AdminCreateUser behavior closely enough for these tests: a fresh sub per
+      // distinct email, and a UsernameExistsException-shaped rejection (matching
+      // isCognitoUserAlreadyExistsError's check) when an email is reused, since Cognito's
+      // Username is the email (see auth/cognitoAdmin.ts's createUser).
+      const usedEmails = new Set<string>();
+      let subCounter = 0;
       cognitoAdmin = {
         assignRole: vi.fn().mockResolvedValue(undefined),
-        createUser: vi.fn().mockResolvedValue('unused-sub'),
-        lookupUserByEmail: vi.fn().mockResolvedValue(null),
+        createUser: vi.fn().mockImplementation(({ email }: { email: string }) => {
+          if (usedEmails.has(email)) {
+            const err = new Error('An account with the given email already exists.');
+            (err as unknown as { name: string }).name = 'UsernameExistsException';
+            throw err;
+          }
+          usedEmails.add(email);
+          subCounter += 1;
+          return Promise.resolve(`caregiver-sub-${subCounter}`);
+        }),
       };
       app = buildTestApp(cognitoAdmin);
     });
@@ -135,13 +149,12 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('POST /caregivers', () => {
-      it('creates both the users and caregivers rows atomically, assigns the Cognito role, and auto-generates employeeNumber/hireDate', async () => {
+      it('creates both the users and caregivers rows atomically, creates the Cognito identity, and auto-generates employeeNumber/hireDate', async () => {
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'new-caregiver-sub',
               email: 'grace.new@example.com',
               phoneNumber: '+254700000030',
               fullName: 'Grace Hopper',
@@ -164,27 +177,31 @@ describe.skipIf(!hasTestDb)(
         // this confirms the DB defaults actually fired, not just that the fields are absent.
         expect(caregiverBody(response).employeeNumber).toMatch(/^CG-\d{4}$/);
         expect(caregiverBody(response).hireDate).not.toBeNull();
-        expect(cognitoAdmin.assignRole).toHaveBeenCalledWith('new-caregiver-sub', 'caregiver');
+        expect(cognitoAdmin.createUser).toHaveBeenCalledWith({
+          email: 'grace.new@example.com',
+          phoneNumber: '+254700000030',
+          fullName: 'Grace Hopper',
+          role: 'caregiver',
+        });
       });
 
       it('returns 403 for a non-supervisor caller', async () => {
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', caregiverAuth)
-          .send(validCaregiverBody({ cognitoSub: 'x', email: 'x@example.com' }));
+          .send(validCaregiverBody({ email: 'x@example.com' }));
 
         expect(response.status).toBe(403);
-        expect(cognitoAdmin.assignRole).not.toHaveBeenCalled();
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
       });
 
-      it('returns 409 for a duplicate cognitoSub', async () => {
+      it('returns 409 for a duplicate email (Cognito already has that identity)', async () => {
         await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'dup-caregiver-sub',
-              email: 'dup-first@example.com',
+              email: 'dup@example.com',
               phoneNumber: '+254700000032',
               fullName: 'First',
             }),
@@ -195,9 +212,34 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'dup-caregiver-sub',
-              email: 'dup-second@example.com',
+              email: 'dup@example.com',
               phoneNumber: '+254700000033',
+              fullName: 'Second',
+            }),
+          );
+
+        expect(response.status).toBe(409);
+      });
+
+      it('returns 409 for a duplicate phoneNumber', async () => {
+        await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'phone-first@example.com',
+              phoneNumber: '+254700000099',
+              fullName: 'First',
+            }),
+          );
+
+        const response = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'phone-second@example.com',
+              phoneNumber: '+254700000099',
               fullName: 'Second',
             }),
           );
@@ -211,7 +253,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'y',
               email: 'y@example.com',
               phoneNumber: '+254700000034',
               fullName: 'Y',
@@ -223,10 +264,7 @@ describe.skipIf(!hasTestDb)(
       });
 
       it('returns 400 when a required field (occupation) is missing', async () => {
-        const body = validCaregiverBody({ cognitoSub: 'z', email: 'z@example.com' }) as Record<
-          string,
-          unknown
-        >;
+        const body = validCaregiverBody({ email: 'z@example.com' }) as Record<string, unknown>;
         delete body.occupation;
 
         const response = await request(app)
@@ -238,61 +276,6 @@ describe.skipIf(!hasTestDb)(
       });
     });
 
-    describe('GET /caregivers/cognito-lookup', () => {
-      it('returns the resolved Cognito identity for a found email', async () => {
-        cognitoAdmin.lookupUserByEmail = vi.fn().mockResolvedValue({
-          cognitoSub: 'looked-up-sub',
-          email: 'amina@example.com',
-          phoneNumber: '+254700000099',
-          fullName: 'Amina Wanjiru',
-        });
-
-        const response = await request(app)
-          .get('/caregivers/cognito-lookup')
-          .query({ email: 'amina@example.com' })
-          .set('x-test-auth', supervisorAuth);
-
-        expect(response.status).toBe(200);
-        expect(response.body).toEqual({
-          cognitoSub: 'looked-up-sub',
-          email: 'amina@example.com',
-          phoneNumber: '+254700000099',
-          fullName: 'Amina Wanjiru',
-        });
-        expect(cognitoAdmin.lookupUserByEmail).toHaveBeenCalledWith('amina@example.com');
-      });
-
-      it('returns 404 when no Cognito user has that email', async () => {
-        cognitoAdmin.lookupUserByEmail = vi.fn().mockResolvedValue(null);
-
-        const response = await request(app)
-          .get('/caregivers/cognito-lookup')
-          .query({ email: 'nobody@example.com' })
-          .set('x-test-auth', supervisorAuth);
-
-        expect(response.status).toBe(404);
-      });
-
-      it('returns 400 for a malformed email', async () => {
-        const response = await request(app)
-          .get('/caregivers/cognito-lookup')
-          .query({ email: 'not-an-email' })
-          .set('x-test-auth', supervisorAuth);
-
-        expect(response.status).toBe(400);
-      });
-
-      it('returns 403 for a non-supervisor caller', async () => {
-        const response = await request(app)
-          .get('/caregivers/cognito-lookup')
-          .query({ email: 'amina@example.com' })
-          .set('x-test-auth', caregiverAuth);
-
-        expect(response.status).toBe(403);
-        expect(cognitoAdmin.lookupUserByEmail).not.toHaveBeenCalled();
-      });
-    });
-
     describe('GET /caregivers', () => {
       beforeEach(async () => {
         for (let i = 0; i < 3; i += 1) {
@@ -301,7 +284,6 @@ describe.skipIf(!hasTestDb)(
             .set('x-test-auth', supervisorAuth)
             .send(
               validCaregiverBody({
-                cognitoSub: `list-caregiver-${i}`,
                 email: `list-${i}@example.com`,
                 phoneNumber: `+25470000004${i}`,
                 fullName: `Caregiver ${i}`,
@@ -367,7 +349,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'target-caregiver',
               email: 'target@example.com',
               phoneNumber: '+254700000050',
               fullName: 'Target',
@@ -392,7 +373,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'self-caregiver',
               email: 'self@example.com',
               phoneNumber: '+254700000051',
               fullName: 'Self',
@@ -413,7 +393,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'patch-target',
               email: 'patch-target@example.com',
               phoneNumber: '+254700000060',
               fullName: 'Before',
@@ -441,7 +420,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'emp-a',
               email: 'emp-a@example.com',
               phoneNumber: '+254700000061',
               fullName: 'A',
@@ -452,7 +430,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'emp-b',
               email: 'emp-b@example.com',
               phoneNumber: '+254700000062',
               fullName: 'B',
@@ -488,7 +465,6 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', supervisorAuth)
           .send(
             validCaregiverBody({
-              cognitoSub: 'offboard-target',
               email: 'offboard@example.com',
               phoneNumber: '+254700000070',
               fullName: 'Offboard',

@@ -120,16 +120,11 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // Lets the supervisor web app register a dependant's primary/family
   // contact who has never touched Cognito at all, not just link an existing
   // identity (2026-09-14, extending HEZ-30/HEZ-56's family-member linking).
-  // Scoped to this user pool only, not a wildcard - same pattern as the
-  // grant above.
+  // Also used by POST /caregivers (2026-09-22, HEZ-54) - a caregiver never
+  // self-registers, so every caregiver's Cognito identity is created here
+  // too, not just linked. Scoped to this user pool only, not a wildcard -
+  // same pattern as the grant above.
   userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
-
-  // Lets GET /caregivers/cognito-lookup (HEZ-54) resolve a caregiver's email to their Cognito sub
-  // before POST /caregivers, which requires one - there's no caregiver self-signup flow yet
-  // (HEZ-63/64 still Backlog) to create that identity through this app, so a supervisor has to
-  // look up one that already exists elsewhere in the pool. Scoped to this user pool only, same
-  // pattern as the two grants above.
-  userPool.grant(apiFunction, "cognito-idp:ListUsers");
 
   // Lets api's biometric-enrollment upload flow (HEZ-31) sign a presigned PUT
   // URL that S3 will actually honor - a presigned URL is only valid if the

@@ -207,37 +207,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /caregivers/cognito-lookup:
-    get:
-      tags: [Caregivers]
-      summary: Look up a Cognito identity by email
-      description: >-
-        Resolves an email to a Cognito identity that may have no `users` row here yet - exists
-        because POST /caregivers requires an already-existing cognitoSub, and there's no caregiver
-        self-signup flow in this product yet (the caregiver mobile app is unbuilt), so a
-        supervisor registering a caregiver needs a way to resolve their email into a Cognito sub
-        first. A plain Cognito lookup, not a search of this app's own `users` table (that's what
-        GET /users is for) - a role-less Cognito signup with no `users` row wouldn't be found there.
-      operationId: lookupCaregiverCognitoIdentity
-      parameters:
-        - name: email
-          in: query
-          required: true
-          schema:
-            type: string
-            format: email
-      responses:
-        '200':
-          description: The matching Cognito identity.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CognitoIdentityLookup'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /caregivers/{caregiverId}:
     parameters:
       - $ref: '#/components/parameters/CaregiverId'
@@ -1338,15 +1307,11 @@ components:
       type: object
       description: >-
         employeeNumber/hireDate are deliberately absent here (2026-09-22, HEZ-54) - both are
-        DB-generated at registration, not supervisor-entered. cognitoSub must already exist in
-        Cognito (see GET /caregivers/cognito-lookup) - there is no caregiver self-signup flow yet,
-        so this never creates a new Cognito identity the way AddFamilyMemberRequest's email path
-        does.
-      required:
-        [cognitoSub, fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
+        DB-generated at registration, not supervisor-entered. Creates a brand-new Cognito identity
+        itself (like AddFamilyMemberRequest's email path) - a caregiver never self-registers, so a
+        pre-existing Cognito account can never be assumed.
+      required: [fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
       properties:
-        cognitoSub:
-          type: string
         fullName:
           type: string
         email:
@@ -1393,21 +1358,6 @@ components:
           format: date
         active:
           type: boolean
-    CognitoIdentityLookup:
-      type: object
-      required: [cognitoSub, email]
-      properties:
-        cognitoSub:
-          type: string
-        email:
-          type: string
-          format: email
-        phoneNumber:
-          type: [string, 'null']
-          description: 'Null if that Cognito identity never set a phone_number attribute.'
-        fullName:
-          type: [string, 'null']
-          description: 'Null if that Cognito identity never set a name attribute.'
     CaregiverPage:
       type: object
       required: [items]

@@ -1,25 +1,18 @@
 // Server-side role assignment for a genuinely new Cognito self-signup (HEZ-29), and server-side
-// creation of a brand-new Cognito identity for a dependant's family contact who has never touched
-// Cognito at all (2026-09-14, extending HEZ-30/HEZ-56). The only way custom:role can be set at
-// all now, since infra/lib/auth.ts removed the app client's own write access to it - a
-// self-signing-up user's own session can never set this directly, closing the privilege-
-// escalation gap that write access left open (a self-signup could otherwise set custom:role to
-// "supervisor" with zero backend involvement).
+// creation of a brand-new Cognito identity for someone who has never touched Cognito at all - a
+// dependant's family contact (2026-09-14, extending HEZ-30/HEZ-56) or a caregiver (2026-09-22,
+// HEZ-54, since a caregiver never self-registers). The only way custom:role can be set at all
+// now, since infra/lib/auth.ts removed the app client's own write access to it - a self-signing-up
+// user's own session can never set this directly, closing the privilege-escalation gap that write
+// access left open (a self-signup could otherwise set custom:role to "supervisor" with zero
+// backend involvement).
 
 import {
   AdminCreateUserCommand,
   AdminUpdateUserAttributesCommand,
   CognitoIdentityProviderClient,
-  ListUsersCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import type { UserRole } from './verifier.js';
-
-export interface CognitoIdentityLookup {
-  cognitoSub: string;
-  email: string;
-  phoneNumber: string | null;
-  fullName: string | null;
-}
 
 export interface CognitoAdmin {
   // Property-typed (not method shorthand) so this interface stays assignable from a plain object
@@ -36,12 +29,6 @@ export interface CognitoAdmin {
     fullName: string;
     role: UserRole;
   }) => Promise<string>;
-  // Resolves an email to a Cognito identity that may have no `users` row here yet (HEZ-54) - a
-  // caregiver's Cognito account is always created outside this app (there's no caregiver
-  // self-signup flow, HEZ-63/64 still Backlog), so POST /caregivers's required cognitoSub has to
-  // come from somewhere; this is that somewhere. Returns null if no Cognito user has that email -
-  // never throws for "not found", since that's an expected, common outcome here, not an error.
-  lookupUserByEmail: (email: string) => Promise<CognitoIdentityLookup | null>;
 }
 
 // Classifies an AdminUpdateUserAttributes rejection caused by a cognitoSub that doesn't
@@ -136,35 +123,6 @@ export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
         throw new Error('AdminCreateUser response did not include a sub attribute.');
       }
       return sub;
-    },
-    lookupUserByEmail: async (email: string): Promise<CognitoIdentityLookup | null> => {
-      // Filter syntax confirmed against AWS's ListUsers documentation: `"AttributeName = \"value\""`,
-      // exact match only (no wildcard needed or wanted here). Safe to interpolate email directly -
-      // the caller already validated it as a well-formed email address (no quote characters
-      // possible) before this ever runs.
-      const response = await client.send(
-        new ListUsersCommand({
-          UserPoolId: userPoolId,
-          Filter: `email = "${email}"`,
-          Limit: 1,
-        }),
-      );
-      const user = response.Users?.[0];
-      if (!user) {
-        return null;
-      }
-      const attribute = (name: string): string | null =>
-        user.Attributes?.find((attr) => attr.Name === name)?.Value ?? null;
-      const sub = attribute('sub');
-      if (!sub) {
-        throw new Error('ListUsers response did not include a sub attribute.');
-      }
-      return {
-        cognitoSub: sub,
-        email: attribute('email') ?? email,
-        phoneNumber: attribute('phone_number'),
-        fullName: attribute('name'),
-      };
     },
   };
 }

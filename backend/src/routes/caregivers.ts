@@ -1,6 +1,6 @@
-// POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId}, GET /caregivers/cognito-lookup
-// (HEZ-29, HEZ-54). Every endpoint here is supervisor-only (confirmed with the user before
-// implementing) - architecture.md frames caregiver registration as a supervisor action, unlike
+// POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId} (HEZ-29, HEZ-54). Every endpoint here
+// is supervisor-only (confirmed with the user before implementing) - architecture.md frames
+// caregiver registration as a supervisor action, unlike
 // family_member/supervisor self-signup, and nothing currently needs a caregiver to self-view or
 // self-edit their own record. Adding that later is a small, additive change (one requireRole call
 // becoming an ownership check, the same shape routes/users.ts already has) once the caregiver
@@ -9,18 +9,20 @@
 // caregivers is a 1:1 shared-PK extension of users (caregivers.userId === users.id), so every
 // response here is a join, and POST /caregivers creates both rows in one transaction.
 //
-// GET /caregivers/cognito-lookup (2026-09-22, HEZ-54) exists because POST /caregivers requires an
-// already-existing cognitoSub, and there's no caregiver self-signup flow anywhere in this product
-// yet (HEZ-63/64 still Backlog) - a supervisor registering a caregiver needs a way to resolve
-// "this caregiver's email" into their Cognito sub first. Registered before the /:caregiverId
-// routes below, not after - Express matches routes in registration order, and /:caregiverId would
-// otherwise swallow "cognito-lookup" as a (invalid) caregiverId value.
+// POST /caregivers creates the Cognito identity itself (2026-09-22, HEZ-54, corrected same day -
+// a caregiver never self-registers, full stop, not just "not yet") via cognitoAdmin.createUser,
+// same as routes/dependants.ts's email-only family-member path - there's no caregiver self-signup
+// flow (HEZ-63/64) to create that identity any other way, and there never will be one, so a
+// pre-existing Cognito account can't be assumed. This replaced an earlier GET
+// /caregivers/cognito-lookup endpoint that looked one up instead of creating it, built on the
+// mistaken premise that a caregiver might already have a Cognito account from self-signing-up
+// elsewhere.
 
 import { and, asc, eq } from 'drizzle-orm';
 import { Router, type RequestHandler } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
-import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
+import { isCognitoUserAlreadyExistsError, type CognitoAdmin } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
@@ -66,7 +68,6 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // see schema.ts), unlike updateCaregiverRequestSchema below where a supervisor may still want to
 // correct either by hand later.
 const createCaregiverRequestSchema = z.object({
-  cognitoSub: z.string().min(1),
   fullName: z.string().min(1),
   email: z.string().email(),
   phoneNumber: z.string().min(1),
@@ -102,10 +103,6 @@ const listCaregiversQuerySchema = z.object({
     .transform((v) => (v === undefined ? undefined : v === 'true')),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-});
-
-const cognitoLookupQuerySchema = z.object({
-  email: z.string().email(),
 });
 
 function caregiverSelection() {
@@ -192,16 +189,24 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
     }
 
     try {
-      // Same ordering rationale as routes/users.ts: assign the Cognito role before the DB insert,
-      // so a failed insert (e.g. duplicate cognitoSub) still leaves a retry able to succeed.
-      await cognitoAdmin.assignRole(body.cognitoSub, 'caregiver');
+      // Same ordering rationale as routes/users.ts and routes/dependants.ts's email-only
+      // family-member path: create the Cognito identity before the DB insert, so a failed insert
+      // (e.g. duplicate email/phoneNumber) still leaves a retry able to succeed rather than
+      // orphaning a Cognito account with no local row. createUser sets custom:role in the same
+      // call, so no separate assignRole is needed here.
+      const cognitoSub = await cognitoAdmin.createUser({
+        email: body.email,
+        phoneNumber: body.phoneNumber,
+        fullName: body.fullName,
+        role: 'caregiver',
+      });
 
       const result = await db.transaction(async (tx) => {
         const [userRow] = await tx
           .insert(schema.users)
           .values({
             id: uuidv7(),
-            cognitoSub: body.cognitoSub,
+            cognitoSub,
             email: body.email,
             phoneNumber: body.phoneNumber,
             fullName: body.fullName,
@@ -250,39 +255,24 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         }),
       );
     } catch (err) {
+      if (isCognitoUserAlreadyExistsError(err)) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'A Cognito identity with this email already exists.',
+        });
+        return;
+      }
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
           type: 'about:blank',
           title: 'Conflict',
           status: 409,
-          detail: 'A user with this cognitoSub, email, or phoneNumber already exists.',
+          detail: 'A user with this email or phoneNumber already exists.',
         });
         return;
       }
-      next(err);
-    }
-  });
-
-  // Registered before GET /:caregiverId - see this file's header comment for why the ordering
-  // matters here specifically.
-  router.get('/cognito-lookup', async (req, res, next) => {
-    const query = parseOrSendProblem(cognitoLookupQuerySchema, req.query, res);
-    if (!query) {
-      return;
-    }
-    try {
-      const identity = await cognitoAdmin.lookupUserByEmail(query.email);
-      if (!identity) {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Not Found',
-          status: 404,
-          detail: 'No Cognito user has this email.',
-        });
-        return;
-      }
-      res.status(200).json(identity);
-    } catch (err) {
       next(err);
     }
   });
