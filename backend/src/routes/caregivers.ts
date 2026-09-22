@@ -42,7 +42,16 @@ export interface CaregiversRouterDependencies {
 interface CaregiverResponse {
   userId: string;
   fullName: string;
+  email: string | null;
   phoneNumber: string | null;
+  idType: 'national_id' | 'passport' | null;
+  idNumber: string | null;
+  dob: string | null;
+  gender: 'male' | 'female' | null;
+  occupation: 'nurse' | 'community_health_worker' | 'caregiver' | null;
+  // Auto-generated at registration (HEZ-54), not supervisor-entered - see schema.ts's own comments
+  // on caregivers.employeeNumber/hireDate for why. Still returned here since a supervisor may need
+  // to see or later correct one via PATCH.
   employeeNumber: string | null;
   hireDate: string | null;
   active: boolean;
@@ -52,17 +61,31 @@ interface CaregiverResponse {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+// Registration now collects a caregiver's own personal/professional details (2026-09-22, HEZ-54,
+// confirmed with the user) - employeeNumber/hireDate are deliberately absent here (DB-generated,
+// see schema.ts), unlike updateCaregiverRequestSchema below where a supervisor may still want to
+// correct either by hand later.
 const createCaregiverRequestSchema = z.object({
   cognitoSub: z.string().min(1),
-  phoneNumber: z.string().min(1),
   fullName: z.string().min(1),
-  employeeNumber: z.string().min(1).optional(),
-  hireDate: z.string().regex(DATE_ONLY, 'hireDate must be YYYY-MM-DD').optional(),
+  email: z.string().email(),
+  phoneNumber: z.string().min(1),
+  idType: z.enum(['national_id', 'passport']),
+  idNumber: z.string().min(1),
+  dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
+  gender: z.enum(['male', 'female']),
+  occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']),
 });
 
 const updateCaregiverRequestSchema = z.object({
-  phoneNumber: z.string().min(1).optional(),
   fullName: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  phoneNumber: z.string().min(1).optional(),
+  idType: z.enum(['national_id', 'passport']).optional(),
+  idNumber: z.string().min(1).optional(),
+  dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD').optional(),
+  gender: z.enum(['male', 'female']).optional(),
+  occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']).optional(),
   employeeNumber: z.string().min(1).optional(),
   hireDate: z.string().regex(DATE_ONLY, 'hireDate must be YYYY-MM-DD').optional(),
   active: z.boolean().optional(),
@@ -89,7 +112,13 @@ function caregiverSelection() {
   return {
     userId: schema.caregivers.userId,
     fullName: schema.users.fullName,
+    email: schema.users.email,
     phoneNumber: schema.users.phoneNumber,
+    idType: schema.users.idType,
+    idNumber: schema.users.idNumber,
+    dob: schema.caregivers.dob,
+    gender: schema.caregivers.gender,
+    occupation: schema.caregivers.occupation,
     employeeNumber: schema.caregivers.employeeNumber,
     hireDate: schema.caregivers.hireDate,
     active: schema.caregivers.active,
@@ -101,7 +130,13 @@ function caregiverSelection() {
 function toCaregiverResponse(row: {
   userId: string;
   fullName: string;
+  email: string | null;
   phoneNumber: string | null;
+  idType: 'national_id' | 'passport' | null;
+  idNumber: string | null;
+  dob: string | null;
+  gender: 'male' | 'female' | null;
+  occupation: 'nurse' | 'community_health_worker' | 'caregiver' | null;
   employeeNumber: string | null;
   hireDate: string | null;
   active: boolean;
@@ -111,7 +146,13 @@ function toCaregiverResponse(row: {
   return {
     userId: row.userId,
     fullName: row.fullName,
+    email: row.email,
     phoneNumber: row.phoneNumber,
+    idType: row.idType,
+    idNumber: row.idNumber,
+    dob: row.dob,
+    gender: row.gender,
+    occupation: row.occupation,
     employeeNumber: row.employeeNumber,
     hireDate: row.hireDate,
     active: row.active,
@@ -161,20 +202,27 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           .values({
             id: uuidv7(),
             cognitoSub: body.cognitoSub,
+            email: body.email,
             phoneNumber: body.phoneNumber,
             fullName: body.fullName,
+            idType: body.idType,
+            idNumber: body.idNumber,
             role: 'caregiver',
           })
           .returning();
         if (!userRow) {
           throw new Error('Insert into users returned no row.');
         }
+        // employeeNumber/hireDate are deliberately not set here - schema.ts's own DB defaults
+        // generate them (a sequence-backed 'CG-0001' style number, and the actual registration
+        // date), per the user's request that they be auto-assigned, not supervisor-entered.
         const [caregiverRow] = await tx
           .insert(schema.caregivers)
           .values({
             userId: userRow.id,
-            employeeNumber: body.employeeNumber,
-            hireDate: body.hireDate,
+            dob: body.dob,
+            gender: body.gender,
+            occupation: body.occupation,
           })
           .returning();
         if (!caregiverRow) {
@@ -187,7 +235,13 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         toCaregiverResponse({
           userId: result.userRow.id,
           fullName: result.userRow.fullName,
+          email: result.userRow.email,
           phoneNumber: result.userRow.phoneNumber,
+          idType: result.userRow.idType,
+          idNumber: result.userRow.idNumber,
+          dob: result.caregiverRow.dob,
+          gender: result.caregiverRow.gender,
+          occupation: result.caregiverRow.occupation,
           employeeNumber: result.caregiverRow.employeeNumber,
           hireDate: result.caregiverRow.hireDate,
           active: result.caregiverRow.active,
@@ -201,7 +255,7 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           type: 'about:blank',
           title: 'Conflict',
           status: 409,
-          detail: 'A user with this cognitoSub, phoneNumber, or employeeNumber already exists.',
+          detail: 'A user with this cognitoSub, email, or phoneNumber already exists.',
         });
         return;
       }
@@ -319,14 +373,25 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
     }
 
     try {
-      const { phoneNumber, fullName, ...caregiverFields } = body;
+      // Split by which table each field actually lives on - email/idType/idNumber belong to
+      // users, not caregivers, unlike everything else PATCH accepts.
+      const { phoneNumber, fullName, email, idType, idNumber, ...caregiverFields } = body;
       const result = await db.transaction(async (tx) => {
-        if (phoneNumber !== undefined || fullName !== undefined) {
+        if (
+          phoneNumber !== undefined ||
+          fullName !== undefined ||
+          email !== undefined ||
+          idType !== undefined ||
+          idNumber !== undefined
+        ) {
           await tx
             .update(schema.users)
             .set({
               ...(phoneNumber !== undefined && { phoneNumber }),
               ...(fullName !== undefined && { fullName }),
+              ...(email !== undefined && { email }),
+              ...(idType !== undefined && { idType }),
+              ...(idNumber !== undefined && { idNumber }),
               updatedAt: new Date(),
             })
             .where(eq(schema.users.id, caregiverId));
@@ -364,7 +429,13 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         toCaregiverResponse({
           userId: result.caregiverRow.userId,
           fullName: result.userRow.fullName,
+          email: result.userRow.email,
           phoneNumber: result.userRow.phoneNumber,
+          idType: result.userRow.idType,
+          idNumber: result.userRow.idNumber,
+          dob: result.caregiverRow.dob,
+          gender: result.caregiverRow.gender,
+          occupation: result.caregiverRow.occupation,
           employeeNumber: result.caregiverRow.employeeNumber,
           hireDate: result.caregiverRow.hireDate,
           active: result.caregiverRow.active,
@@ -378,7 +449,7 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           type: 'about:blank',
           title: 'Conflict',
           status: 409,
-          detail: 'A user with this phoneNumber or employeeNumber already exists.',
+          detail: 'A user with this email, phoneNumber, or employeeNumber already exists.',
         });
         return;
       }

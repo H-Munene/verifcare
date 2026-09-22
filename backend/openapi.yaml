@@ -1188,9 +1188,14 @@ components:
     DependantStatus:
       type: string
       enum: [active, deactivated]
-    DependantGender:
+    # Renamed from DependantGender (2026-09-22, HEZ-54) - caregivers now use the same enum, per
+    # backend/src/db/schema.ts's own person_gender rename.
+    PersonGender:
       type: string
       enum: [male, female]
+    CaregiverOccupation:
+      type: string
+      enum: [nurse, community_health_worker, caregiver]
     IdType:
       type: string
       enum: [national_id, passport]
@@ -1289,13 +1294,38 @@ components:
           format: uuid
         fullName:
           type: string
+        email:
+          type: [string, 'null']
+          format: email
         phoneNumber:
           type: [string, 'null']
+        idType:
+          oneOf:
+            - $ref: '#/components/schemas/IdType'
+            - type: 'null'
+        idNumber:
+          type: [string, 'null']
+        dob:
+          type: [string, 'null']
+          format: date
+        gender:
+          oneOf:
+            - $ref: '#/components/schemas/PersonGender'
+            - type: 'null'
+        occupation:
+          oneOf:
+            - $ref: '#/components/schemas/CaregiverOccupation'
+            - type: 'null'
         employeeNumber:
           type: [string, 'null']
+          description: >-
+            Auto-generated at registration ('CG-' plus a zero-padded sequence value, e.g.
+            CG-0001), never client-supplied - see CreateCaregiverRequest. Still editable later via
+            UpdateCaregiverRequest if a supervisor ever needs to correct one by hand.
         hireDate:
           type: [string, 'null']
           format: date
+          description: 'Auto-populated to the actual registration date, never client-supplied - see CreateCaregiverRequest.'
         active:
           type: boolean
         createdAt:
@@ -1306,26 +1336,56 @@ components:
           format: date-time
     CreateCaregiverRequest:
       type: object
-      required: [cognitoSub, phoneNumber, fullName]
+      description: >-
+        employeeNumber/hireDate are deliberately absent here (2026-09-22, HEZ-54) - both are
+        DB-generated at registration, not supervisor-entered. cognitoSub must already exist in
+        Cognito (see GET /caregivers/cognito-lookup) - there is no caregiver self-signup flow yet,
+        so this never creates a new Cognito identity the way AddFamilyMemberRequest's email path
+        does.
+      required:
+        [cognitoSub, fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
       properties:
         cognitoSub:
           type: string
-        phoneNumber:
-          type: string
         fullName:
           type: string
-        employeeNumber:
+        email:
           type: string
-        hireDate:
+          format: email
+        phoneNumber:
+          type: string
+        idType:
+          $ref: '#/components/schemas/IdType'
+        idNumber:
+          type: string
+        dob:
           type: string
           format: date
+        gender:
+          $ref: '#/components/schemas/PersonGender'
+        occupation:
+          $ref: '#/components/schemas/CaregiverOccupation'
     UpdateCaregiverRequest:
       type: object
       properties:
-        phoneNumber:
-          type: string
         fullName:
           type: string
+        email:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+        idType:
+          $ref: '#/components/schemas/IdType'
+        idNumber:
+          type: string
+        dob:
+          type: string
+          format: date
+        gender:
+          $ref: '#/components/schemas/PersonGender'
+        occupation:
+          $ref: '#/components/schemas/CaregiverOccupation'
         employeeNumber:
           type: string
         hireDate:
@@ -1384,7 +1444,7 @@ components:
           format: date
         gender:
           oneOf:
-            - $ref: '#/components/schemas/DependantGender'
+            - $ref: '#/components/schemas/PersonGender'
             - type: 'null'
         homeAddressText:
           type: [string, 'null']
@@ -1441,7 +1501,7 @@ components:
           type: string
           format: date
         gender:
-          $ref: '#/components/schemas/DependantGender'
+          $ref: '#/components/schemas/PersonGender'
         homeAddressText:
           type: string
         primaryConditionSummary:
@@ -1473,7 +1533,7 @@ components:
         fullName:
           type: string
         gender:
-          $ref: '#/components/schemas/DependantGender'
+          $ref: '#/components/schemas/PersonGender'
         homeAddressText:
           type: string
         primaryConditionSummary:

@@ -4,10 +4,20 @@
 
 import type { ApiClient } from './client';
 
+export type CaregiverIdType = 'national_id' | 'passport';
+export type CaregiverGender = 'male' | 'female';
+export type CaregiverOccupation = 'nurse' | 'community_health_worker' | 'caregiver';
+
 export interface Caregiver {
   userId: string;
   fullName: string;
+  email: string | null;
   phoneNumber: string | null;
+  idType: CaregiverIdType | null;
+  idNumber: string | null;
+  dob: string | null;
+  gender: CaregiverGender | null;
+  occupation: CaregiverOccupation | null;
   employeeNumber: string | null;
   hireDate: string | null;
   active: boolean;
@@ -20,17 +30,30 @@ export interface CaregiverPage {
   nextCursor: string | null;
 }
 
+// employeeNumber/hireDate are deliberately absent here - the backend now auto-generates both at
+// creation (server-generated "CG-0001" style number, registration date), with no way for the
+// client to set either on POST. They remain settable via UpdateCaregiverRequest below.
 export interface CreateCaregiverRequest {
   cognitoSub: string;
-  phoneNumber: string;
   fullName: string;
-  employeeNumber?: string;
-  hireDate?: string;
+  email: string;
+  phoneNumber: string;
+  idType: CaregiverIdType;
+  idNumber: string;
+  dob: string;
+  gender: CaregiverGender;
+  occupation: CaregiverOccupation;
 }
 
 export interface UpdateCaregiverRequest {
-  phoneNumber?: string;
   fullName?: string;
+  email?: string;
+  phoneNumber?: string;
+  idType?: CaregiverIdType;
+  idNumber?: string;
+  dob?: string;
+  gender?: CaregiverGender;
+  occupation?: CaregiverOccupation;
   employeeNumber?: string;
   hireDate?: string;
   active?: boolean;

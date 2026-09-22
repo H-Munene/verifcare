@@ -71,6 +71,13 @@
       "when": 1789975508301,
       "tag": "0009_abandoned_weapon_omega",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790078741915,
+      "tag": "0010_hez_54_caregiver_registration_fields",
+      "breakpoints": true
     }
   ]
 }

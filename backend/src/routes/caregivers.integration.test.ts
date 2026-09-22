@@ -29,13 +29,39 @@ function testAuthHeader(user: AuthenticatedUser): string {
 interface CaregiverBody {
   userId: string;
   fullName: string;
+  email: string | null;
   phoneNumber: string | null;
+  idType: string | null;
+  idNumber: string | null;
+  dob: string | null;
+  gender: string | null;
+  occupation: string | null;
   employeeNumber: string | null;
+  hireDate: string | null;
   active: boolean;
 }
 interface CaregiverPageBody {
   items: CaregiverBody[];
   nextCursor: string | null;
+}
+
+// Every field createCaregiverRequestSchema now requires (2026-09-22, HEZ-54) - a shared base so
+// each test only has to spell out what it's actually varying, not all eight required fields every
+// time. cognitoSub/email/phoneNumber default to obviously-overridable placeholders since most
+// tests need unique values per call (cognitoSub/email/phoneNumber are all unique-constrained).
+function validCaregiverBody(overrides: Record<string, unknown> = {}) {
+  return {
+    cognitoSub: 'caregiver-sub',
+    fullName: 'Grace Hopper',
+    email: 'grace@example.com',
+    phoneNumber: '+254700000000',
+    idType: 'national_id',
+    idNumber: 'ID-0001',
+    dob: '1990-01-01',
+    gender: 'female',
+    occupation: 'nurse',
+    ...overrides,
+  };
 }
 // supertest types response.body as `any` (it's just parsed JSON) - a single cast point per
 // response, rather than scattering `as` assertions across every property access below.
@@ -109,24 +135,35 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('POST /caregivers', () => {
-      it('creates both the users and caregivers rows atomically, and assigns the Cognito role', async () => {
+      it('creates both the users and caregivers rows atomically, assigns the Cognito role, and auto-generates employeeNumber/hireDate', async () => {
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'new-caregiver-sub',
-            phoneNumber: '+254700000030',
-            fullName: 'Grace Hopper',
-            employeeNumber: 'EMP-001',
-          });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'new-caregiver-sub',
+              email: 'grace.new@example.com',
+              phoneNumber: '+254700000030',
+              fullName: 'Grace Hopper',
+            }),
+          );
 
         expect(response.status).toBe(201);
         expect(response.body).toMatchObject({
           fullName: 'Grace Hopper',
+          email: 'grace.new@example.com',
           phoneNumber: '+254700000030',
-          employeeNumber: 'EMP-001',
+          idType: 'national_id',
+          idNumber: 'ID-0001',
+          dob: '1990-01-01',
+          gender: 'female',
+          occupation: 'nurse',
           active: true,
         });
+        // Neither is ever sent by the client (createCaregiverRequestSchema has no such fields) -
+        // this confirms the DB defaults actually fired, not just that the fields are absent.
+        expect(caregiverBody(response).employeeNumber).toMatch(/^CG-\d{4}$/);
+        expect(caregiverBody(response).hireDate).not.toBeNull();
         expect(cognitoAdmin.assignRole).toHaveBeenCalledWith('new-caregiver-sub', 'caregiver');
       });
 
@@ -134,41 +171,68 @@ describe.skipIf(!hasTestDb)(
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', caregiverAuth)
-          .send({ cognitoSub: 'x', phoneNumber: '+254700000031', fullName: 'X' });
+          .send(validCaregiverBody({ cognitoSub: 'x', email: 'x@example.com' }));
 
         expect(response.status).toBe(403);
         expect(cognitoAdmin.assignRole).not.toHaveBeenCalled();
       });
 
       it('returns 409 for a duplicate cognitoSub', async () => {
-        await request(app).post('/caregivers').set('x-test-auth', supervisorAuth).send({
-          cognitoSub: 'dup-caregiver-sub',
-          phoneNumber: '+254700000032',
-          fullName: 'First',
-        });
+        await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'dup-caregiver-sub',
+              email: 'dup-first@example.com',
+              phoneNumber: '+254700000032',
+              fullName: 'First',
+            }),
+          );
 
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'dup-caregiver-sub',
-            phoneNumber: '+254700000033',
-            fullName: 'Second',
-          });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'dup-caregiver-sub',
+              email: 'dup-second@example.com',
+              phoneNumber: '+254700000033',
+              fullName: 'Second',
+            }),
+          );
 
         expect(response.status).toBe(409);
       });
 
-      it('returns 400 for an invalid hireDate format', async () => {
+      it('returns 400 for an invalid dob format', async () => {
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'y',
-            phoneNumber: '+254700000034',
-            fullName: 'Y',
-            hireDate: '13-09-2026',
-          });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'y',
+              email: 'y@example.com',
+              phoneNumber: '+254700000034',
+              fullName: 'Y',
+              dob: '13-09-2026',
+            }),
+          );
+
+        expect(response.status).toBe(400);
+      });
+
+      it('returns 400 when a required field (occupation) is missing', async () => {
+        const body = validCaregiverBody({ cognitoSub: 'z', email: 'z@example.com' }) as Record<
+          string,
+          unknown
+        >;
+        delete body.occupation;
+
+        const response = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(body);
 
         expect(response.status).toBe(400);
       });
@@ -235,12 +299,14 @@ describe.skipIf(!hasTestDb)(
           await request(app)
             .post('/caregivers')
             .set('x-test-auth', supervisorAuth)
-            .send({
-              cognitoSub: `list-caregiver-${i}`,
-              phoneNumber: `+25470000004${i}`,
-              fullName: `Caregiver ${i}`,
-              ...(i === 0 ? { hireDate: undefined } : {}),
-            });
+            .send(
+              validCaregiverBody({
+                cognitoSub: `list-caregiver-${i}`,
+                email: `list-${i}@example.com`,
+                phoneNumber: `+25470000004${i}`,
+                fullName: `Caregiver ${i}`,
+              }),
+            );
         }
         // Deactivate one so the `active` filter has something real to filter on.
         const list = caregiverPageBody(
@@ -299,11 +365,14 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'target-caregiver',
-            phoneNumber: '+254700000050',
-            fullName: 'Target',
-          });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'target-caregiver',
+              email: 'target@example.com',
+              phoneNumber: '+254700000050',
+              fullName: 'Target',
+            }),
+          );
 
         const found = await request(app)
           .get(`/caregivers/${caregiverBody(created).userId}`)
@@ -321,7 +390,14 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({ cognitoSub: 'self-caregiver', phoneNumber: '+254700000051', fullName: 'Self' });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'self-caregiver',
+              email: 'self@example.com',
+              phoneNumber: '+254700000051',
+              fullName: 'Self',
+            }),
+          );
 
         const response = await request(app)
           .get(`/caregivers/${caregiverBody(created).userId}`)
@@ -335,7 +411,14 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({ cognitoSub: 'patch-target', phoneNumber: '+254700000060', fullName: 'Before' });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'patch-target',
+              email: 'patch-target@example.com',
+              phoneNumber: '+254700000060',
+              fullName: 'Before',
+            }),
+          );
 
         const response = await request(app)
           .patch(`/caregivers/${caregiverBody(created).userId}`)
@@ -351,21 +434,35 @@ describe.skipIf(!hasTestDb)(
       });
 
       it('returns 409 on a duplicate employeeNumber', async () => {
-        await request(app).post('/caregivers').set('x-test-auth', supervisorAuth).send({
-          cognitoSub: 'emp-a',
-          phoneNumber: '+254700000061',
-          fullName: 'A',
-          employeeNumber: 'EMP-DUP',
-        });
+        // employeeNumber is never client-supplied at create time anymore (auto-generated) - this
+        // now exercises the PATCH-time uniqueness check by colliding with an auto-generated value.
+        const first = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'emp-a',
+              email: 'emp-a@example.com',
+              phoneNumber: '+254700000061',
+              fullName: 'A',
+            }),
+          );
         const second = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({ cognitoSub: 'emp-b', phoneNumber: '+254700000062', fullName: 'B' });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'emp-b',
+              email: 'emp-b@example.com',
+              phoneNumber: '+254700000062',
+              fullName: 'B',
+            }),
+          );
 
         const response = await request(app)
           .patch(`/caregivers/${caregiverBody(second).userId}`)
           .set('x-test-auth', supervisorAuth)
-          .send({ employeeNumber: 'EMP-DUP' });
+          .send({ employeeNumber: caregiverBody(first).employeeNumber });
 
         expect(response.status).toBe(409);
       });
@@ -389,11 +486,14 @@ describe.skipIf(!hasTestDb)(
         const created = await request(localApp)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'offboard-target',
-            phoneNumber: '+254700000070',
-            fullName: 'Offboard',
-          });
+          .send(
+            validCaregiverBody({
+              cognitoSub: 'offboard-target',
+              email: 'offboard@example.com',
+              phoneNumber: '+254700000070',
+              fullName: 'Offboard',
+            }),
+          );
         const caregiverId = caregiverBody(created).userId;
 
         const db = getDb();

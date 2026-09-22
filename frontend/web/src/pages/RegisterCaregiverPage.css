@@ -11,11 +11,15 @@
   text-align: center;
 }
 
+.register-caregiver-page .ds-stepper {
+  max-width: 420px;
+  margin: 20px auto 8px;
+}
+
 .register-caregiver-page__form {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  margin-top: 20px;
 }
 
 .register-caregiver-page__section {
@@ -28,6 +32,22 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--color-ink-primary);
+}
+
+.register-caregiver-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.register-caregiver-page__name-row {
+  display: flex;
+  gap: 16px;
+}
+
+.register-caregiver-page__name-row > * {
+  flex: 1;
+  min-width: 0;
 }
 
 .register-caregiver-page__hint {

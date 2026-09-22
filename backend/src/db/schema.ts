@@ -32,6 +32,7 @@ import {
   jsonb,
   numeric,
   pgEnum,
+  pgSequence,
   pgTable,
   primaryKey,
   real,
@@ -48,7 +49,17 @@ import {
 
 export const subjectTypeEnum = pgEnum('subject_type', ['caregiver', 'dependant']);
 export const dependantStatusEnum = pgEnum('dependant_status', ['active', 'deactivated']);
-export const dependantGenderEnum = pgEnum('dependant_gender', ['male', 'female']);
+// Renamed from dependant_gender (2026-09-22, HEZ-54) - caregivers now need the same concept
+// (male/female), and the user confirmed one shared vocabulary over a second near-duplicate enum.
+// A type rename only, no data rewrite - dependants.gender's existing values are untouched.
+export const personGenderEnum = pgEnum('person_gender', ['male', 'female']);
+// Confirmed with the user as exactly these three (2026-09-22, HEZ-54) - deliberately narrower than
+// a free-text job title, so check-in/reporting can rely on a fixed, known vocabulary.
+export const caregiverOccupationEnum = pgEnum('caregiver_occupation', [
+  'nurse',
+  'community_health_worker',
+  'caregiver',
+]);
 export const verificationAttemptTypeEnum = pgEnum('verification_attempt_type', [
   'geofence',
   'caregiver_liveness',
@@ -108,12 +119,36 @@ export const users = pgTable(
 // caregivers (1:1 extension of users)
 // ============================================================================
 
+// Backs employeeNumber's own DB-generated default below (2026-09-22, HEZ-54) - the user asked for
+// employee numbers to be auto-assigned at registration, not supervisor-entered, and a DB sequence
+// is the only concurrency-safe way to hand out a strictly-increasing number under simultaneous
+// registrations (an app-side MAX(...)+1 read is a real race condition, not just a theoretical one).
+export const caregiverEmployeeNumberSeq = pgSequence('caregiver_employee_number_seq', {
+  startWith: 1,
+  increment: 1,
+});
+
 export const caregivers = pgTable('caregivers', {
   userId: uuid()
     .primaryKey()
     .references(() => users.id),
-  employeeNumber: text().unique('uq_caregivers_employee_number'),
-  hireDate: date(),
+  // dob/gender/occupation added 2026-09-22 (HEZ-54) - nullable despite being required at
+  // registration going forward, same "existing rows predate this" treatment users.idType/idNumber
+  // already got, rather than forcing a NOT NULL that could break any already-registered caregiver.
+  dob: date(),
+  gender: personGenderEnum(),
+  occupation: caregiverOccupationEnum(),
+  // Auto-generated ('CG-' + a zero-padded sequence value, e.g. CG-0001) rather than
+  // supervisor-entered - matches the wireframe's own example ("CG-1042"). Still a plain nullable
+  // column, not NOT NULL, for the same pre-existing-rows reason as above (also means PATCH can
+  // still correct one by hand later if a real-world need for that ever comes up, unchanged from
+  // before).
+  employeeNumber: text()
+    .unique('uq_caregivers_employee_number')
+    .default(sql`'CG-' || lpad(nextval('caregiver_employee_number_seq')::text, 4, '0')`),
+  // Auto-populated to the actual registration date rather than supervisor-entered, per the same
+  // request as employeeNumber above.
+  hireDate: date().default(sql`CURRENT_DATE`),
   active: boolean().notNull().default(true),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -131,7 +166,7 @@ export const dependants = pgTable(
       .default(sql`uuid_generate_v7()`),
     fullName: text().notNull(),
     dob: date().notNull(),
-    gender: dependantGenderEnum(),
+    gender: personGenderEnum(),
     homeAddressText: text(),
     // Free-text clinical/care context (e.g. "early-stage dementia, lives alone, mobility aid
     // required") - a general description of the dependant's condition for caregivers/supervisors,
