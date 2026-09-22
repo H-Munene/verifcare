@@ -472,6 +472,84 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /biometric-enrollments/flagged:
+    get:
+      tags: [Biometric Enrollments]
+      summary: List enrollments flagged as a possible duplicate of a different subject (HEZ-85)
+      description: |
+        Supervisor-only. A row lands here when confirming it found this face already enrolled
+        under a *different* subject above the duplicate-detection threshold - not hard-rejected
+        (see `matchedSubjectType`/`matchedSubjectId`/`matchedSimilarity` on each row for the
+        context a supervisor needs to approve or reject it via the two endpoints below.
+      operationId: listFlaggedBiometricEnrollments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Flagged enrollments across every subject, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollmentPage'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/{id}/approve:
+    post:
+      tags: [Biometric Enrollments]
+      summary: Approve a flagged enrollment as legitimate (HEZ-85)
+      description: |
+        Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
+        until now, since it wasn't indexed while flagged) and promotes the row to `active`,
+        superseding any existing active row for the same subject/imageOrder.
+      operationId: approveBiometricEnrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The now-active enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/{id}/reject:
+    post:
+      tags: [Biometric Enrollments]
+      summary: Reject a flagged enrollment as a genuine duplicate (HEZ-85)
+      description: |
+        Supervisor-only. Marks the row `deleted` - it was never indexed while flagged, so nothing
+        needs to be removed from the enrollment-uniqueness collection.
+      operationId: rejectBiometricEnrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The now-deleted enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /visit-schedules:
     post:
       tags: [Visit Schedules]
@@ -647,22 +725,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/challenge:
+  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
-    get:
+    post:
       tags: [Check-in]
-      summary: Get a randomized liveness challenge for the caregiver
-      operationId: getCaregiverLivenessChallenge
+      summary: Get a presigned URL to upload the caregiver's check-in photo
+      description: Called once, before POST .../caregiver-liveness. Uploads go to a separate, short-retention bucket from biometric-enrollments - see architecture.md's storage notes.
+      operationId: createCaregiverLivenessFrameUploadUrl
       security:
-        - bearerAuth: [sessionToken]
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
       responses:
-        '200':
-          description: The challenge to perform on-camera.
+        '201':
+          description: A presigned PUT URL, short-lived.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessChallenge'
+                $ref: '#/components/schemas/PresignedUpload'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -671,14 +757,21 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the caregiver's captured liveness frames
+      summary: Submit the caregiver's check-in photo
       description: |
-        `DetectFaces` runs across the captured frame burst (pose/eye/mouth attribute checks,
-        frame-to-frame movement), then `CompareFaces` against the caregiver's enrolled reference
-        images. Writes a `verification_attempts` row (`attempt_type: caregiver_liveness`) and, on
-        success, updates `verification_events.caregiver_liveness_passed` /
-        `caregiver_match_confidence`.
+        A single photo, not a liveness/anti-spoofing check - the user explicitly decided to drop
+        multi-frame challenge-response liveness detection in favor of one photo, for caregiver
+        mobile app build simplicity (a deliberate, informed tradeoff - see architecture.md's "Key
+        design decisions"). `DetectFaces` confirms exactly one face is present, then `CompareFaces`
+        runs against the caregiver's enrolled reference images. Writes a `verification_attempts`
+        row (`attempt_type: caregiver_liveness`) and, on success, updates
+        `verification_events.caregiver_liveness_passed` / `caregiver_match_confidence`. The photo
+        is deleted from storage right after processing, pass or fail - it is never needed again
+        either way.
       operationId: submitCaregiverLiveness
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -687,7 +780,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Liveness result.
+          description: Result.
           content:
             application/json:
               schema:
@@ -695,21 +788,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/challenge:
+  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
-    get:
+    post:
       tags: [Check-in]
-      summary: Get a randomized liveness challenge for the dependant
-      description: Only reachable once the caregiver liveness step has passed, and within the configurable bounded co-presence time window.
-      operationId: getDependantLivenessChallenge
+      summary: Get a presigned URL to upload the dependant's check-in photo
+      description: Same flow as the caregiver step's upload-url endpoint.
+      operationId: createDependantLivenessFrameUploadUrl
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
       responses:
-        '200':
-          description: The challenge to perform on-camera.
+        '201':
+          description: A presigned PUT URL, short-lived.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessChallenge'
+                $ref: '#/components/schemas/PresignedUpload'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -718,9 +820,12 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the dependant's captured liveness frames
-      description: 'Same flow as the caregiver step. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both liveness steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
+      summary: Submit the dependant's check-in photo
+      description: 'Same flow as the caregiver step (see its own description for the single-photo-not-liveness reasoning). Only reachable once the caregiver step has passed, within the configurable bounded co-presence time window. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
       operationId: submitDependantLiveness
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -729,7 +834,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Liveness result. On pass, check-in is complete.
+          description: Result. On pass, check-in is complete.
           content:
             application/json:
               schema:
@@ -942,6 +1047,21 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: A Cognito-issued ID token (not the access token - the `custom:role` custom attribute this API's RBAC relies on is only present in the ID token by default, confirmed against AWS's Cognito documentation; the access token's default claim set does not include custom attributes without a Pre Token Generation Lambda trigger, which this project does not use). The `custom:role` claim drives RBAC.
+    checkinSessionToken:
+      type: apiKey
+      in: header
+      name: X-Checkin-Session-Token
+      description: |
+        The short-lived session token returned by `POST .../checkin/geofence`, required in
+        addition to (not instead of) the normal `bearerAuth` Cognito token on every remaining
+        check-in step (photo upload, submit - caregiver and dependant). Proves this specific
+        visit's geofence step was passed recently, not just that the caller is a valid caregiver in
+        general - defense in depth, confirmed with the user as the more robust of two designs over
+        a session-token-only approach (HEZ-34). A previous draft of this file used
+        `security: [{bearerAuth: [sessionToken]}]` on one endpoint only, an ambiguous OAuth2-style
+        scopes annotation that doesn't apply to an `http`/`bearer` scheme and was never a
+        considered design - superseded by this explicit second scheme, applied consistently to
+        every step past the geofence check.
 
   parameters:
     Cursor:
@@ -1037,15 +1157,23 @@ components:
     DependantStatus:
       type: string
       enum: [active, deactivated]
-    DependantGender:
+    # Renamed from DependantGender (2026-09-22, HEZ-54) - caregivers now use the same enum, per
+    # backend/src/db/schema.ts's own person_gender rename.
+    PersonGender:
       type: string
       enum: [male, female]
+    CaregiverOccupation:
+      type: string
+      enum: [nurse, community_health_worker, caregiver]
+    IdType:
+      type: string
+      enum: [national_id, passport]
     SubjectType:
       type: string
       enum: [caregiver, dependant]
     BiometricEnrollmentStatus:
       type: string
-      enum: [active, superseded, deleted]
+      enum: [active, superseded, deleted, flagged]
     VisitStatus:
       type: string
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated]
@@ -1135,13 +1263,38 @@ components:
           format: uuid
         fullName:
           type: string
+        email:
+          type: [string, 'null']
+          format: email
         phoneNumber:
           type: [string, 'null']
+        idType:
+          oneOf:
+            - $ref: '#/components/schemas/IdType'
+            - type: 'null'
+        idNumber:
+          type: [string, 'null']
+        dob:
+          type: [string, 'null']
+          format: date
+        gender:
+          oneOf:
+            - $ref: '#/components/schemas/PersonGender'
+            - type: 'null'
+        occupation:
+          oneOf:
+            - $ref: '#/components/schemas/CaregiverOccupation'
+            - type: 'null'
         employeeNumber:
           type: [string, 'null']
+          description: >-
+            Auto-generated at registration ('CG-' plus a zero-padded sequence value, e.g.
+            CG-0001), never client-supplied - see CreateCaregiverRequest. Still editable later via
+            UpdateCaregiverRequest if a supervisor ever needs to correct one by hand.
         hireDate:
           type: [string, 'null']
           format: date
+          description: 'Auto-populated to the actual registration date, never client-supplied - see CreateCaregiverRequest.'
         active:
           type: boolean
         createdAt:
@@ -1152,26 +1305,52 @@ components:
           format: date-time
     CreateCaregiverRequest:
       type: object
-      required: [cognitoSub, phoneNumber, fullName]
+      description: >-
+        employeeNumber/hireDate are deliberately absent here (2026-09-22, HEZ-54) - both are
+        DB-generated at registration, not supervisor-entered. Creates a brand-new Cognito identity
+        itself (like AddFamilyMemberRequest's email path) - a caregiver never self-registers, so a
+        pre-existing Cognito account can never be assumed.
+      required: [fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
       properties:
-        cognitoSub:
-          type: string
-        phoneNumber:
-          type: string
         fullName:
           type: string
-        employeeNumber:
+        email:
           type: string
-        hireDate:
+          format: email
+        phoneNumber:
+          type: string
+        idType:
+          $ref: '#/components/schemas/IdType'
+        idNumber:
+          type: string
+        dob:
           type: string
           format: date
+        gender:
+          $ref: '#/components/schemas/PersonGender'
+        occupation:
+          $ref: '#/components/schemas/CaregiverOccupation'
     UpdateCaregiverRequest:
       type: object
       properties:
-        phoneNumber:
-          type: string
         fullName:
           type: string
+        email:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+        idType:
+          $ref: '#/components/schemas/IdType'
+        idNumber:
+          type: string
+        dob:
+          type: string
+          format: date
+        gender:
+          $ref: '#/components/schemas/PersonGender'
+        occupation:
+          $ref: '#/components/schemas/CaregiverOccupation'
         employeeNumber:
           type: string
         hireDate:
@@ -1215,9 +1394,19 @@ components:
           format: date
         gender:
           oneOf:
-            - $ref: '#/components/schemas/DependantGender'
+            - $ref: '#/components/schemas/PersonGender'
             - type: 'null'
         homeAddressText:
+          type: [string, 'null']
+        primaryConditionSummary:
+          description: Free-text clinical/care context for caregivers/supervisors - not a structured diagnosis field.
+          type: [string, 'null']
+        county:
+          description: Resolved client-side (admin web app) via a point-in-polygon lookup against IEBC ward boundary GeoJSON as the geofence pin is placed. Null for dependants registered before this field existed.
+          type: [string, 'null']
+        constituency:
+          type: [string, 'null']
+        ward:
           type: [string, 'null']
         geofenceLat:
           type: number
@@ -1243,7 +1432,18 @@ components:
           format: date-time
     CreateDependantRequest:
       type: object
-      required: [fullName, dob, geofenceLat, geofenceLng, geofenceRadiusMeters, primaryFamilyMember]
+      required:
+        [
+          fullName,
+          dob,
+          county,
+          constituency,
+          ward,
+          geofenceLat,
+          geofenceLng,
+          geofenceRadiusMeters,
+          primaryFamilyMember,
+        ]
       properties:
         fullName:
           type: string
@@ -1251,8 +1451,17 @@ components:
           type: string
           format: date
         gender:
-          $ref: '#/components/schemas/DependantGender'
+          $ref: '#/components/schemas/PersonGender'
         homeAddressText:
+          type: string
+        primaryConditionSummary:
+          type: string
+        county:
+          description: Required for every new registration, unlike homeAddressText's own optional free-text treatment - resolved client-side as the geofence pin is placed.
+          type: string
+        constituency:
+          type: string
+        ward:
           type: string
         geofenceLat:
           type: number
@@ -1274,8 +1483,16 @@ components:
         fullName:
           type: string
         gender:
-          $ref: '#/components/schemas/DependantGender'
+          $ref: '#/components/schemas/PersonGender'
         homeAddressText:
+          type: string
+        primaryConditionSummary:
+          type: string
+        county:
+          type: string
+        constituency:
+          type: string
+        ward:
           type: string
         geofenceLat:
           type: number
@@ -1343,8 +1560,19 @@ components:
           description: 'Creates a brand-new Cognito identity and sends it a real invitation email. Mutually exclusive with cognitoSub.'
         phoneNumber:
           type: string
+          description: >-
+            Required in E.164 format (e.g. +254712345678) only when email is also set - that's the
+            only path that sends this value to Cognito's AdminCreateUser, which rejects any other
+            format. Not validated against this format when cognitoSub is set instead (linking an
+            existing identity never uses this field).
         fullName:
           type: string
+        idType:
+          allOf: [{ $ref: '#/components/schemas/IdType' }]
+          description: 'Required together with idNumber when registering a brand-new user via email.'
+        idNumber:
+          type: string
+          description: 'Required together with idType when registering a brand-new user via email.'
         relationship:
           type: string
         isPrimaryContact:
@@ -1382,6 +1610,20 @@ components:
           format: float
         status:
           $ref: '#/components/schemas/BiometricEnrollmentStatus'
+        matchedSubjectType:
+          description: |
+            Set only when status is (or was) `flagged` (HEZ-85): the *other* subject this image's
+            face matched above the duplicate-detection threshold at confirm time.
+          oneOf:
+            - $ref: '#/components/schemas/SubjectType'
+            - type: 'null'
+        matchedSubjectId:
+          type: [string, 'null']
+          format: uuid
+        matchedSimilarity:
+          description: The Rekognition similarity score (0-100) for the match above.
+          type: [number, 'null']
+          format: float
         enrolledBy:
           type: string
           format: uuid
@@ -1435,6 +1677,16 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+    BiometricEnrollmentPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BiometricEnrollment'
+        nextCursor:
+          type: [string, 'null']
 
     VisitSchedule:
       type: object
@@ -1575,7 +1827,10 @@ components:
       required: [event, attempts]
       properties:
         event:
-          $ref: '#/components/schemas/VerificationEvent'
+          description: Null when the visit has never reached the geofence step (no verification_events row exists yet).
+          oneOf:
+            - $ref: '#/components/schemas/VerificationEvent'
+            - type: 'null'
         attempts:
           type: array
           items:
@@ -1611,38 +1866,20 @@ components:
           type: string
           format: date-time
 
-    LivenessChallenge:
+    LivenessFrameUploadUrlRequest:
       type: object
-      required: [challengeId, instructions, expiresAt]
+      required: [contentType]
       properties:
-        challengeId:
+        contentType:
           type: string
-          format: uuid
-        instructions:
-          type: string
-          example: Turn your head left, then right.
-        expiresAt:
-          type: string
-          format: date-time
+          enum: [image/jpeg, image/png]
     LivenessSubmission:
       type: object
-      required: [challengeId, frames]
+      required: [s3Key]
+      description: A single check-in photo, not a multi-frame burst - see submitCaregiverLiveness's own description for why.
       properties:
-        challengeId:
+        s3Key:
           type: string
-          format: uuid
-        frames:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [s3Key, capturedAt]
-            properties:
-              s3Key:
-                type: string
-              capturedAt:
-                type: string
-                format: date-time
     LivenessResult:
       type: object
       required: [passed]

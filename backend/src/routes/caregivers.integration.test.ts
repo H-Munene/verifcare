@@ -6,8 +6,11 @@
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser } from '../auth/verifier.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
+import * as schema from '../db/schema.js';
 import {
   getDb,
   getTestDatabaseUrl,
@@ -26,13 +29,39 @@ function testAuthHeader(user: AuthenticatedUser): string {
 interface CaregiverBody {
   userId: string;
   fullName: string;
+  email: string | null;
   phoneNumber: string | null;
+  idType: string | null;
+  idNumber: string | null;
+  dob: string | null;
+  gender: string | null;
+  occupation: string | null;
   employeeNumber: string | null;
+  hireDate: string | null;
   active: boolean;
 }
 interface CaregiverPageBody {
   items: CaregiverBody[];
   nextCursor: string | null;
+}
+
+// Every field createCaregiverRequestSchema now requires (2026-09-22, HEZ-54) - a shared base so
+// each test only has to spell out what it's actually varying, not all seven required fields every
+// time. email/phoneNumber default to obviously-overridable placeholders since most tests need
+// unique values per call (both are unique-constrained). No cognitoSub field - POST /caregivers
+// creates the Cognito identity itself now, a caregiver never self-registers.
+function validCaregiverBody(overrides: Record<string, unknown> = {}) {
+  return {
+    fullName: 'Grace Hopper',
+    email: 'grace@example.com',
+    phoneNumber: '+254700000000',
+    idType: 'national_id',
+    idNumber: 'ID-0001',
+    dob: '1990-01-01',
+    gender: 'female',
+    occupation: 'nurse',
+    ...overrides,
+  };
 }
 // supertest types response.body as `any` (it's just parsed JSON) - a single cast point per
 // response, rather than scattering `as` assertions across every property access below.
@@ -43,7 +72,10 @@ function caregiverPageBody(response: request.Response): CaregiverPageBody {
   return response.body as CaregiverPageBody;
 }
 
-function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
+function buildTestApp(
+  cognitoAdmin: CognitoAdmin,
+  faceCollection?: BiometricFaceCollection,
+): Express {
   const app = express();
   app.use(express.json());
   app.locals.db = getDb();
@@ -58,7 +90,7 @@ function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
     next();
   };
 
-  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth, faceCollection }));
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -90,9 +122,24 @@ describe.skipIf(!hasTestDb)(
 
     beforeEach(async () => {
       await truncateAllTables();
+      // Mimics real AdminCreateUser behavior closely enough for these tests: a fresh sub per
+      // distinct email, and a UsernameExistsException-shaped rejection (matching
+      // isCognitoUserAlreadyExistsError's check) when an email is reused, since Cognito's
+      // Username is the email (see auth/cognitoAdmin.ts's createUser).
+      const usedEmails = new Set<string>();
+      let subCounter = 0;
       cognitoAdmin = {
         assignRole: vi.fn().mockResolvedValue(undefined),
-        createUser: vi.fn().mockResolvedValue('unused-sub'),
+        createUser: vi.fn().mockImplementation(({ email }: { email: string }) => {
+          if (usedEmails.has(email)) {
+            const err = new Error('An account with the given email already exists.');
+            (err as unknown as { name: string }).name = 'UsernameExistsException';
+            throw err;
+          }
+          usedEmails.add(email);
+          subCounter += 1;
+          return Promise.resolve(`caregiver-sub-${subCounter}`);
+        }),
       };
       app = buildTestApp(cognitoAdmin);
     });
@@ -102,66 +149,128 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('POST /caregivers', () => {
-      it('creates both the users and caregivers rows atomically, and assigns the Cognito role', async () => {
+      it('creates both the users and caregivers rows atomically, creates the Cognito identity, and auto-generates employeeNumber/hireDate', async () => {
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'new-caregiver-sub',
-            phoneNumber: '+254700000030',
-            fullName: 'Grace Hopper',
-            employeeNumber: 'EMP-001',
-          });
+          .send(
+            validCaregiverBody({
+              email: 'grace.new@example.com',
+              phoneNumber: '+254700000030',
+              fullName: 'Grace Hopper',
+            }),
+          );
 
         expect(response.status).toBe(201);
         expect(response.body).toMatchObject({
           fullName: 'Grace Hopper',
+          email: 'grace.new@example.com',
           phoneNumber: '+254700000030',
-          employeeNumber: 'EMP-001',
+          idType: 'national_id',
+          idNumber: 'ID-0001',
+          dob: '1990-01-01',
+          gender: 'female',
+          occupation: 'nurse',
           active: true,
         });
-        expect(cognitoAdmin.assignRole).toHaveBeenCalledWith('new-caregiver-sub', 'caregiver');
+        // Neither is ever sent by the client (createCaregiverRequestSchema has no such fields) -
+        // this confirms the DB defaults actually fired, not just that the fields are absent.
+        expect(caregiverBody(response).employeeNumber).toMatch(/^CG-\d{4}$/);
+        expect(caregiverBody(response).hireDate).not.toBeNull();
+        expect(cognitoAdmin.createUser).toHaveBeenCalledWith({
+          email: 'grace.new@example.com',
+          phoneNumber: '+254700000030',
+          fullName: 'Grace Hopper',
+          role: 'caregiver',
+        });
       });
 
       it('returns 403 for a non-supervisor caller', async () => {
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', caregiverAuth)
-          .send({ cognitoSub: 'x', phoneNumber: '+254700000031', fullName: 'X' });
+          .send(validCaregiverBody({ email: 'x@example.com' }));
 
         expect(response.status).toBe(403);
-        expect(cognitoAdmin.assignRole).not.toHaveBeenCalled();
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
       });
 
-      it('returns 409 for a duplicate cognitoSub', async () => {
-        await request(app).post('/caregivers').set('x-test-auth', supervisorAuth).send({
-          cognitoSub: 'dup-caregiver-sub',
-          phoneNumber: '+254700000032',
-          fullName: 'First',
-        });
+      it('returns 409 for a duplicate email (Cognito already has that identity)', async () => {
+        await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'dup@example.com',
+              phoneNumber: '+254700000032',
+              fullName: 'First',
+            }),
+          );
 
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'dup-caregiver-sub',
-            phoneNumber: '+254700000033',
-            fullName: 'Second',
-          });
+          .send(
+            validCaregiverBody({
+              email: 'dup@example.com',
+              phoneNumber: '+254700000033',
+              fullName: 'Second',
+            }),
+          );
 
         expect(response.status).toBe(409);
       });
 
-      it('returns 400 for an invalid hireDate format', async () => {
+      it('returns 409 for a duplicate phoneNumber', async () => {
+        await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'phone-first@example.com',
+              phoneNumber: '+254700000099',
+              fullName: 'First',
+            }),
+          );
+
         const response = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'y',
-            phoneNumber: '+254700000034',
-            fullName: 'Y',
-            hireDate: '13-09-2026',
-          });
+          .send(
+            validCaregiverBody({
+              email: 'phone-second@example.com',
+              phoneNumber: '+254700000099',
+              fullName: 'Second',
+            }),
+          );
+
+        expect(response.status).toBe(409);
+      });
+
+      it('returns 400 for an invalid dob format', async () => {
+        const response = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'y@example.com',
+              phoneNumber: '+254700000034',
+              fullName: 'Y',
+              dob: '13-09-2026',
+            }),
+          );
+
+        expect(response.status).toBe(400);
+      });
+
+      it('returns 400 when a required field (occupation) is missing', async () => {
+        const body = validCaregiverBody({ email: 'z@example.com' }) as Record<string, unknown>;
+        delete body.occupation;
+
+        const response = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(body);
 
         expect(response.status).toBe(400);
       });
@@ -173,12 +282,13 @@ describe.skipIf(!hasTestDb)(
           await request(app)
             .post('/caregivers')
             .set('x-test-auth', supervisorAuth)
-            .send({
-              cognitoSub: `list-caregiver-${i}`,
-              phoneNumber: `+25470000004${i}`,
-              fullName: `Caregiver ${i}`,
-              ...(i === 0 ? { hireDate: undefined } : {}),
-            });
+            .send(
+              validCaregiverBody({
+                email: `list-${i}@example.com`,
+                phoneNumber: `+25470000004${i}`,
+                fullName: `Caregiver ${i}`,
+              }),
+            );
         }
         // Deactivate one so the `active` filter has something real to filter on.
         const list = caregiverPageBody(
@@ -237,11 +347,13 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({
-            cognitoSub: 'target-caregiver',
-            phoneNumber: '+254700000050',
-            fullName: 'Target',
-          });
+          .send(
+            validCaregiverBody({
+              email: 'target@example.com',
+              phoneNumber: '+254700000050',
+              fullName: 'Target',
+            }),
+          );
 
         const found = await request(app)
           .get(`/caregivers/${caregiverBody(created).userId}`)
@@ -259,7 +371,13 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({ cognitoSub: 'self-caregiver', phoneNumber: '+254700000051', fullName: 'Self' });
+          .send(
+            validCaregiverBody({
+              email: 'self@example.com',
+              phoneNumber: '+254700000051',
+              fullName: 'Self',
+            }),
+          );
 
         const response = await request(app)
           .get(`/caregivers/${caregiverBody(created).userId}`)
@@ -273,7 +391,13 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({ cognitoSub: 'patch-target', phoneNumber: '+254700000060', fullName: 'Before' });
+          .send(
+            validCaregiverBody({
+              email: 'patch-target@example.com',
+              phoneNumber: '+254700000060',
+              fullName: 'Before',
+            }),
+          );
 
         const response = await request(app)
           .patch(`/caregivers/${caregiverBody(created).userId}`)
@@ -289,21 +413,33 @@ describe.skipIf(!hasTestDb)(
       });
 
       it('returns 409 on a duplicate employeeNumber', async () => {
-        await request(app).post('/caregivers').set('x-test-auth', supervisorAuth).send({
-          cognitoSub: 'emp-a',
-          phoneNumber: '+254700000061',
-          fullName: 'A',
-          employeeNumber: 'EMP-DUP',
-        });
+        // employeeNumber is never client-supplied at create time anymore (auto-generated) - this
+        // now exercises the PATCH-time uniqueness check by colliding with an auto-generated value.
+        const first = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'emp-a@example.com',
+              phoneNumber: '+254700000061',
+              fullName: 'A',
+            }),
+          );
         const second = await request(app)
           .post('/caregivers')
           .set('x-test-auth', supervisorAuth)
-          .send({ cognitoSub: 'emp-b', phoneNumber: '+254700000062', fullName: 'B' });
+          .send(
+            validCaregiverBody({
+              email: 'emp-b@example.com',
+              phoneNumber: '+254700000062',
+              fullName: 'B',
+            }),
+          );
 
         const response = await request(app)
           .patch(`/caregivers/${caregiverBody(second).userId}`)
           .set('x-test-auth', supervisorAuth)
-          .send({ employeeNumber: 'EMP-DUP' });
+          .send({ employeeNumber: caregiverBody(first).employeeNumber });
 
         expect(response.status).toBe(409);
       });
@@ -315,6 +451,50 @@ describe.skipIf(!hasTestDb)(
           .send({ active: false });
 
         expect(response.status).toBe(404);
+      });
+
+      it('cleans up indexed biometric enrollments when deactivated (HEZ-85)', async () => {
+        const faceCollection: BiometricFaceCollection = {
+          checkDuplicate: vi.fn(),
+          indexFace: vi.fn(),
+          deleteFaces: vi.fn().mockResolvedValue(undefined),
+        };
+        const localApp = buildTestApp(cognitoAdmin, faceCollection);
+        const created = await request(localApp)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'offboard@example.com',
+              phoneNumber: '+254700000070',
+              fullName: 'Offboard',
+            }),
+          );
+        const caregiverId = caregiverBody(created).userId;
+
+        const db = getDb();
+        await db.insert(schema.biometricEnrollments).values({
+          subjectType: 'caregiver',
+          caregiverId,
+          s3Key: `caregiver/${caregiverId}/1/photo.jpg`,
+          imageOrder: 1,
+          status: 'active',
+          rekognitionFaceId: 'face-id-1',
+          enrolledBy: caregiverId,
+        });
+
+        const response = await request(localApp)
+          .patch(`/caregivers/${caregiverId}`)
+          .set('x-test-auth', supervisorAuth)
+          .send({ active: false });
+
+        expect(response.status).toBe(200);
+        expect(faceCollection.deleteFaces).toHaveBeenCalledWith(['face-id-1']);
+        const [row] = await db
+          .select()
+          .from(schema.biometricEnrollments)
+          .where(eq(schema.biometricEnrollments.caregiverId, caregiverId));
+        expect(row?.status).toBe('deleted');
       });
     });
   },

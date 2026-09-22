@@ -5,6 +5,7 @@ import { ApiError } from '../api/client';
 import type { DependantFamilyMember } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
 import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
@@ -87,6 +88,8 @@ export function DependantDetailPage() {
           <p className="dependant-detail__empty">No family members linked yet.</p>
         )}
       </section>
+
+      <BiometricEnrollmentSection subjectType="dependant" subjectId={dependant.id} />
 
       <section className="dependant-detail__section">
         <h2 className="dependant-detail__section-title">Visit History</h2>

@@ -5,7 +5,7 @@
 // way).
 // See https://www.postgresql.org/docs/current/errcodes-appendix.html
 
-function getPostgresErrorCode(err: unknown): string | undefined {
+function getPostgresErrorField(err: unknown, field: 'code' | 'constraint'): string | undefined {
   if (typeof err !== 'object' || err === null) {
     return undefined;
   }
@@ -13,8 +13,19 @@ function getPostgresErrorCode(err: unknown): string | undefined {
   if (typeof cause !== 'object' || cause === null) {
     return undefined;
   }
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' ? code : undefined;
+  const value = (cause as Record<string, unknown>)[field];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function getPostgresErrorCode(err: unknown): string | undefined {
+  return getPostgresErrorField(err, 'code');
+}
+
+// The `constraint` field on a classified error's `.cause` (e.g. which EXCLUDE/CHECK/UNIQUE
+// constraint fired) - only meaningful once a caller has already confirmed via one of the
+// is-a-violation checks below which broad error class it's dealing with.
+export function getPostgresConstraintName(err: unknown): string | undefined {
+  return getPostgresErrorField(err, 'constraint');
 }
 
 // invalid_password, invalid_authorization_specification.
@@ -27,4 +38,11 @@ export function isPostgresAuthError(err: unknown): boolean {
 
 export function isPostgresUniqueViolation(err: unknown): boolean {
   return getPostgresErrorCode(err) === '23505';
+}
+
+// exclusion_violation - the `excl_visit_schedules_caregiver_overlap`/
+// `excl_visit_schedules_dependant_overlap` EXCLUDE USING gist constraints (HEZ-9), surfaced as a
+// clean 409 by routes/visitSchedules.ts (HEZ-32) rather than a raw 500.
+export function isPostgresExclusionViolation(err: unknown): boolean {
+  return getPostgresErrorCode(err) === '23P01';
 }

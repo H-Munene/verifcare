@@ -22,6 +22,62 @@
       "when": 1788943675172,
       "tag": "0002_triggers_and_exclusions",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789663117267,
+      "tag": "0003_zippy_wendell_vaughn",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789805484182,
+      "tag": "0004_bitter_wallflower",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789805620870,
+      "tag": "0005_short_mandroid",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789807634144,
+      "tag": "0006_even_emma_frost",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789931818200,
+      "tag": "0007_bouncy_giant_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789970243446,
+      "tag": "0008_thick_wrecker",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789975508301,
+      "tag": "0009_abandoned_weapon_omega",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790078741915,
+      "tag": "0010_hez_54_caregiver_registration_fields",
+      "breakpoints": true
     }
   ]
 }

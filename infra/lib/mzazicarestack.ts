@@ -6,6 +6,7 @@ import { createDatabase } from "./database";
 import { createStorage } from "./storage";
 import { createRegistry } from "./registry";
 import { createApi } from "./api";
+import { createMigrationRunner } from "./migrationRunner";
 import { createMissedVisitSweep } from "./missedVisitSweep";
 import { createObservability } from "./observability";
 import { createCicd } from "./cicd";
@@ -18,7 +19,12 @@ export class MzaziCareStack extends cdk.Stack {
     const { userPool, userPoolClient, caregiverAppUserPoolClient, familyMemberAppUserPoolClient } =
       createAuth(this);
     const { database, databaseSecret } = createDatabase(this, vpc);
-    const { biometricEnrollmentsBucket, visitAudioBucket } = createStorage(this);
+    const {
+      biometricEnrollmentsBucket,
+      visitAudioBucket,
+      checkinLivenessFramesBucket,
+      biometricFacesCollection,
+    } = createStorage(this);
     createRegistry(this);
 
     const { apiFunction, restApi } = createApi(this, {
@@ -31,6 +37,8 @@ export class MzaziCareStack extends cdk.Stack {
       familyMemberAppUserPoolClient,
       biometricEnrollmentsBucket,
       visitAudioBucket,
+      checkinLivenessFramesBucket,
+      biometricFacesCollection,
     });
 
     const { missedVisitSweepFunction } = createMissedVisitSweep(this, {
@@ -38,6 +46,8 @@ export class MzaziCareStack extends cdk.Stack {
       database,
       databaseSecret,
     });
+
+    createMigrationRunner(this, { vpc, database, databaseSecret });
 
     createObservability(this, {
       apiFunction,

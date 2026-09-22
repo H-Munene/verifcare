@@ -6,6 +6,7 @@ import type { ApiClient } from './client';
 
 export type DependantStatus = 'active' | 'deactivated';
 export type DependantGender = 'male' | 'female';
+export type FamilyMemberIdType = 'national_id' | 'passport';
 
 export interface Dependant {
   id: string;
@@ -13,6 +14,10 @@ export interface Dependant {
   dob: string;
   gender: DependantGender | null;
   homeAddressText: string | null;
+  primaryConditionSummary: string | null;
+  county: string | null;
+  constituency: string | null;
+  ward: string | null;
   geofenceLat: number;
   geofenceLng: number;
   geofenceRadiusMeters: number;
@@ -40,12 +45,15 @@ export interface DependantFamilyMember {
 // Exactly one of cognitoSub/email must be set - cognitoSub links an existing Cognito identity;
 // email creates a brand-new one from scratch (2026-09-14, see backend/openapi.yaml's
 // AddFamilyMemberRequest for the full contract). Built by components/FamilyMemberResolver.tsx,
-// not typed directly by hand in any page.
+// not typed directly by hand in any page. idType/idNumber are required together on the email path
+// (enforced server-side) and ignored on the cognitoSub path.
 export interface AddFamilyMemberRequest {
   cognitoSub?: string;
   email?: string;
   phoneNumber: string;
   fullName: string;
+  idType?: FamilyMemberIdType;
+  idNumber?: string;
   relationship?: string;
   isPrimaryContact?: boolean;
 }
@@ -55,6 +63,12 @@ export interface CreateDependantRequest {
   dob: string;
   gender?: DependantGender;
   homeAddressText?: string;
+  primaryConditionSummary?: string;
+  // Required for every new registration (unlike homeAddressText's own optional treatment) -
+  // resolved client-side via the geofence map's point-in-polygon lookup (HEZ-86).
+  county: string;
+  constituency: string;
+  ward: string;
   geofenceLat: number;
   geofenceLng: number;
   geofenceRadiusMeters: number;
@@ -66,6 +80,10 @@ export interface UpdateDependantRequest {
   fullName?: string;
   gender?: DependantGender;
   homeAddressText?: string;
+  primaryConditionSummary?: string;
+  county?: string;
+  constituency?: string;
+  ward?: string;
   geofenceLat?: number;
   geofenceLng?: number;
   geofenceRadiusMeters?: number;
