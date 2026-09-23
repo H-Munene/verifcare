@@ -180,6 +180,22 @@ async function createInProgressVisit(
   return row;
 }
 
+async function createTestCareTask(
+  dependantId: string,
+  createdById: string,
+  overrides: Partial<typeof schema.dependantCareTasks.$inferInsert> = {},
+): Promise<typeof schema.dependantCareTasks.$inferSelect> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.dependantCareTasks)
+    .values({ dependantId, title: 'Assist with bathing', createdBy: createdById, ...overrides })
+    .returning();
+  if (!row) {
+    throw new Error('Failed to insert test care task.');
+  }
+  return row;
+}
+
 describe.skipIf(!hasTestDb)(
   'POST/GET /visit-schedules, GET/PATCH /visit-schedules/{visitScheduleId} (real Postgres)',
   () => {
@@ -607,6 +623,66 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
 
         expect(response.status).toBe(404);
+      });
+
+      it('blocks checkout with a 409 naming the task when a required care task is unaddressed', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        await createTestCareTask(dependant.id, supervisor.id, {
+          title: 'Assist with bathing',
+          required: true,
+        });
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(409);
+        expect(problemBody(response).detail).toMatch(/Assist with bathing/);
+
+        const db = getDb();
+        const [unchanged] = await db
+          .select()
+          .from(schema.visitSchedules)
+          .where(eq(schema.visitSchedules.id, visit.id));
+        expect(unchanged?.status).toBe('in_progress');
+      });
+
+      it('allows checkout once every required task has any status recorded, and ignores non-required/retired tasks', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const required = await createTestCareTask(dependant.id, supervisor.id, {
+          title: 'Assist with bathing',
+          required: true,
+        });
+        await createTestCareTask(dependant.id, supervisor.id, {
+          title: 'Optional task',
+          required: false,
+        });
+        await createTestCareTask(dependant.id, supervisor.id, {
+          title: 'Retired required task',
+          required: true,
+          active: false,
+        });
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+        const db = getDb();
+        // "Addressed" means any status was recorded, not necessarily 'completed' - matches the
+        // real-world "Required task alert" semantics this blocking mirrors.
+        await db.insert(schema.visitTaskCompletions).values({
+          visitScheduleId: visit.id,
+          careTaskId: required.id,
+          status: 'not_applicable',
+        });
+
+        const response = await request(app)
+          .post(`/visit-schedules/${visit.id}/checkout`)
+          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+        expect(response.status).toBe(200);
+        expect(visitBody(response).status).toBe('completed');
       });
     });
 

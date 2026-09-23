@@ -78,6 +78,13 @@
       "when": 1790078741915,
       "tag": "0010_hez_54_caregiver_registration_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790259600000,
+      "tag": "0011_visit_task_checklist",
+      "breakpoints": true
     }
   ]
 }

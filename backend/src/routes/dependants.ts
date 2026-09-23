@@ -115,6 +115,34 @@ function toDependantResponse(row: typeof schema.dependants.$inferSelect): Depend
   };
 }
 
+interface CareTaskResponse {
+  id: string;
+  dependantId: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  required: boolean;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toCareTaskResponse(row: typeof schema.dependantCareTasks.$inferSelect): CareTaskResponse {
+  return {
+    id: row.id,
+    dependantId: row.dependantId,
+    title: row.title,
+    description: row.description,
+    category: row.category,
+    required: row.required,
+    active: row.active,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 interface DependantFamilyMemberResponse {
   dependantId: string;
   familyMemberUserId: string;
@@ -258,6 +286,30 @@ const updateDependantRequestSchema = z.object({
 const updateFamilyMemberRequestSchema = z.object({
   relationship: z.string().min(1).optional(),
   isPrimaryContact: z.boolean().optional(),
+});
+
+const careTaskIdParamSchema = z.string().uuid();
+
+const createCareTaskRequestSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+});
+
+const updateCareTaskRequestSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+  active: z.boolean().optional(),
+});
+
+const listCareTasksQuerySchema = z.object({
+  active: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 
 const listDependantsQuerySchema = z.object({
@@ -988,6 +1040,161 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           throw new Error('Update to dependant_family_members returned no row.');
         }
         res.status(200).json(toFamilyMemberResponse(updated));
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Visit task checklist (docs/visit-task-checklist-plan.md) - the care plan itself. Authoring
+  // (POST/PATCH) is supervisor-only, matching the user's own "these will be defined by the
+  // supervisor" confirmation; GET reuses this router's own broader gate (supervisor,
+  // family_member) plus the same ownership check GET /:dependantId already uses, so a family
+  // member can see the care plan for a dependant they're linked to, not author it.
+
+  router.post('/:dependantId/care-tasks', requireRole('supervisor'), async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const body = parseOrSendProblem(createCareTaskRequestSchema, req.body, res);
+    if (!body) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [dependant] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!dependant) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+      if (!callerRow) {
+        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
+      }
+
+      const [row] = await db
+        .insert(schema.dependantCareTasks)
+        .values({
+          id: uuidv7(),
+          dependantId,
+          title: body.title,
+          description: body.description,
+          category: body.category,
+          required: body.required,
+          createdBy: callerRow.id,
+        })
+        .returning();
+      if (!row) {
+        throw new Error('Insert into dependant_care_tasks returned no row.');
+      }
+      res.status(201).json(toCareTaskResponse(row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:dependantId/care-tasks', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const query = parseOrSendProblem(listCareTasksQuerySchema, req.query, res);
+    if (!query) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [dependant] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!dependant) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (caller.role !== 'supervisor') {
+        const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+
+      const conditions = [eq(schema.dependantCareTasks.dependantId, dependantId)];
+      if (query.active !== undefined) {
+        conditions.push(eq(schema.dependantCareTasks.active, query.active));
+      }
+      const rows = await db
+        .select()
+        .from(schema.dependantCareTasks)
+        .where(and(...conditions))
+        .orderBy(asc(schema.dependantCareTasks.createdAt));
+      res.status(200).json(rows.map(toCareTaskResponse));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.patch(
+    '/:dependantId/care-tasks/:careTaskId',
+    requireRole('supervisor'),
+    async (req, res, next) => {
+      const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+      if (!dependantId) {
+        return;
+      }
+      const careTaskId = parseOrSendProblem(careTaskIdParamSchema, req.params.careTaskId, res);
+      if (!careTaskId) {
+        return;
+      }
+      const body = parseOrSendProblem(updateCareTaskRequestSchema, req.body, res);
+      if (!body) {
+        return;
+      }
+      const db = getDb(res);
+      if (!db) {
+        return;
+      }
+
+      try {
+        const [row] = await db
+          .update(schema.dependantCareTasks)
+          .set(body)
+          .where(
+            and(
+              eq(schema.dependantCareTasks.id, careTaskId),
+              eq(schema.dependantCareTasks.dependantId, dependantId),
+            ),
+          )
+          .returning();
+        if (!row) {
+          sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+          return;
+        }
+        res.status(200).json(toCareTaskResponse(row));
       } catch (err) {
         next(err);
       }

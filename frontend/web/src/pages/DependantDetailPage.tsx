@@ -59,14 +59,23 @@ export function DependantDetailPage() {
             {dependant.geofenceRadiusMeters}m
           </div>
         </div>
-        <Button
-          variant="primary"
-          onClick={() => {
-            void navigate(`/dependants/${dependant.id}/edit`);
-          }}
-        >
-          Edit Dependant
-        </Button>
+        <div className="dependant-detail__header-actions">
+          <Button
+            onClick={() => {
+              void navigate(`/dependants/${dependant.id}/care-plan`);
+            }}
+          >
+            Care Plan
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => {
+              void navigate(`/dependants/${dependant.id}/edit`);
+            }}
+          >
+            Edit Dependant
+          </Button>
+        </div>
       </div>
 
       <section className="dependant-detail__section">

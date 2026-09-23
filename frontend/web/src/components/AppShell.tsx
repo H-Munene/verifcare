@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { NavItem } from '../design-system/NavItem';
+import { Breadcrumbs } from './Breadcrumbs';
 import './AppShell.css';
 
 // Matches the wireframe's global chrome (temp_images's design prompt): left sidebar nav with all
@@ -70,7 +71,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             Sign out
           </button>
         </header>
-        <main className="app-shell__content">{children}</main>
+        <main className="app-shell__content">
+          <Breadcrumbs />
+          {children}
+        </main>
       </div>
     </div>
   );

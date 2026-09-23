@@ -402,6 +402,84 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /dependants/{dependantId}/care-tasks:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    post:
+      tags: [Dependants]
+      summary: Create a care-plan task for a dependant
+      description: |
+        Visit task checklist (docs/visit-task-checklist-plan.md). Supervisor-only - the care plan
+        is authored by a supervisor on a dedicated Care Plan screen, not by the caregiver and not
+        part of dependant registration.
+      operationId: createCareTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCareTaskRequest'
+      responses:
+        '201':
+          description: The created task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTask'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      tags: [Dependants]
+      summary: List a dependant's care-plan tasks
+      description: Supervisor sees any dependant's tasks; a family_member sees only a linked dependant's, same ownership rule as `GET /dependants/{dependantId}`.
+      operationId: listCareTasks
+      parameters:
+        - name: active
+          in: query
+          schema:
+            type: boolean
+          description: Omit to list every task (active and retired); set to filter to one or the other.
+      responses:
+        '200':
+          description: The dependant's care-plan tasks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CareTask'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /dependants/{dependantId}/care-tasks/{careTaskId}:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+      - $ref: '#/components/parameters/CareTaskId'
+    patch:
+      tags: [Dependants]
+      summary: Update or retire a care-plan task
+      description: "Supervisor-only. Retiring (`active: false`) keeps the task's history on any `visit_task_completions` rows that already reference it, but stops it appearing on future visits."
+      operationId: updateCareTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCareTaskRequest'
+      responses:
+        '200':
+          description: The updated task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTask'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /biometric-enrollments/upload-url:
     post:
       tags: [Biometric Enrollments]
@@ -924,7 +1002,11 @@ paths:
     post:
       tags: [Visit Schedules]
       summary: Check out of a visit
-      description: Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to `completed`.
+      description: |
+        Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to
+        `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
+        dependant_care_tasks row has no matching visit_task_completions row for this visit -
+        "addressed" means any status was recorded, not necessarily `completed`.
       operationId: checkoutVisit
       responses:
         '200':
@@ -934,7 +1016,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/VisitSchedule'
         '409':
-          description: The visit hasn't been checked in yet, or is already completed/cancelled.
+          description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/tasks:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    get:
+      tags: [Visit Schedules]
+      summary: Get this visit's task checklist
+      description: |
+        Visit task checklist (docs/visit-task-checklist-plan.md). Caregiver-only, own visit,
+        `in_progress` only - the checklist is worked through during the visit, after check-in and
+        before checkout. Live-joined against dependant_care_tasks (active, for this visit's
+        dependant) - not a snapshot, so a care-plan edit made mid-visit is reflected immediately.
+      operationId: listVisitTasks
+      responses:
+        '200':
+          description: This visit's task checklist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VisitTask'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/tasks/{careTaskId}:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+      - $ref: '#/components/parameters/CareTaskId'
+    put:
+      tags: [Visit Schedules]
+      summary: Record (or correct) this visit's completion status for one task
+      description: Upserts - a second submission for the same task replaces the first, rather than appending. Rejects with 409 once the visit is no longer `in_progress` ("locked after checkout" - see the plan doc's section 2).
+      operationId: putVisitTaskCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutVisitTaskCompletionRequest'
+      responses:
+        '200':
+          description: The recorded completion.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [careTaskId, status, reason, notes, completedAt]
+                properties:
+                  careTaskId:
+                    type: string
+                    format: uuid
+                  status:
+                    $ref: '#/components/schemas/TaskCompletionStatus'
+                  reason:
+                    allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
+                    nullable: true
+                  notes:
+                    type: [string, 'null']
+                  completedAt:
+                    type: string
+                    format: date-time
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The visit is not `in_progress` (either not yet checked in, or already past checkout).
           content:
             application/problem+json:
               schema:
@@ -1130,6 +1284,13 @@ components:
         format: uuid
     VisitScheduleId:
       name: visitScheduleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CareTaskId:
+      name: careTaskId
       in: path
       required: true
       schema:
@@ -1616,6 +1777,111 @@ components:
           type: string
         isPrimaryContact:
           type: boolean
+
+    TaskCompletionStatus:
+      type: string
+      enum: [completed, not_completed, not_applicable]
+    TaskSkipReason:
+      type: string
+      enum: [client_declined, client_unavailable, equipment_unavailable, other]
+    CareTask:
+      type: object
+      description: A care-plan task (docs/visit-task-checklist-plan.md), authored by a supervisor for one dependant.
+      required: [id, dependantId, title, required, active, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        dependantId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+          description: Free text, not a fixed ADL/IADL taxonomy - a display grouping label only.
+        required:
+          type: boolean
+          description: A required task with no visit_task_completions row blocks checkout for that visit.
+        active:
+          type: boolean
+          description: A retired (false) task keeps its history but stops appearing on future visits.
+        createdBy:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateCareTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        required:
+          type: boolean
+          default: true
+    UpdateCareTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        required:
+          type: boolean
+        active:
+          type: boolean
+    VisitTask:
+      type: object
+      description: A care-plan task live-joined against this visit's own completion, if any has been recorded yet.
+      required: [careTaskId, title, required, status, reason, notes, completedAt]
+      properties:
+        careTaskId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+        required:
+          type: boolean
+        status:
+          allOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }]
+          nullable: true
+          description: 'Null: not yet addressed this visit.'
+        reason:
+          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
+          nullable: true
+        notes:
+          type: [string, 'null']
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+    PutVisitTaskCompletionRequest:
+      type: object
+      description: "`reason` is required when `status` is `not_completed`, and must be omitted otherwise (matches `visit_task_completions`'s own CHECK constraint)."
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/TaskCompletionStatus'
+        reason:
+          $ref: '#/components/schemas/TaskSkipReason'
+        notes:
+          type: string
 
     BiometricEnrollment:
       type: object
