@@ -13,7 +13,7 @@ const NAV_SECTIONS = [
   { label: 'Overview', path: undefined },
   { label: 'Caregivers', path: '/caregivers' },
   { label: 'Dependants', path: '/dependants' },
-  { label: 'Scheduling', path: undefined },
+  { label: 'Scheduling', path: '/scheduling' },
   { label: 'Visits', path: undefined },
   { label: 'Alerts', path: undefined },
   { label: 'Compliance', path: undefined },
@@ -27,10 +27,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   // the whole router, not just registration - a caregiver can never self-register, confirmed with
   // the user) - disabled here too for a signed-in non-supervisor, rather than only finding out via
   // a failed request, the same "hide what you can't use" treatment Flagged Enrollments/Make
-  // Primary/the dependant status field already get elsewhere in this app.
+  // Primary/the dependant status field already get elsewhere in this app. Scheduling gets the same
+  // treatment: GET /visit-schedules is open to all three roles, but this page's whole purpose is
+  // POST/PATCH (create, reschedule, cancel), both supervisor-only per visitSchedules.ts.
   const isSupervisor = identity?.role === 'supervisor';
+  const supervisorOnlySections = new Set(['Caregivers', 'Scheduling']);
   const navSections = NAV_SECTIONS.map((section) =>
-    section.label === 'Caregivers' && !isSupervisor ? { ...section, path: undefined } : section,
+    supervisorOnlySections.has(section.label) && !isSupervisor
+      ? { ...section, path: undefined }
+      : section,
   );
 
   return (
