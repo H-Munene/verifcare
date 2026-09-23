@@ -75,6 +75,22 @@ export const consentTypeEnum = pgEnum('consent_type', [
 // value inside the same migration that also uses it.
 export const idTypeEnum = pgEnum('id_type', ['national_id', 'passport']);
 
+// Visit task checklist (docs/visit-task-checklist-plan.md) - a closed set confirmed with the user
+// before implementation, not yet used anywhere else in the same migration, so (unlike
+// biometric_enrollments.status) a native enum has no same-transaction ADD VALUE restriction to
+// worry about here.
+export const taskCompletionStatusEnum = pgEnum('task_completion_status', [
+  'completed',
+  'not_completed',
+  'not_applicable',
+]);
+export const taskSkipReasonEnum = pgEnum('task_skip_reason', [
+  'client_declined',
+  'client_unavailable',
+  'equipment_unavailable',
+  'other',
+]);
+
 // ============================================================================
 // users
 // ============================================================================
@@ -232,6 +248,43 @@ export const dependantFamilyMembers = pgTable(
 );
 
 // ============================================================================
+// dependant_care_tasks - the care plan itself (docs/visit-task-checklist-plan.md), authored by a
+// supervisor on a dedicated Care Plan screen, not part of dependant registration.
+// ============================================================================
+
+export const dependantCareTasks = pgTable(
+  'dependant_care_tasks',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    dependantId: uuid()
+      .notNull()
+      .references(() => dependants.id),
+    title: text().notNull(),
+    description: text(),
+    // Free text, not a fixed ADL/IADL enum - tasks are authored per dependant by the supervisor (a
+    // bespoke care plan), not selected from a fixed master taxonomy, so a rigid category enum
+    // would fight that flexibility rather than support it. Purely a display grouping label, never
+    // validated against a closed list.
+    category: text(),
+    required: boolean().notNull().default(true),
+    // A retired task keeps its history (existing visit_task_completions rows referencing it stay
+    // valid) but stops appearing on future visits - deletion is never used for this table, the
+    // same reasoning dependants.status/caregivers.active already establish elsewhere.
+    active: boolean().notNull().default(true),
+    createdBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_dependant_care_tasks_dependant_active').on(table.dependantId, table.active),
+  ],
+);
+
+// ============================================================================
 // biometric_enrollments
 // ============================================================================
 
@@ -343,6 +396,45 @@ export const visitSchedules = pgTable(
     index('idx_visit_schedules_created_by').on(table.createdBy),
     // `excl_visit_schedules_caregiver_overlap` / `excl_visit_schedules_dependant_overlap`
     // (EXCLUDE USING gist, double-booking prevention) are added by HEZ-9 - see file header.
+  ],
+);
+
+// ============================================================================
+// visit_task_completions - one row per (visit, task), filled in live during the visit
+// (docs/visit-task-checklist-plan.md). No updatedAt/trigger and no forbid_update_delete trigger -
+// this table is genuinely mutable while the visit is in_progress (a caregiver correcting
+// themselves before checkout is normal, matching verification_events' own upsert-while-in-progress
+// treatment, not an audit violation), and "locked after checkout" is enforced at the application
+// layer (the backend rejects a write once visit_schedules.status is no longer in_progress) rather
+// than a DB trigger - a supervisor's later correction goes to the existing audit_log table instead
+// of editing this row directly.
+// ============================================================================
+
+export const visitTaskCompletions = pgTable(
+  'visit_task_completions',
+  {
+    visitScheduleId: uuid()
+      .notNull()
+      .references(() => visitSchedules.id),
+    careTaskId: uuid()
+      .notNull()
+      .references(() => dependantCareTasks.id),
+    status: taskCompletionStatusEnum().notNull(),
+    reason: taskSkipReasonEnum(),
+    notes: text(),
+    completedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.visitScheduleId, table.careTaskId] }),
+    // Mirrors this schema's existing style of encoding "these columns are only valid together" as
+    // a CHECK (verification_events, biometric_enrollments both already do this) - a reason only
+    // makes sense for a genuinely skipped task, never one marked done or explicitly N/A.
+    check(
+      'chk_visit_task_completions_reason',
+      sql`(${table.status} = 'not_completed' AND ${table.reason} IS NOT NULL) OR
+          (${table.status} != 'not_completed' AND ${table.reason} IS NULL)`,
+    ),
+    index('idx_visit_task_completions_visit').on(table.visitScheduleId),
   ],
 );
 

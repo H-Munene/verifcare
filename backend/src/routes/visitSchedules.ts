@@ -42,7 +42,7 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -708,6 +708,38 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           title: 'Conflict',
           status: 409,
           detail: `This visit hasn't been checked in yet, or is already completed/cancelled (current status: ${visit.status}).`,
+        });
+        return;
+      }
+
+      // Visit task checklist (docs/visit-task-checklist-plan.md): a required, active task with no
+      // visit_task_completions row for this visit blocks checkout outright, per the user's own
+      // explicit choice (not just a warning) - "addressed" means any status was recorded
+      // (including not_completed/not_applicable), not that every task must be marked done.
+      const missingRequiredTasks = await db
+        .select({ id: schema.dependantCareTasks.id, title: schema.dependantCareTasks.title })
+        .from(schema.dependantCareTasks)
+        .leftJoin(
+          schema.visitTaskCompletions,
+          and(
+            eq(schema.visitTaskCompletions.careTaskId, schema.dependantCareTasks.id),
+            eq(schema.visitTaskCompletions.visitScheduleId, visitScheduleId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.dependantCareTasks.dependantId, visit.dependantId),
+            eq(schema.dependantCareTasks.active, true),
+            eq(schema.dependantCareTasks.required, true),
+            isNull(schema.visitTaskCompletions.visitScheduleId),
+          ),
+        );
+      if (missingRequiredTasks.length > 0) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: `The following required tasks must be addressed before checkout: ${missingRequiredTasks.map((t) => t.title).join(', ')}.`,
         });
         return;
       }

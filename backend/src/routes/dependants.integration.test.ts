@@ -64,6 +64,19 @@ function familyMemberBody(response: request.Response): FamilyMemberBody {
 function familyMemberListBody(response: request.Response): FamilyMemberBody[] {
   return response.body as FamilyMemberBody[];
 }
+interface CareTaskBody {
+  id: string;
+  dependantId: string;
+  title: string;
+  required: boolean;
+  active: boolean;
+}
+function careTaskBody(response: request.Response): CareTaskBody {
+  return response.body as CareTaskBody;
+}
+function careTaskListBody(response: request.Response): CareTaskBody[] {
+  return response.body as CareTaskBody[];
+}
 
 function buildTestApp(
   cognitoAdmin: CognitoAdmin,
@@ -127,6 +140,39 @@ function createDependantPayload(overrides: Record<string, unknown> = {}): Record
     },
     ...overrides,
   };
+}
+
+// Direct-insert, not via POST /dependants - the care-tasks tests below don't need the full
+// primaryFamilyMember dance every other describe block in this file already covers.
+async function createTestDependant(
+  registeredById: string,
+): Promise<typeof schema.dependants.$inferSelect> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.dependants)
+    .values({
+      fullName: 'Test Dependant',
+      dob: '1950-01-01',
+      geofenceLat: -1.2921,
+      geofenceLng: 36.8219,
+      geofenceRadiusMeters: 100,
+      registeredBy: registeredById,
+    })
+    .returning();
+  if (!row) {
+    throw new Error('Failed to insert test dependant.');
+  }
+  return row;
+}
+
+async function linkFamilyMember(dependantId: string, familyMemberUserId: string): Promise<void> {
+  const db = getDb();
+  await db.insert(schema.dependantFamilyMembers).values({
+    dependantId,
+    familyMemberUserId,
+    isPrimaryContact: true,
+    addedBy: familyMemberUserId,
+  });
 }
 
 describe.skipIf(!hasTestDb)(
@@ -1139,6 +1185,141 @@ describe.skipIf(!hasTestDb)(
           .send({ relationship: 'Nobody' });
 
         expect(response.status).toBe(404);
+      });
+    });
+
+    describe('POST/GET/PATCH /dependants/{dependantId}/care-tasks', () => {
+      it('lets a supervisor create a care task', async () => {
+        const sup = await createTestUser('sup-ct-1', 'supervisor', '+254700000200');
+        const dependant = await createTestDependant(sup.id);
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('sup-ct-1', 'supervisor'))
+          .send({ title: 'Assist with bathing', category: 'Personal care', required: true });
+
+        expect(response.status).toBe(201);
+        expect(careTaskBody(response)).toMatchObject({
+          dependantId: dependant.id,
+          title: 'Assist with bathing',
+          required: true,
+          active: true,
+        });
+      });
+
+      it('rejects a caregiver or family_member trying to create a care task', async () => {
+        const sup = await createTestUser('sup-ct-2', 'supervisor', '+254700000201');
+        const dependant = await createTestDependant(sup.id);
+        await createTestUser('cg-ct-1', 'caregiver', '+254700000202');
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('cg-ct-1', 'caregiver'))
+          .send({ title: 'Assist with bathing' });
+
+        expect(response.status).toBe(403);
+      });
+
+      it('404s creating a task for a nonexistent dependant', async () => {
+        await createTestUser('sup-ct-3', 'supervisor', '+254700000203');
+
+        const response = await request(app)
+          .post('/dependants/00000000-0000-7000-8000-000000000000/care-tasks')
+          .set('x-test-auth', testAuthHeader('sup-ct-3', 'supervisor'))
+          .send({ title: 'Assist with bathing' });
+
+        expect(response.status).toBe(404);
+      });
+
+      it("lists a dependant's care tasks, newest-created last, and supports ?active= filtering", async () => {
+        const sup = await createTestUser('sup-ct-4', 'supervisor', '+254700000204');
+        const dependant = await createTestDependant(sup.id);
+        const first = careTaskBody(
+          await request(app)
+            .post(`/dependants/${dependant.id}/care-tasks`)
+            .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'))
+            .send({ title: 'Assist with bathing' }),
+        );
+        const second = careTaskBody(
+          await request(app)
+            .post(`/dependants/${dependant.id}/care-tasks`)
+            .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'))
+            .send({ title: 'Medication reminder' }),
+        );
+        await request(app)
+          .patch(`/dependants/${dependant.id}/care-tasks/${second.id}`)
+          .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'))
+          .send({ active: false });
+
+        const all = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'));
+        expect(all.status).toBe(200);
+        expect(careTaskListBody(all).map((t) => t.id)).toEqual([first.id, second.id]);
+
+        const activeOnly = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks?active=true`)
+          .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'));
+        expect(careTaskListBody(activeOnly).map((t) => t.id)).toEqual([first.id]);
+      });
+
+      it('lets a linked family member view, but not author, care tasks', async () => {
+        const sup = await createTestUser('sup-ct-5', 'supervisor', '+254700000205');
+        const dependant = await createTestDependant(sup.id);
+        const fm = await createTestUser('fm-ct-1', 'family_member', '+254700000206');
+        await linkFamilyMember(dependant.id, fm.id);
+        await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('sup-ct-5', 'supervisor'))
+          .send({ title: 'Assist with bathing' });
+
+        const viewResponse = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('fm-ct-1', 'family_member'));
+        expect(viewResponse.status).toBe(200);
+        expect(careTaskListBody(viewResponse)).toHaveLength(1);
+
+        const authorResponse = await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('fm-ct-1', 'family_member'))
+          .send({ title: 'Should be rejected' });
+        expect(authorResponse.status).toBe(403);
+      });
+
+      it('rejects an unlinked family member viewing care tasks', async () => {
+        const sup = await createTestUser('sup-ct-6', 'supervisor', '+254700000207');
+        const dependant = await createTestDependant(sup.id);
+        await createTestUser('fm-ct-2', 'family_member', '+254700000208');
+
+        const response = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('fm-ct-2', 'family_member'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('lets a supervisor retire a task via PATCH, and rejects a non-supervisor', async () => {
+        const sup = await createTestUser('sup-ct-7', 'supervisor', '+254700000209');
+        const dependant = await createTestDependant(sup.id);
+        const task = careTaskBody(
+          await request(app)
+            .post(`/dependants/${dependant.id}/care-tasks`)
+            .set('x-test-auth', testAuthHeader('sup-ct-7', 'supervisor'))
+            .send({ title: 'Assist with bathing' }),
+        );
+
+        const rejected = await request(app)
+          .patch(`/dependants/${dependant.id}/care-tasks/${task.id}`)
+          .set('x-test-auth', testAuthHeader('fm-ct-3', 'family_member'))
+          .send({ active: false });
+        expect(rejected.status).toBe(403);
+
+        const retired = await request(app)
+          .patch(`/dependants/${dependant.id}/care-tasks/${task.id}`)
+          .set('x-test-auth', testAuthHeader('sup-ct-7', 'supervisor'))
+          .send({ active: false });
+        expect(retired.status).toBe(200);
+        expect(careTaskBody(retired).active).toBe(false);
       });
     });
   },

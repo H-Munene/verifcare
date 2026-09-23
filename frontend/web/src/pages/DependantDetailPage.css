@@ -5,6 +5,11 @@
   margin-bottom: 24px;
 }
 
+.dependant-detail__header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .dependant-detail__name-row {
   display: flex;
   align-items: center;

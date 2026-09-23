@@ -18,6 +18,7 @@ import { createDependantsRouter } from './routes/dependants.js';
 import { createNotificationsRouter } from './routes/notifications.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
+import { createVisitTasksRouter } from './routes/visitTasks.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -195,6 +196,9 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         coPresenceWindowSeconds: dependencies.checkinCoPresenceWindowSeconds ?? 120,
       }),
     );
+    // Visit task checklist (docs/visit-task-checklist-plan.md) - mounted at the same
+    // '/visit-schedules' prefix as a separate router, same reasoning as checkin.ts above.
+    app.use('/visit-schedules', createVisitTasksRouter({ requireAuth }));
     // HEZ-40's consent-capture endpoints - only needs requireAuth too, same reasoning as above.
     app.use('/consent-records', createConsentRecordsRouter({ requireAuth }));
     // HEZ-41's notification list/acknowledge endpoints - only needs requireAuth too.

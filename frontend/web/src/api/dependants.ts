@@ -96,6 +96,36 @@ export interface UpdateFamilyMemberRequest {
   isPrimaryContact?: boolean;
 }
 
+// Visit task checklist (docs/visit-task-checklist-plan.md) - the care plan itself, authored on
+// its own Care Plan screen (CarePlanPage.tsx), not part of dependant registration.
+export interface CareTask {
+  id: string;
+  dependantId: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  required: boolean;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCareTaskRequest {
+  title: string;
+  description?: string;
+  category?: string;
+  required?: boolean;
+}
+
+export interface UpdateCareTaskRequest {
+  title?: string;
+  description?: string;
+  category?: string;
+  required?: boolean;
+  active?: boolean;
+}
+
 export interface ListDependantsParams {
   status?: DependantStatus;
   cursor?: string;
@@ -134,6 +164,14 @@ export function createDependantsApi(client: ApiClient) {
         `/dependants/${dependantId}/family-members/${familyMemberUserId}`,
         body,
       ),
+    listCareTasks: (dependantId: string, active?: boolean) =>
+      client.get<CareTask[]>(
+        `/dependants/${dependantId}/care-tasks${active === undefined ? '' : `?active=${active}`}`,
+      ),
+    createCareTask: (dependantId: string, body: CreateCareTaskRequest) =>
+      client.post<CareTask>(`/dependants/${dependantId}/care-tasks`, body),
+    updateCareTask: (dependantId: string, careTaskId: string, body: UpdateCareTaskRequest) =>
+      client.patch<CareTask>(`/dependants/${dependantId}/care-tasks/${careTaskId}`, body),
   };
 }
 

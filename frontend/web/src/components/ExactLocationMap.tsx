@@ -142,6 +142,14 @@ export function ExactLocationMap({
             />
             {radiusMeters > 0 ? (
               <Circle
+                // Keyed on the pin's own position - @react-google-maps/api's Circle wrapper doesn't
+                // reliably call the underlying google.maps.Circle's setCenter() when `center` alone
+                // changes (confirmed via a real repro: moving the pin left the old circle overlay
+                // stuck at the previous spot while the Marker itself moved correctly), so a stale
+                // circle was left behind every time an existing pin was moved. Forcing a remount on
+                // every position change guarantees the old overlay is torn down before the new one
+                // mounts, so there is only ever one circle on the map.
+                key={`${lat}-${lng}`}
                 center={{ lat, lng }}
                 radius={radiusMeters}
                 options={{
