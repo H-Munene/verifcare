@@ -717,11 +717,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/GeofenceCheckinResult'
         '422':
-          description: Geofence check failed (out of range, insufficient accuracy, or mock location detected).
+          description: |
+            Geofence check failed. `failureReason` is one of `out_of_range`/`insufficient_accuracy`
+            (retriable - the caregiver can move closer or wait for a better fix) or
+            `mock_location_detected` (a hard block - the app should not offer a retry).
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/checkin/context:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    get:
+      tags: [Check-in]
+      summary: Get the dependant display name and geofence for a visit, before check-in starts
+      description: |
+        View-only, pre-geofence - no `X-Checkin-Session-Token` is required (unlike every route past
+        the geofence step), since none exists yet at this point. Lets the caregiver app render the
+        geofence circle/marker and confirm the right dependant/address before attempting a GPS
+        read. Deliberately narrow: not the full dependant record (no `primaryConditionSummary`,
+        `county`/`constituency`/`ward`, etc.) - a caregiver needs enough to render the map and
+        confirm they're at the right home, nothing else. Same caregiver-only, own-visit,
+        still-'scheduled' rule as every other route in this router.
+      operationId: getCheckinContext
+      responses:
+        '200':
+          description: Context for the check-in map screen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckinContext'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -1147,6 +1175,9 @@ components:
         instance:
           type: string
           format: uri
+        failureReason:
+          type: string
+          description: Present on some error responses (e.g. GeofenceCheckinFailureReason on the geofence check's 422) so a client can branch deterministically instead of parsing `detail`'s prose.
 
     UserRole:
       type: string
@@ -1695,6 +1726,8 @@ components:
           id,
           caregiverId,
           dependantId,
+          caregiverDisplayName,
+          dependantDisplayName,
           scheduledStart,
           scheduledEnd,
           status,
@@ -1712,6 +1745,11 @@ components:
         dependantId:
           type: string
           format: uuid
+        caregiverDisplayName:
+          type: string
+          description: Added for HEZ-66 - every consumer of this endpoint needed a display name per visit and had no other way to get one (a caregiver in particular has no access to GET /dependants at all).
+        dependantDisplayName:
+          type: string
         scheduledStart:
           type: string
           format: date-time
@@ -1865,6 +1903,30 @@ components:
         expiresAt:
           type: string
           format: date-time
+    CheckinContext:
+      type: object
+      required:
+        [
+          dependantDisplayName,
+          dependantHomeAddressText,
+          geofenceLat,
+          geofenceLng,
+          geofenceRadiusMeters,
+        ]
+      properties:
+        dependantDisplayName:
+          type: string
+        dependantHomeAddressText:
+          type: string
+          nullable: true
+        geofenceLat:
+          type: number
+          format: double
+        geofenceLng:
+          type: number
+          format: double
+        geofenceRadiusMeters:
+          type: integer
 
     LivenessFrameUploadUrlRequest:
       type: object

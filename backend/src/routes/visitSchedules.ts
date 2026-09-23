@@ -42,7 +42,7 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -120,6 +120,16 @@ interface VisitScheduleResponse {
   id: string;
   caregiverId: string;
   dependantId: string;
+  // Added alongside HEZ-66 (the caregiver mobile app's schedule calendar and check-in map): every
+  // consumer of this endpoint so far (the admin web app's Scheduling page, the caregiver app's
+  // calendar) needed a display name per visit and had no other way to get one - a caregiver in
+  // particular has no access to GET /dependants at all (routes/dependants.ts is
+  // requireRole('supervisor', 'family_member')-only), so this couldn't be worked around
+  // client-side the way the web app's Scheduling page currently does (a separate full
+  // caregivers/dependants fetch, supervisor-only). Fixed once, here, for every caller, rather than
+  // adding another narrow per-role endpoint.
+  caregiverDisplayName: string;
+  dependantDisplayName: string;
   scheduledStart: string;
   scheduledEnd: string;
   status: VisitStatus;
@@ -128,11 +138,17 @@ interface VisitScheduleResponse {
   updatedAt: string;
 }
 
-function toResponse(row: typeof schema.visitSchedules.$inferSelect): VisitScheduleResponse {
+function toResponse(
+  row: typeof schema.visitSchedules.$inferSelect,
+  caregiverDisplayName: string,
+  dependantDisplayName: string,
+): VisitScheduleResponse {
   return {
     id: row.id,
     caregiverId: row.caregiverId,
     dependantId: row.dependantId,
+    caregiverDisplayName,
+    dependantDisplayName,
     scheduledStart: row.scheduledStart.toISOString(),
     scheduledEnd: row.scheduledEnd.toISOString(),
     status: row.status as VisitStatus,
@@ -140,6 +156,40 @@ function toResponse(row: typeof schema.visitSchedules.$inferSelect): VisitSchedu
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+// Batches the caregiver/dependant name lookup across every row at once (not one query pair per
+// row) - used by every response site (POST, GET list, GET :id, PATCH) so
+// VisitScheduleResponse's two display-name fields are always populated the same way, from one
+// place, rather than four slightly different inline joins.
+async function attachDisplayNames(
+  db: Db,
+  rows: (typeof schema.visitSchedules.$inferSelect)[],
+): Promise<VisitScheduleResponse[]> {
+  if (rows.length === 0) {
+    return [];
+  }
+  const caregiverIds = [...new Set(rows.map((row) => row.caregiverId))];
+  const dependantIds = [...new Set(rows.map((row) => row.dependantId))];
+  const [caregiverRows, dependantRows] = await Promise.all([
+    db
+      .select({ id: schema.users.id, fullName: schema.users.fullName })
+      .from(schema.users)
+      .where(inArray(schema.users.id, caregiverIds)),
+    db
+      .select({ id: schema.dependants.id, fullName: schema.dependants.fullName })
+      .from(schema.dependants)
+      .where(inArray(schema.dependants.id, dependantIds)),
+  ]);
+  const caregiverNames = new Map(caregiverRows.map((row) => [row.id, row.fullName]));
+  const dependantNames = new Map(dependantRows.map((row) => [row.id, row.fullName]));
+  return rows.map((row) =>
+    toResponse(
+      row,
+      caregiverNames.get(row.caregiverId) ?? 'Unknown caregiver',
+      dependantNames.get(row.dependantId) ?? 'Unknown dependant',
+    ),
+  );
 }
 
 const visitStatusSchema = z.enum([
@@ -286,7 +336,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       if (!row) {
         throw new Error('Insert into visit_schedules returned no row.');
       }
-      res.status(201).json(toResponse(row));
+      const [response] = await attachDisplayNames(db, [row]);
+      res.status(201).json(response);
     } catch (err) {
       if (isPostgresExclusionViolation(err)) {
         sendProblem(res, {
@@ -393,7 +444,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       }
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
-      res.status(200).json({ items: items.map(toResponse), nextCursor });
+      res.status(200).json({ items: await attachDisplayNames(db, items), nextCursor });
     } catch (err) {
       next(err);
     }
@@ -442,7 +493,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         }
       }
 
-      res.status(200).json(toResponse(row));
+      const [response] = await attachDisplayNames(db, [row]);
+      res.status(200).json(response);
     } catch (err) {
       next(err);
     }
@@ -584,7 +636,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       if (!updated) {
         throw new Error('Update to visit_schedules returned no row.');
       }
-      res.status(200).json(toResponse(updated));
+      const [response] = await attachDisplayNames(db, [updated]);
+      res.status(200).json(response);
     } catch (err) {
       if (isPostgresExclusionViolation(err)) {
         sendProblem(res, {
@@ -674,7 +727,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       if (!updated) {
         throw new Error('Update to visit_schedules returned no row.');
       }
-      res.status(200).json(toResponse(updated));
+      const [response] = await attachDisplayNames(db, [updated]);
+      res.status(200).json(response);
     } catch (err) {
       next(err);
     }

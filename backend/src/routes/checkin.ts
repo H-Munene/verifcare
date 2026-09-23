@@ -176,23 +176,21 @@ function getDb(res: Response): Db | undefined {
   return db;
 }
 
-// Shared by every route past the geofence step (upload-url/submit, caregiver and, later, dependant):
-// caller lookup, visit lookup + ownership + 'scheduled' precondition (identical to the geofence
-// handler's own checks), then the check-in session token (auth/checkinSession.ts) - required IN
-// ADDITION to Cognito auth, not instead of it. Sends the appropriate error response itself and
-// returns undefined on any failure, the same "send the response, return a falsy sentinel" pattern
-// this codebase already establishes.
-async function resolveCaregiverCheckinContext(
+// Shared by every route in this router that needs "is this caller the assigned caregiver on a
+// still-'scheduled' visit": the geofence handler itself, resolveCaregiverCheckinContext below (for
+// every route past it), and the checkin-context endpoint (view-only, pre-geofence, so it stops
+// here rather than also requiring the session token resolveCaregiverCheckinContext adds). Sends
+// the appropriate error response itself and returns undefined on any failure, the same "send the
+// response, return a falsy sentinel" pattern this codebase already establishes.
+async function resolveCaregiverVisitOwnership(
   db: Db,
   visitScheduleId: string,
   req: Request,
   res: Response,
-  sessionTokenTtlSeconds: number,
 ): Promise<
   | {
       callerRow: typeof schema.users.$inferSelect;
       visit: typeof schema.visitSchedules.$inferSelect;
-      event: typeof schema.verificationEvents.$inferSelect;
     }
   | undefined
 > {
@@ -227,6 +225,32 @@ async function resolveCaregiverCheckinContext(
     });
     return undefined;
   }
+
+  return { callerRow, visit };
+}
+
+// Shared by every route past the geofence step (upload-url/submit, caregiver and, later, dependant):
+// resolveCaregiverVisitOwnership above, then the check-in session token (auth/checkinSession.ts) -
+// required IN ADDITION to Cognito auth, not instead of it.
+async function resolveCaregiverCheckinContext(
+  db: Db,
+  visitScheduleId: string,
+  req: Request,
+  res: Response,
+  sessionTokenTtlSeconds: number,
+): Promise<
+  | {
+      callerRow: typeof schema.users.$inferSelect;
+      visit: typeof schema.visitSchedules.$inferSelect;
+      event: typeof schema.verificationEvents.$inferSelect;
+    }
+  | undefined
+> {
+  const ownership = await resolveCaregiverVisitOwnership(db, visitScheduleId, req, res);
+  if (!ownership) {
+    return undefined;
+  }
+  const { callerRow, visit } = ownership;
 
   const event = await resolveCheckinSession(
     db,
@@ -275,39 +299,13 @@ export function createCheckinRouter(dependencies: CheckinRouterDependencies): Ro
     if (!db) {
       return;
     }
-    const caller = req.auth;
-    if (!caller) {
-      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
-      return;
-    }
 
     try {
-      const callerRow = await getUserByCognitoSub(db, caller.sub);
-      if (!callerRow) {
-        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
-      }
-
-      const [visit] = await db
-        .select()
-        .from(schema.visitSchedules)
-        .where(eq(schema.visitSchedules.id, visitScheduleId));
-      if (!visit) {
-        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+      const ownership = await resolveCaregiverVisitOwnership(db, visitScheduleId, req, res);
+      if (!ownership) {
         return;
       }
-      if (visit.caregiverId !== callerRow.id) {
-        sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-        return;
-      }
-      if (visit.status !== 'scheduled') {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Conflict',
-          status: 409,
-          detail: `This visit is not awaiting check-in (current status: ${visit.status}).`,
-        });
-        return;
-      }
+      const { visit } = ownership;
 
       const [dependant] = await db
         .select({
@@ -360,6 +358,7 @@ export function createCheckinRouter(dependencies: CheckinRouterDependencies): Ro
           title: 'Unprocessable Entity',
           status: 422,
           detail: geofenceFailureDetail(failureReason),
+          failureReason,
         });
         return;
       }
@@ -394,6 +393,62 @@ export function createCheckinRouter(dependencies: CheckinRouterDependencies): Ro
         sessionToken: token,
         distanceFromGeofenceMeters: distanceMeters,
         expiresAt: new Date(now.getTime() + sessionTokenTtlSeconds * 1000).toISOString(),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET .../checkin/context: view-only, pre-geofence (no session token exists yet, so this uses
+  // resolveCaregiverVisitOwnership directly rather than resolveCaregiverCheckinContext) - added so
+  // the caregiver app's check-in map screen (docs/caregiver-checkin-geofence-plan.md) can render
+  // the dependant's geofence circle and a display name/address before the caregiver has even
+  // attempted a GPS read. Deliberately narrow: not the full dependants record (no
+  // primaryConditionSummary, county/constituency/ward, etc.) - a caregiver needs enough to render
+  // the map and confirm they're at the right dependant's home, nothing else from that record,
+  // which is also why this doesn't just widen routes/dependants.ts's RBAC to the caregiver role
+  // (dependants.ts's own router is requireRole('supervisor', 'family_member')-only).
+  router.get('/:visitScheduleId/checkin/context', async (req, res, next) => {
+    const visitScheduleId = parseOrSendProblem(
+      visitScheduleIdParamSchema,
+      req.params.visitScheduleId,
+      res,
+    );
+    if (!visitScheduleId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+
+    try {
+      const ownership = await resolveCaregiverVisitOwnership(db, visitScheduleId, req, res);
+      if (!ownership) {
+        return;
+      }
+      const { visit } = ownership;
+
+      const [dependant] = await db
+        .select({
+          fullName: schema.dependants.fullName,
+          homeAddressText: schema.dependants.homeAddressText,
+          geofenceLat: schema.dependants.geofenceLat,
+          geofenceLng: schema.dependants.geofenceLng,
+          geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
+        })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, visit.dependantId));
+      if (!dependant) {
+        throw new Error(`visit_schedules ${visitScheduleId} references a nonexistent dependant.`);
+      }
+
+      res.status(200).json({
+        dependantDisplayName: dependant.fullName,
+        dependantHomeAddressText: dependant.homeAddressText,
+        geofenceLat: dependant.geofenceLat,
+        geofenceLng: dependant.geofenceLng,
+        geofenceRadiusMeters: dependant.geofenceRadiusMeters,
       });
     } catch (err) {
       next(err);
