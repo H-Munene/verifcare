@@ -267,30 +267,13 @@ export function LocationSelector({
               No location selected. The map displays the full national extent of Kenya.
             </p>
           ) : (
-            <>
-              <div className="location-selector__chips">
-                <span className="location-selector__chip location-selector__chip--county">
-                  County: {selectedCounty.name}
-                </span>
-                {selectedConstituency ? (
-                  <span className="location-selector__chip location-selector__chip--constituency">
-                    Constituency: {selectedConstituency.name}
-                  </span>
-                ) : null}
-                {selectedWard ? (
-                  <span className="location-selector__chip location-selector__chip--ward">
-                    Ward: {selectedWard.name}
-                  </span>
-                ) : null}
-              </div>
-              <p className="location-selector__summary-text">
-                {selectedWard
-                  ? `Selected ward ${selectedWard.name} in ${selectedConstituency?.name} constituency, ${selectedCounty.name} county.`
-                  : selectedConstituency
-                    ? `Selected constituency ${selectedConstituency.name}. Select a ward to continue.`
-                    : `Selected county ${selectedCounty.name}. Select a constituency to zoom in further.`}
-              </p>
-            </>
+            <p className="location-selector__summary-text">
+              {selectedWard
+                ? `Selected ward ${selectedWard.name} in ${selectedConstituency?.name} constituency, ${selectedCounty.name} county.`
+                : selectedConstituency
+                  ? `Selected constituency ${selectedConstituency.name}. Select a ward to continue.`
+                  : `Selected county ${selectedCounty.name}. Select a constituency to zoom in further.`}
+            </p>
           )}
         </div>
       </Card>

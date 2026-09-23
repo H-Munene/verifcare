@@ -65,31 +65,3 @@
   font-size: 12px;
   color: var(--color-ink-subtle);
 }
-
-.location-selector__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.location-selector__chip {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 8px;
-  border-radius: 999px;
-}
-
-.location-selector__chip--county {
-  background: var(--color-accent-tint-bg);
-  color: var(--color-accent-tint-text);
-}
-
-.location-selector__chip--constituency {
-  background: var(--color-accent-tint-bg);
-  color: var(--color-accent-tint-text);
-}
-
-.location-selector__chip--ward {
-  background: var(--color-success-tint);
-  color: var(--color-success-text);
-}

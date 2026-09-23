@@ -66,15 +66,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="app-shell__main">
         <header className="app-shell__topbar">
-          <span className="app-shell__user">{identity?.email ?? identity?.sub}</span>
-          <button type="button" className="app-shell__sign-out" onClick={signOut}>
-            Sign out
-          </button>
+          <div className="app-shell__topbar-left">
+            <Breadcrumbs />
+          </div>
+          <div className="app-shell__topbar-right">
+            <span className="app-shell__user">{identity?.email ?? identity?.sub}</span>
+            <button type="button" className="app-shell__sign-out" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
         </header>
-        <main className="app-shell__content">
-          <Breadcrumbs />
-          {children}
-        </main>
+        <main className="app-shell__content">{children}</main>
       </div>
     </div>
   );

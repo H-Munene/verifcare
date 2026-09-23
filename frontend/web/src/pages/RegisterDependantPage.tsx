@@ -148,11 +148,17 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const additionalContactsStepIndex = isEdit ? -1 : 4;
   // Always the last step in both orderings.
   const photoStepIndex = steps.length - 1;
-  // The step that actually creates/updates the dependant - Exact Location for editing (no
-  // Additional Contacts step to defer to), Additional Contacts for registration (Photo, after it,
-  // is a trailing step with its own Skip/Finish actions, not part of this "Save" gate).
-  const isDataEntryLastStep =
-    step === (isEdit ? exactLocationStepIndex : additionalContactsStepIndex);
+  // The step that actually creates the dependant and submits via the form - Additional Contacts
+  // for registration (Photo, after it, is a trailing step with its own Skip/Finish actions, not
+  // part of this "Save" gate). Editing never submits through a wizard step at all any more: the
+  // dependant already exists, so every edit-mode transition is a plain "Next step"/"Back" (below),
+  // and persisting changes happens via the title bar's own Save button (saveEdit below) instead -
+  // this was a real, reported bug, not just a preference: the old design switched this same footer
+  // slot from a type="button" "Next step" to a type="submit" "Save" the instant Exact Location
+  // became current, and a real click's mouseup could land on the just-swapped-in Save button
+  // (confirmed via a trusted, submitter="Save" submit event firing right after a single "Next
+  // step" click), silently PATCHing the dependant and skipping straight into the Photo step.
+  const isDataEntryLastStep = !isEdit && step === additionalContactsStepIndex;
   const isPhotoStep = step === photoStepIndex;
 
   const initialName = splitFullName(initial?.fullName ?? '');
@@ -235,8 +241,10 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const [additionalContactError, setAdditionalContactError] = useState<string | null>(null);
 
   // Set once the dependant is actually created (see submitForm below), which is what unlocks the
-  // Photo step - biometric-enrollments' own FK check requires this id to already exist.
-  const [createdDependantId, setCreatedDependantId] = useState<string | null>(null);
+  // Photo step - biometric-enrollments' own FK check requires this id to already exist. Editing
+  // starts with it already set to the real id - the dependant obviously already exists, so the
+  // Photo step needs no prior "create/save" action to unlock it, unlike registration.
+  const [createdDependantId, setCreatedDependantId] = useState<string | null>(dependantId ?? null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoResult, setPhotoResult] = useState<BiometricEnrollment | null>(null);
 
@@ -381,6 +389,41 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     setAdditionalContacts([]);
   }
 
+  // Edit mode's own save action (title bar's Save button, per the user's explicit request to save
+  // from wherever they are in the wizard, not just at the end) - completely independent of `step`,
+  // unlike submitForm below: it never advances or reads isDataEntryLastStep, so there is no footer
+  // step-transition button left in edit mode that also submits (see isDataEntryLastStep's own
+  // comment for the real bug that caused).
+  async function saveEdit() {
+    try {
+      await updateMutation.mutateAsync({
+        fullName: `${firstName} ${lastName}`.trim(),
+        gender: gender || undefined,
+        homeAddressText: homeAddressText || undefined,
+        primaryConditionSummary: primaryConditionSummary || undefined,
+        geofenceRadiusMeters: Number(geofenceRadiusMeters),
+        cognitiveMonitoringEnabled: effectiveCognitiveMonitoringEnabled,
+        // Sent only when the supervisor actually re-resolved these on this edit (e.g. by picking a
+        // new ward and pin) - an unrelated field edit must not overwrite existing
+        // county/constituency/ward/coordinates, and the backend's own zod schema rejects an empty
+        // county/constituency/ward string outright.
+        ...(county ? { county } : {}),
+        ...(constituency ? { constituency } : {}),
+        ...(ward ? { ward } : {}),
+        ...(geofenceLat !== null ? { geofenceLat } : {}),
+        ...(geofenceLng !== null ? { geofenceLng } : {}),
+        ...(identity?.role === 'supervisor' ? { status } : {}),
+      });
+      void queryClient.invalidateQueries({ queryKey: ['dependants'] });
+      void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
+    } catch {
+      // updateMutation's own `error` state (surfaced via mutationError below) already reports this
+      // - nothing further to do here.
+    }
+  }
+
+  // Registration only from here on - editing never reaches this (isDataEntryLastStep is always
+  // false for isEdit, so handleSubmit's own guard above never calls this in edit mode).
   async function submitForm() {
     const common = {
       fullName: `${firstName} ${lastName}`.trim(),
@@ -391,39 +434,6 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       geofenceRadiusMeters: Number(geofenceRadiusMeters),
       cognitiveMonitoringEnabled: effectiveCognitiveMonitoringEnabled,
     };
-
-    if (isEdit) {
-      try {
-        // Only PATCH the first time this step is saved - revisiting it (via the Photo step's own
-        // Back button) after createdDependantId is already set should just link any newly-added
-        // contacts, not resend the same update again.
-        if (!createdDependantId) {
-          await updateMutation.mutateAsync({
-            ...common,
-            // Sent only when the supervisor actually re-resolved these on this edit (e.g. by
-            // picking a new ward and pin) - an unrelated field edit must not overwrite existing
-            // county/constituency/ward/coordinates, and the backend's own zod schema rejects an
-            // empty county/constituency/ward string outright.
-            ...(county ? { county } : {}),
-            ...(constituency ? { constituency } : {}),
-            ...(ward ? { ward } : {}),
-            ...(geofenceLat !== null ? { geofenceLat } : {}),
-            ...(geofenceLng !== null ? { geofenceLng } : {}),
-            ...(identity?.role === 'supervisor' ? { status } : {}),
-          });
-        }
-        void queryClient.invalidateQueries({ queryKey: ['dependants'] });
-        void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
-        // Don't navigate yet - advance into the Photo step instead, matching registration's own
-        // flow (see submitForm's create branch below for why Photo can't be reached any other way).
-        setCreatedDependantId(dependantId!);
-        setStep((s) => s + 1);
-      } catch {
-        // updateMutation's own `error` state (surfaced via mutationError below) already reports
-        // this - nothing further to do here.
-      }
-      return;
-    }
 
     if (!primarySelection) {
       return;
@@ -466,9 +476,21 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
 
   return (
     <div className="register-dependant-page">
-      <h1 className="register-dependant-page__title">
-        {isEdit ? 'Edit Dependant' : 'Register Dependant'}
-      </h1>
+      <div className="register-dependant-page__title-row">
+        <h1 className="register-dependant-page__title">
+          {isEdit ? 'Edit Dependant' : 'Register Dependant'}
+        </h1>
+        {isEdit ? (
+          <Button
+            type="button"
+            variant="primary"
+            disabled={updateMutation.isPending || !detailsValid}
+            onClick={() => void saveEdit()}
+          >
+            {updateMutation.isPending ? 'Saving...' : 'Save'}
+          </Button>
+        ) : null}
+      </div>
       <Stepper steps={steps} currentStepIndex={step} />
       <form
         onSubmit={handleSubmit}
