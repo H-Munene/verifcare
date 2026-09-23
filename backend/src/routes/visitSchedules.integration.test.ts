@@ -213,6 +213,8 @@ describe.skipIf(!hasTestDb)(
         expect(visitBody(response)).toMatchObject({
           caregiverId: caregiver.userId,
           dependantId: dependant.id,
+          caregiverDisplayName: 'User cg-1',
+          dependantDisplayName: 'Test Dependant',
           status: 'scheduled',
           createdBy: supervisor.id,
         });

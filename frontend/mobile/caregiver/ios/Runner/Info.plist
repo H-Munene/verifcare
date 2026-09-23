@@ -26,6 +26,12 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Screen 04's check-in map (docs/caregiver-checkin-geofence-plan.md) - required before iOS
+	     will show any location permission prompt at all; geolocator's requestPermission() call
+	     fails silently without this. Foreground-only (WhenInUse), matching the plan: check-in only
+	     happens while the app is open, no background location tracking. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Mzazi Care uses your location to confirm you're at the dependant's home before check-in.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

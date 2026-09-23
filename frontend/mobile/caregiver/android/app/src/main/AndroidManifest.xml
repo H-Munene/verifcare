@@ -1,10 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Screen 04's check-in map (docs/caregiver-checkin-geofence-plan.md): geolocator requests
+         these at runtime via Geolocator.requestPermission(), same as any other Android runtime
+         permission - declaring them here only makes the request possible, it doesn't grant them. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <application
         android:label="caregiver"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Google Maps SDK for Android key - platform-restricted (package name + SHA-1 signing
+             certificate), per architecture.md's "three separate, platform-restricted API keys"
+             decision - never the same key/restriction as the web app's HTTP-referrer-restricted
+             VITE_GOOGLE_MAPS_API_KEY, which cannot authenticate a native SDK call at all. Replace
+             this placeholder with a real key before running on a device/emulator; the app builds
+             and runs without one, the map just won't render tiles. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyDiu92F2OBGJH63kcoaZYRH28_qPSqhX1k" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

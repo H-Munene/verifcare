@@ -358,6 +358,9 @@ describe.skipIf(!hasTestDb)(
 
       expect(response.status).toBe(422);
       expect(problemBody(response).detail).toMatch(/geofence/i);
+      expect((problemBody(response) as { failureReason?: string }).failureReason).toBe(
+        'out_of_range',
+      );
 
       const db = getDb();
       const [event] = await db
@@ -386,6 +389,9 @@ describe.skipIf(!hasTestDb)(
         .send(geofencePayload({ accuracyMeters: 21 }));
 
       expect(response.status).toBe(422);
+      expect((problemBody(response) as { failureReason?: string }).failureReason).toBe(
+        'insufficient_accuracy',
+      );
 
       const db = getDb();
       const attempts = await db
@@ -407,6 +413,9 @@ describe.skipIf(!hasTestDb)(
         .send(geofencePayload({ isMockLocation: true }));
 
       expect(response.status).toBe(422);
+      expect((problemBody(response) as { failureReason?: string }).failureReason).toBe(
+        'mock_location_detected',
+      );
 
       const db = getDb();
       const attempts = await db
@@ -531,6 +540,99 @@ describe.skipIf(!hasTestDb)(
     });
   },
 );
+
+describe.skipIf(!hasTestDb)('GET .../checkin/context (real Postgres)', () => {
+  let app: Express;
+
+  beforeAll(async () => {
+    await setupTestDb();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    app = buildTestApp();
+  });
+
+  afterAll(async () => {
+    await teardownTestDb();
+  });
+
+  it("returns the dependant's display name, address, and geofence for the assigned caregiver", async () => {
+    const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+    const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+    const dependant = await createTestDependant(supervisor.id);
+    const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+
+    const response = await request(app)
+      .get(`/visit-schedules/${visit.id}/checkin/context`)
+      .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      dependantDisplayName: dependant.fullName,
+      dependantHomeAddressText: dependant.homeAddressText,
+      geofenceLat: GEOFENCE_LAT,
+      geofenceLng: GEOFENCE_LNG,
+      geofenceRadiusMeters: GEOFENCE_RADIUS_METERS,
+    });
+  });
+
+  it('does not require a check-in session token, unlike every route past the geofence step', async () => {
+    const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+    const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+    const dependant = await createTestDependant(supervisor.id);
+    const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+
+    const response = await request(app)
+      .get(`/visit-schedules/${visit.id}/checkin/context`)
+      .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+    expect(response.status).toBe(200);
+  });
+
+  it("403s a caregiver requesting another caregiver's visit", async () => {
+    const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+    const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+    await createTestCaregiver('cg-2', '+254700000003');
+    const dependant = await createTestDependant(supervisor.id);
+    const visit = await createTestVisit(caregiver.userId, dependant.id, supervisor.id);
+
+    const response = await request(app)
+      .get(`/visit-schedules/${visit.id}/checkin/context`)
+      .set('x-test-auth', testAuthHeader('cg-2', 'caregiver'));
+
+    expect(response.status).toBe(403);
+  });
+
+  it('409s once the visit has moved past scheduled', async () => {
+    const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+    const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+    const dependant = await createTestDependant(supervisor.id);
+    const visit = await createTestVisit(
+      caregiver.userId,
+      dependant.id,
+      supervisor.id,
+      'in_progress',
+    );
+
+    const response = await request(app)
+      .get(`/visit-schedules/${visit.id}/checkin/context`)
+      .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+    expect(response.status).toBe(409);
+  });
+
+  it('404s an unknown visit', async () => {
+    await createTestUser('sup-1', 'supervisor', '+254700000001');
+    await createTestCaregiver('cg-1', '+254700000002');
+
+    const response = await request(app)
+      .get('/visit-schedules/00000000-0000-0000-0000-000000000000/checkin/context')
+      .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
+
+    expect(response.status).toBe(404);
+  });
+});
 
 describe.skipIf(!hasTestDb)('POST .../checkin/caregiver-liveness (real Postgres)', () => {
   let app: Express;

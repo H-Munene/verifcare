@@ -36,6 +36,13 @@ dependencies:
   cupertino_icons: ^1.0.8
   amazon_cognito_identity_dart_2: ^4.0.1
   shared_preferences: ^2.5.5
+  http: ^1.6.0
+  # Native Google Maps SDK binding (Circle/Marker are first-class GoogleMap params) - no
+  # third-party geofence-widget package needed, per docs/caregiver-checkin-geofence-plan.md.
+  google_maps_flutter: ^2.18.1
+  # GPS read with accuracy + Android-only Position.isMocked (matches architecture.md's own
+  # "on Android, the app also reports the OS mock-location flag" framing).
+  geolocator: ^14.0.3
 
 dev_dependencies:
   flutter_test:
