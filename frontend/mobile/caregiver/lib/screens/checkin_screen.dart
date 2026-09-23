@@ -439,7 +439,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
         ),
         const SizedBox(height: 2),
         Text(
-          ctx.dependantHomeAddressText ?? 'No address on file',
+          ctx.dependantHomeAddressText ?? 'No address given',
           style: const TextStyle(fontSize: 14, color: _inkSecondary),
         ),
         const SizedBox(height: 2),

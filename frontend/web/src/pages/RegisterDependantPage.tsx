@@ -160,6 +160,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const [lastName, setLastName] = useState(initialName.lastName);
   const [dob, setDob] = useState(initial?.dob ?? '');
   const [gender, setGender] = useState<DependantGender | ''>(initial?.gender ?? '');
+  const [homeAddressText, setHomeAddressText] = useState(initial?.homeAddressText ?? '');
   const [primaryConditionSummary, setPrimaryConditionSummary] = useState(
     initial?.primaryConditionSummary ?? '',
   );
@@ -385,6 +386,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       fullName: `${firstName} ${lastName}`.trim(),
       dob,
       gender: gender || undefined,
+      homeAddressText: homeAddressText || undefined,
       primaryConditionSummary: primaryConditionSummary || undefined,
       geofenceRadiusMeters: Number(geofenceRadiusMeters),
       cognitiveMonitoringEnabled: effectiveCognitiveMonitoringEnabled,
@@ -514,6 +516,19 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                 <option value="male">Male</option>
                 <option value="female">Female</option>
               </select>
+            </div>
+            <div className="register-dependant-page__field">
+              <label className="ds-label" htmlFor="homeAddressText">
+                Home address details
+              </label>
+              <textarea
+                id="homeAddressText"
+                className="ds-input register-dependant-page__textarea"
+                rows={2}
+                placeholder='Apartment/unit number, floor, building name, or other detail a caregiver would need to actually find the door (e.g. "Apt 4B, 3rd floor, Blue Gate Apartments") - the map pin below covers the general location, this covers the last few steps'
+                value={homeAddressText}
+                onChange={(e) => setHomeAddressText(e.target.value)}
+              />
             </div>
             <div className="register-dependant-page__field">
               <label className="ds-label" htmlFor="primaryConditionSummary">
