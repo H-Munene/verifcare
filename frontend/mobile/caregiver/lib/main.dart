@@ -3,13 +3,19 @@ import 'package:flutter/material.dart';
 import 'api/api_client.dart';
 import 'api/checkin_api.dart';
 import 'api/visit_schedules_api.dart';
+import 'app_ui.dart';
 import 'auth/cognito_auth_service.dart';
 import 'screens/checkin_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/schedule_calendar_screen.dart';
+import 'screens/visit_in_progress_screen.dart';
+import 'screens/visit_timeline_screen.dart';
+import 'visit_notifications.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await VisitNotifications.init();
   runApp(MzaziCareCaregiverApp(authService: CognitoAuthService()));
 }
 
@@ -115,6 +121,10 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
   late final VisitSchedulesApi _visitSchedulesApi;
   late final CheckinApi _checkinApi;
   int _tabIndex = 0;
+  int _visitsRefreshToken = 0;
+  // The caregiver's checked-in visit, if any - read from the server rather than stored on the
+  // phone, so the banner comes back correctly after the app is closed and reopened.
+  VisitSchedule? _ongoingVisit;
 
   @override
   void initState() {
@@ -122,21 +132,98 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
     _apiClient = ApiClient(widget.authService.getIdToken);
     _visitSchedulesApi = VisitSchedulesApi(_apiClient);
     _checkinApi = CheckinApi(_apiClient);
+    _loadOngoingVisit();
+    VisitNotifications.tappedVisitId.addListener(_openTappedVisit);
+    // A tap that cold-launched the app landed before this shell existed (or before sign-in).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openTappedVisit());
+  }
+
+  @override
+  void dispose() {
+    VisitNotifications.tappedVisitId.removeListener(_openTappedVisit);
+    super.dispose();
+  }
+
+  Future<void> _loadOngoingVisit() async {
+    try {
+      final page = await _visitSchedulesApi.listVisitSchedules(
+        const ListVisitSchedulesParams(status: 'in_progress', limit: 1),
+      );
+      if (!mounted) return;
+      final ongoing = page.items.firstOrNull;
+      setState(() => _ongoingVisit = ongoing);
+      // Keeps the pinned notification in step with the server: re-shown after a restart,
+      // cleared if the visit ended some other way (e.g. marked missed).
+      await (ongoing == null
+          ? VisitNotifications.cancelOngoing()
+          : VisitNotifications.showOngoing(ongoing));
+    } on ApiException {
+      // Best-effort - the calendar tab already surfaces real connectivity errors itself.
+    }
+  }
+
+  void _refreshVisits() {
+    setState(() => _visitsRefreshToken++);
+    _loadOngoingVisit();
+  }
+
+  Future<void> _openTappedVisit() async {
+    final visitId = VisitNotifications.tappedVisitId.value;
+    if (visitId == null) return;
+    VisitNotifications.tappedVisitId.value = null;
+    try {
+      final visit = await _visitSchedulesApi.getVisitSchedule(visitId);
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      await _openVisit(visit);
+    } on ApiException catch (e) {
+      if (mounted) showSnack(context, e.problem.detail ?? e.problem.title);
+    }
   }
 
   // ScheduleCalendarScreen doesn't navigate itself - it only reports which visit was tapped, so
-  // this shell (which owns the api instances CheckInScreen needs) is the one place that knows how
-  // to get there. Pushed as a full route, not a tab, since the wireframe's check-in flow (screens
-  // 4-9) is explicitly "full-screen linear, no nav chrome" - it should cover the bottom bar too.
-  void _openCheckIn(VisitSchedule visit) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CheckInScreen(
-          visit: visit,
-          visitSchedulesApi: _visitSchedulesApi,
-          checkinApi: _checkinApi,
-          onBack: () => Navigator.of(context).pop(),
-        ),
+  // this shell (which owns the api instances every visit screen needs) decides where it goes by
+  // status. Pushed as full routes, not tabs, since the wireframe's check-in flow (screens 4-9) is
+  // explicitly "full-screen linear, no nav chrome" - it should cover the bottom bar too.
+  Future<void> _openVisit(VisitSchedule visit) async {
+    final navigator = Navigator.of(context);
+    final Widget screen = switch (visit.status) {
+      'in_progress' => VisitInProgressScreen(
+        visit: visit,
+        visitSchedulesApi: _visitSchedulesApi,
+      ),
+      'completed' || 'missed' => VisitTimelineScreen(
+        visit: visit,
+        visitSchedulesApi: _visitSchedulesApi,
+      ),
+      _ => CheckInScreen(
+        visit: visit,
+        visitSchedulesApi: _visitSchedulesApi,
+        checkinApi: _checkinApi,
+        onBack: navigator.pop,
+        onCheckedIn: () => _startVisit(visit),
+      ),
+    };
+    await navigator.push(MaterialPageRoute<void>(builder: (_) => screen));
+    _refreshVisits();
+  }
+
+  // Both photos passed: swap the whole check-in stack for the in-progress visit screen.
+  void _startVisit(VisitSchedule visit) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _openVisit(
+      VisitSchedule(
+        id: visit.id,
+        caregiverId: visit.caregiverId,
+        dependantId: visit.dependantId,
+        caregiverDisplayName: visit.caregiverDisplayName,
+        dependantDisplayName: visit.dependantDisplayName,
+        scheduledStart: visit.scheduledStart,
+        scheduledEnd: visit.scheduledEnd,
+        status: 'in_progress',
+        createdBy: visit.createdBy,
+        createdAt: visit.createdAt,
+        updatedAt: visit.updatedAt,
       ),
     );
   }
@@ -151,12 +238,31 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
       ),
       ScheduleCalendarScreen(
         visitSchedulesApi: _visitSchedulesApi,
-        onSelectVisit: _openCheckIn,
+        onSelectVisit: _openVisit,
+        refreshToken: _visitsRefreshToken,
       ),
     ];
 
+    final ongoing = _ongoingVisit;
     return Scaffold(
-      body: IndexedStack(index: _tabIndex, children: tabs),
+      body: Column(
+        children: [
+          if (ongoing != null)
+            _OngoingVisitBanner(
+              visit: ongoing,
+              onTap: () => _openVisit(ongoing),
+            ),
+          Expanded(
+            // The banner already took the status-bar inset - stop each tab's own SafeArea from
+            // adding it a second time.
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: ongoing != null,
+              child: IndexedStack(index: _tabIndex, children: tabs),
+            ),
+          ),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabIndex,
         onTap: (index) => setState(() => _tabIndex = index),
@@ -170,6 +276,60 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
             label: 'Calendar',
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Pinned above both tabs while a visit is checked in - the way back to its checklist.
+class _OngoingVisitBanner extends StatelessWidget {
+  final VisitSchedule visit;
+  final VoidCallback onTap;
+
+  const _OngoingVisitBanner({required this.visit, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: primaryBlue,
+      child: InkWell(
+        onTap: onTap,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.timelapse, color: Colors.white, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Ongoing visit',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        '${visit.dependantDisplayName} - tap to return to the checklist',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.white),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

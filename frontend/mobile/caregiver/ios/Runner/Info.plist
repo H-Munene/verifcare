@@ -32,6 +32,10 @@
 	     happens while the app is open, no background location tracking. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Mzazi Care uses your location to confirm you're at the dependant's home before check-in.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Mzazi Care takes a photo of you and the dependant to verify identity at check-in.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mzazi Care records a short ambient audio log during the visit.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
