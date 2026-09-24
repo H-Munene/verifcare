@@ -1,6 +1,6 @@
 // Screen 04/05 of the wireframes (temp_images/Mzazi Care Caregiver App Wireframes.dc.html) - the
-// geofence check-in map and its bottom sheet. Only the geofence step: caregiver/dependant liveness
-// (screens 06/07) are separate, later work per the plan doc, not built here.
+// geofence check-in map and its bottom sheet. A passing geofence check moves straight on to
+// PhotoVerificationScreen (the caregiver/dependant photo step).
 
 import 'dart:async';
 
@@ -11,6 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../api/api_client.dart';
 import '../api/checkin_api.dart';
 import '../api/visit_schedules_api.dart';
+import 'photo_verification_screen.dart';
 
 const _primaryBlue = Color(0xFF0077E6);
 const _successGreen = Color(0xFF15B042);
@@ -39,6 +40,8 @@ class CheckInScreen extends StatefulWidget {
   final VisitSchedulesApi visitSchedulesApi;
   final CheckinApi checkinApi;
   final VoidCallback onBack;
+  // Both photos verified and the caregiver tapped Proceed - the visit is now in progress.
+  final VoidCallback onCheckedIn;
 
   const CheckInScreen({
     super.key,
@@ -46,6 +49,7 @@ class CheckInScreen extends StatefulWidget {
     required this.visitSchedulesApi,
     required this.checkinApi,
     required this.onBack,
+    required this.onCheckedIn,
   });
 
   @override
@@ -189,6 +193,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
         _result = result;
         _state = _SheetState.success;
       });
+      unawaited(_openPhotoVerification());
     } on ApiException catch (e) {
       if (!mounted) return;
       if (e.problem.status == 422) {
@@ -211,6 +216,22 @@ class _CheckInScreenState extends State<CheckInScreen> {
         _genericErrorMessage = e.toString();
         _state = _SheetState.genericError;
       });
+    }
+  }
+
+  Future<void> _openPhotoVerification() async {
+    final sessionExpired = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PhotoVerificationScreen(
+          visit: widget.visit,
+          checkinApi: widget.checkinApi,
+          session: _result!,
+          onProceed: widget.onCheckedIn,
+        ),
+      ),
+    );
+    if (sessionExpired == true && mounted) {
+      setState(() => _state = _SheetState.ready);
     }
   }
 
@@ -665,14 +686,15 @@ class _CheckInScreenState extends State<CheckInScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Valid until ${result.expiresAt.toLocal()}',
+            'Valid until ${TimeOfDay.fromDateTime(result.expiresAt.toLocal()).format(context)}',
             style: const TextStyle(fontSize: 12, color: _inkTertiary),
           ),
           const SizedBox(height: 12),
           SizedBox(
             height: 40,
             child: ElevatedButton(
-              onPressed: widget.onBack,
+              // Reached only by backing out of the photo step while the session is still valid.
+              onPressed: _openPhotoVerification,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryBlue,
                 foregroundColor: Colors.white,
@@ -681,7 +703,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 ),
                 elevation: 0,
               ),
-              child: const Text('Done'),
+              child: const Text('Continue to photos'),
             ),
           ),
         ],

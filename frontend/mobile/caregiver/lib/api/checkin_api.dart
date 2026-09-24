@@ -1,9 +1,36 @@
-// POST /visit-schedules/{id}/checkin/geofence only, this pass - the caregiver/dependant photo
-// steps (backend/src/routes/checkin.ts's .../caregiver-liveness, .../dependant-liveness) are
-// separate, later work (docs/caregiver-checkin-geofence-plan.md's suggested build order, HEZ-34/
-// HEZ-68), not part of screen 04's geofence-only scope.
+// The check-in flow's three server steps (backend/src/routes/checkin.ts): geofence, then the
+// caregiver photo, then the dependant photo. Every step after geofence needs the geofence step's
+// sessionToken in X-Checkin-Session-Token, alongside the normal bearer token.
 
 import 'api_client.dart';
+
+enum CheckinSubject { caregiver, dependant }
+
+class LivenessResult {
+  final bool passed;
+  final String? failureReason;
+
+  LivenessResult({required this.passed, this.failureReason});
+
+  factory LivenessResult.fromJson(Map<String, dynamic> json) => switch (json) {
+    {'passed': bool passed} => LivenessResult(
+      passed: passed,
+      failureReason: json['failureReason'] as String?,
+    ),
+    _ => throw FormatException('Unexpected liveness result: $json'),
+  };
+}
+
+/// Human wording for LivenessResult.failureReason - values from checkin.ts
+/// (no_face_detected/multiple_faces_detected from db/checkinLiveness.ts, plus not_enrolled and
+/// identity_mismatch from the face-match step).
+String describeLivenessFailure(String? reason) => switch (reason) {
+  'no_face_detected' => 'no face was detected',
+  'multiple_faces_detected' => 'more than one face was in the photo',
+  'identity_mismatch' => "the face didn't match the enrolled photos",
+  'not_enrolled' => 'no enrollment photos exist - contact your supervisor',
+  _ => 'the photo could not be verified',
+};
 
 /// backend's GeofenceFailureReason (checkin.ts) - a 422's Problem.failureReason. mockLocation is a
 /// hard block (no retry, per the wireframe's screen 05 third state); outOfRange/
@@ -16,22 +43,21 @@ enum GeofenceFailureReason {
   unknown,
 }
 
-GeofenceFailureReason parseGeofenceFailureReason(String? value) {
-  switch (value) {
-    case 'out_of_range':
-      return GeofenceFailureReason.outOfRange;
-    case 'insufficient_accuracy':
-      return GeofenceFailureReason.insufficientAccuracy;
-    case 'mock_location_detected':
-      return GeofenceFailureReason.mockLocation;
-    default:
-      return GeofenceFailureReason.unknown;
-  }
-}
+GeofenceFailureReason parseGeofenceFailureReason(String? value) =>
+    switch (value) {
+      'out_of_range' => GeofenceFailureReason.outOfRange,
+      'insufficient_accuracy' => GeofenceFailureReason.insufficientAccuracy,
+      'mock_location_detected' => GeofenceFailureReason.mockLocation,
+      _ => GeofenceFailureReason.unknown,
+    };
 
 bool isRetriableGeofenceFailure(GeofenceFailureReason reason) =>
-    reason == GeofenceFailureReason.outOfRange ||
-    reason == GeofenceFailureReason.insufficientAccuracy;
+    switch (reason) {
+      GeofenceFailureReason.outOfRange ||
+      GeofenceFailureReason.insufficientAccuracy => true,
+      GeofenceFailureReason.mockLocation ||
+      GeofenceFailureReason.unknown => false,
+    };
 
 class GeofenceCheckinResult {
   final String sessionToken;
@@ -77,5 +103,43 @@ class CheckinApi {
           'isMockLocation': isMockLocation,
         });
     return GeofenceCheckinResult.fromJson(json);
+  }
+
+  /// Presign + upload only. Split from [submitLiveness] because the two subjects' uploads may run
+  /// concurrently, but the backend only accepts the dependant submission once the caregiver's has
+  /// passed (and within its co-presence window) - see PhotoVerificationScreen.
+  Future<String> uploadLivenessPhoto({
+    required String visitScheduleId,
+    required CheckinSubject subject,
+    required String sessionToken,
+    required List<int> jpegBytes,
+  }) async {
+    final presign = await _client.post(
+      '/visit-schedules/$visitScheduleId/checkin/${subject.name}-liveness/upload-url',
+      {'contentType': 'image/jpeg'},
+      headers: {'X-Checkin-Session-Token': sessionToken},
+    );
+    await ApiClient.uploadToPresignedUrl(
+      presign['uploadUrl'] as String,
+      jpegBytes,
+      'image/jpeg',
+    );
+    return presign['s3Key'] as String;
+  }
+
+  /// A failed face check is a normal 200 with passed: false, not an exception - only
+  /// precondition failures (expired session, co-presence window) throw [ApiException].
+  Future<LivenessResult> submitLiveness({
+    required String visitScheduleId,
+    required CheckinSubject subject,
+    required String sessionToken,
+    required String s3Key,
+  }) async {
+    final json = await _client.post(
+      '/visit-schedules/$visitScheduleId/checkin/${subject.name}-liveness',
+      {'s3Key': s3Key},
+      headers: {'X-Checkin-Session-Token': sessionToken},
+    );
+    return LivenessResult.fromJson(json);
   }
 }

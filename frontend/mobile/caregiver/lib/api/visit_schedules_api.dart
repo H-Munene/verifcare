@@ -161,4 +161,121 @@ class VisitSchedulesApi {
     );
     return CheckinContext.fromJson(json);
   }
+
+  Future<VisitSchedule> getVisitSchedule(String visitScheduleId) async =>
+      VisitSchedule.fromJson(
+        await _client.get('/visit-schedules/$visitScheduleId'),
+      );
+
+  Future<VerificationAudit> getVerification(String visitScheduleId) async =>
+      VerificationAudit.fromJson(
+        await _client.get('/visit-schedules/$visitScheduleId/verification'),
+      );
+
+  // Only callable while the visit is in_progress (backend/src/routes/visitTasks.ts).
+  Future<List<VisitTask>> listTasks(String visitScheduleId) async {
+    final json = await _client.getList(
+      '/visit-schedules/$visitScheduleId/tasks',
+    );
+    return json
+        .map((item) => VisitTask.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// [reason] must be set for, and only for, 'not_completed' (mirrors the backend's own rule).
+  Future<void> putTask(
+    String visitScheduleId,
+    String careTaskId, {
+    required String status,
+    String? reason,
+    String? notes,
+  }) async {
+    await _client.put('/visit-schedules/$visitScheduleId/tasks/$careTaskId', {
+      'status': status,
+      'reason': ?reason,
+      'notes': ?notes,
+    });
+  }
+
+  Future<VisitSchedule> checkout(String visitScheduleId) async =>
+      VisitSchedule.fromJson(
+        await _client.post('/visit-schedules/$visitScheduleId/checkout', {}),
+      );
+}
+
+/// One care-plan task as seen from a visit (GET .../tasks) - status is null until recorded.
+class VisitTask {
+  final String careTaskId;
+  final String title;
+  final String? description;
+  final bool required;
+  final String? status;
+
+  VisitTask({
+    required this.careTaskId,
+    required this.title,
+    this.description,
+    required this.required,
+    this.status,
+  });
+
+  // Required keys validated by the map pattern (fast-fail on a malformed row); the nullable
+  // ones are read directly, since a map pattern also requires the key to be present.
+  factory VisitTask.fromJson(Map<String, dynamic> json) => switch (json) {
+    {
+      'careTaskId': String careTaskId,
+      'title': String title,
+      'required': bool required,
+    } =>
+      VisitTask(
+        careTaskId: careTaskId,
+        title: title,
+        description: json['description'] as String?,
+        required: required,
+        status: json['status'] as String?,
+      ),
+    _ => throw FormatException('Unexpected visit task: $json'),
+  };
+}
+
+/// GET .../verification, trimmed to what the visit timeline reads.
+class VerificationAudit {
+  final DateTime? checkinAt;
+  final DateTime? checkoutAt;
+  final DateTime? caregiverVerifiedAt;
+  final DateTime? dependantVerifiedAt;
+
+  VerificationAudit({
+    this.checkinAt,
+    this.checkoutAt,
+    this.caregiverVerifiedAt,
+    this.dependantVerifiedAt,
+  });
+
+  factory VerificationAudit.fromJson(Map<String, dynamic> json) {
+    DateTime? parse(Object? value) => switch (value) {
+      String iso => DateTime.parse(iso).toLocal(),
+      null => null,
+      _ => throw FormatException('Expected an ISO timestamp, got $value'),
+    };
+    if (json case {
+      'event': Map<String, dynamic>? event,
+      'attempts': List<dynamic> attempts,
+    }) {
+      // Same rule as the admin web app's VisitDetailPage: the first *passing* attempt per type.
+      DateTime? firstPass(String type) => parse(
+        attempts
+            .map((a) => a as Map<String, dynamic>)
+            .where((a) => a['attemptType'] == type && a['passed'] == true)
+            .firstOrNull?['attemptedAt'],
+      );
+      return VerificationAudit(
+        checkinAt: parse(event?['checkinAt']),
+        checkoutAt: parse(event?['checkoutAt']),
+        caregiverVerifiedAt: firstPass('caregiver_liveness'),
+        dependantVerifiedAt: firstPass('dependant_liveness'),
+      );
+    }
+    throw FormatException('Unexpected verification audit: $json');
+  }
 }

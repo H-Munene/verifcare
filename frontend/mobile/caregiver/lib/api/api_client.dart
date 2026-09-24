@@ -59,7 +59,14 @@ class ApiClient {
 
   ApiClient(this._getIdToken);
 
-  Future<Map<String, dynamic>> get(String path) async {
+  Future<Map<String, dynamic>> get(String path) async =>
+      (await _getRaw(path) as Map<String, dynamic>?) ?? const {};
+
+  // For the few endpoints whose body is a bare JSON array (e.g. GET .../tasks).
+  Future<List<dynamic>> getList(String path) async =>
+      await _getRaw(path) as List<dynamic>;
+
+  Future<Object?> _getRaw(String path) async {
     final token = await _getIdToken();
     final response = await http.get(
       Uri.parse('${AppConfig.apiBaseUrl}$path'),
@@ -68,28 +75,66 @@ class ApiClient {
     return _parseResponse(response);
   }
 
+  // headers: for the check-in flow's X-Checkin-Session-Token, which the backend requires
+  // alongside (not instead of) the bearer token.
   Future<Map<String, dynamic>> post(
     String path,
+    Map<String, dynamic> body, {
+    Map<String, String> headers = const {},
+  }) => _send('POST', path, body, headers);
+
+  Future<Map<String, dynamic>> put(String path, Map<String, dynamic> body) =>
+      _send('PUT', path, body, const {});
+
+  Future<Map<String, dynamic>> _send(
+    String method,
+    String path,
     Map<String, dynamic> body,
+    Map<String, String> headers,
   ) async {
     final token = await _getIdToken();
-    final response = await http.post(
-      Uri.parse('${AppConfig.apiBaseUrl}$path'),
-      headers: {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode(body),
-    );
-    return _parseResponse(response);
+    final request =
+        http.Request(method, Uri.parse('${AppConfig.apiBaseUrl}$path'))
+          ..headers.addAll({
+            'Content-Type': 'application/json',
+            if (token != null) 'Authorization': 'Bearer $token',
+            ...headers,
+          })
+          ..body = jsonEncode(body);
+    final response = await http.Response.fromStream(await request.send());
+    return (_parseResponse(response) as Map<String, dynamic>?) ?? const {};
   }
 
-  Map<String, dynamic> _parseResponse(http.Response response) {
+  /// PUTs raw bytes straight to an S3 presigned URL - deliberately not through [_send]: S3
+  /// rejects a request carrying the app's own bearer token (same reason as the web app's
+  /// uploadFileToPresignedUrl).
+  static Future<void> uploadToPresignedUrl(
+    String uploadUrl,
+    List<int> bytes,
+    String contentType,
+  ) async {
+    final response = await http.put(
+      Uri.parse(uploadUrl),
+      headers: {'Content-Type': contentType},
+      body: bytes,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        Problem(
+          type: 'about:blank',
+          title: 'Photo upload failed',
+          status: response.statusCode,
+        ),
+      );
+    }
+  }
+
+  Object? _parseResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) {
-        return const {};
+        return null;
       }
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      return jsonDecode(response.body);
     }
 
     if (response.body.isNotEmpty) {
