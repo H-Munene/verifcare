@@ -1,0 +1,83 @@
+.care-plan-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.care-plan-page__back {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.care-plan-page__title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+  margin: 0;
+}
+
+.care-plan-page__task-title {
+  font-size: 14px;
+  color: var(--color-ink-primary);
+}
+
+.care-plan-page__task-description {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  margin-top: 2px;
+}
+
+.care-plan-page__row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.care-plan-page__empty {
+  text-align: center;
+  color: var(--color-ink-muted);
+  height: 48px;
+}
+
+.care-plan-page__error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-default);
+  padding: 8px 10px;
+  margin-top: 12px;
+}
+
+.care-plan-page__modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.care-plan-page__textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.care-plan-page__modal-error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-default);
+  padding: 8px 10px;
+}
+
+.care-plan-page__modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}

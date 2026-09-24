@@ -1,10 +1,11 @@
 // Server-side role assignment for a genuinely new Cognito self-signup (HEZ-29), and server-side
-// creation of a brand-new Cognito identity for a dependant's family contact who has never touched
-// Cognito at all (2026-09-14, extending HEZ-30/HEZ-56). The only way custom:role can be set at
-// all now, since infra/lib/auth.ts removed the app client's own write access to it - a
-// self-signing-up user's own session can never set this directly, closing the privilege-
-// escalation gap that write access left open (a self-signup could otherwise set custom:role to
-// "supervisor" with zero backend involvement).
+// creation of a brand-new Cognito identity for someone who has never touched Cognito at all - a
+// dependant's family contact (2026-09-14, extending HEZ-30/HEZ-56) or a caregiver (2026-09-22,
+// HEZ-54, since a caregiver never self-registers). The only way custom:role can be set at all
+// now, since infra/lib/auth.ts removed the app client's own write access to it - a self-signing-up
+// user's own session can never set this directly, closing the privilege-escalation gap that write
+// access left open (a self-signup could otherwise set custom:role to "supervisor" with zero
+// backend involvement).
 
 import {
   AdminCreateUserCommand,
@@ -56,6 +57,23 @@ export function isCognitoUserAlreadyExistsError(err: unknown): boolean {
   }
   const name = (err as { name?: unknown }).name;
   return name === 'UsernameExistsException' || name === 'AliasExistsException';
+}
+
+// Classifies an AdminCreateUser rejection caused by one of the submitted attributes failing
+// Cognito's own validation (most commonly phone_number not being E.164 - found via a real
+// "Internal Server Error" report where a locally-formatted phone number reached AdminCreateUser
+// unvalidated, since routes/dependants.ts's own zod schema didn't check the format at the time).
+// zod-level validation now catches the common phone-format case before Cognito is ever called;
+// this stays as a fallback for whatever that regex doesn't anticipate, so a rejection here still
+// becomes a clean 400 instead of an unhandled 500. Cognito's own message (e.g. "Invalid phone
+// number format.") is not sensitive - it's Cognito describing its own validation rule, not
+// leaking anything about this account or user pool - so it's safe to relay directly to the caller.
+export function isCognitoInvalidParameterError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { name?: unknown }).name === 'InvalidParameterException'
+  );
 }
 
 export function createCognitoAdmin(userPoolId: string): CognitoAdmin {

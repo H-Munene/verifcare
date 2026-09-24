@@ -15,6 +15,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -63,8 +64,24 @@ function familyMemberBody(response: request.Response): FamilyMemberBody {
 function familyMemberListBody(response: request.Response): FamilyMemberBody[] {
   return response.body as FamilyMemberBody[];
 }
+interface CareTaskBody {
+  id: string;
+  dependantId: string;
+  title: string;
+  required: boolean;
+  active: boolean;
+}
+function careTaskBody(response: request.Response): CareTaskBody {
+  return response.body as CareTaskBody;
+}
+function careTaskListBody(response: request.Response): CareTaskBody[] {
+  return response.body as CareTaskBody[];
+}
 
-function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
+function buildTestApp(
+  cognitoAdmin: CognitoAdmin,
+  faceCollection?: BiometricFaceCollection,
+): Express {
   const app = express();
   app.use(express.json());
   app.locals.db = getDb();
@@ -79,7 +96,7 @@ function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
     next();
   };
 
-  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
+  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth, faceCollection }));
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -110,6 +127,9 @@ function createDependantPayload(overrides: Record<string, unknown> = {}): Record
   return {
     fullName: 'Grandma Wanjiru',
     dob: '1945-03-01',
+    county: 'NAIROBI',
+    constituency: 'STAREHE',
+    ward: 'NAIROBI CENTRAL',
     geofenceLat: -1.286389,
     geofenceLng: 36.817223,
     geofenceRadiusMeters: 100,
@@ -120,6 +140,39 @@ function createDependantPayload(overrides: Record<string, unknown> = {}): Record
     },
     ...overrides,
   };
+}
+
+// Direct-insert, not via POST /dependants - the care-tasks tests below don't need the full
+// primaryFamilyMember dance every other describe block in this file already covers.
+async function createTestDependant(
+  registeredById: string,
+): Promise<typeof schema.dependants.$inferSelect> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.dependants)
+    .values({
+      fullName: 'Test Dependant',
+      dob: '1950-01-01',
+      geofenceLat: -1.2921,
+      geofenceLng: 36.8219,
+      geofenceRadiusMeters: 100,
+      registeredBy: registeredById,
+    })
+    .returning();
+  if (!row) {
+    throw new Error('Failed to insert test dependant.');
+  }
+  return row;
+}
+
+async function linkFamilyMember(dependantId: string, familyMemberUserId: string): Promise<void> {
+  const db = getDb();
+  await db.insert(schema.dependantFamilyMembers).values({
+    dependantId,
+    familyMemberUserId,
+    isPrimaryContact: true,
+    addedBy: familyMemberUserId,
+  });
 }
 
 describe.skipIf(!hasTestDb)(
@@ -172,6 +225,9 @@ describe.skipIf(!hasTestDb)(
         expect(response.status).toBe(201);
         expect(dependantBody(response)).toMatchObject({
           fullName: 'Grandma Wanjiru',
+          county: 'NAIROBI',
+          constituency: 'STAREHE',
+          ward: 'NAIROBI CENTRAL',
           status: 'active',
           registeredBy: supervisor.id,
         });
@@ -187,6 +243,36 @@ describe.skipIf(!hasTestDb)(
           isPrimaryContact: true,
           addedBy: supervisor.id,
         });
+      });
+
+      it('accepts an optional primaryConditionSummary', async () => {
+        await createTestUser('sup-cond', 'supervisor', '+254700000090');
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-cond', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryConditionSummary: 'Early-stage dementia, lives alone, uses a walking aid.',
+            }),
+          );
+
+        expect(response.status).toBe(201);
+        expect(dependantBody(response)).toMatchObject({
+          primaryConditionSummary: 'Early-stage dementia, lives alone, uses a walking aid.',
+        });
+      });
+
+      it('defaults primaryConditionSummary to null when omitted', async () => {
+        await createTestUser('sup-cond-2', 'supervisor', '+254700000091');
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-cond-2', 'supervisor'))
+          .send(createDependantPayload());
+
+        expect(response.status).toBe(201);
+        expect(dependantBody(response)).toMatchObject({ primaryConditionSummary: null });
       });
 
       it('ignores a mismatched phoneNumber/fullName for an existing family member rather than overwriting their profile', async () => {
@@ -345,6 +431,8 @@ describe.skipIf(!hasTestDb)(
                 email: 'brand-new@example.com',
                 phoneNumber: '+254700000017',
                 fullName: 'Brand New By Email',
+                idType: 'national_id',
+                idNumber: '12345678',
               },
             }),
           );
@@ -367,7 +455,29 @@ describe.skipIf(!hasTestDb)(
           role: 'family_member',
           fullName: 'Brand New By Email',
           cognitoSub: 'created-sub-brand-new@example.com',
+          idType: 'national_id',
+          idNumber: '12345678',
         });
+      });
+
+      it('returns 400 when registering a brand-new user by email without idType/idNumber', async () => {
+        await createTestUser('sup-email-noid', 'supervisor', '+254700000029');
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-email-noid', 'supervisor'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                email: 'no-id@example.com',
+                phoneNumber: '+254700000030',
+                fullName: 'Missing ID',
+              },
+            }),
+          );
+
+        expect(response.status).toBe(400);
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
       });
 
       it('returns 409 when the primaryFamilyMember email belongs to an existing non-family_member user', async () => {
@@ -389,6 +499,8 @@ describe.skipIf(!hasTestDb)(
                 email: 'cg-taken@example.com',
                 phoneNumber: '+254700000020',
                 fullName: 'Irrelevant',
+                idType: 'national_id',
+                idNumber: '87654321',
               },
             }),
           );
@@ -417,6 +529,8 @@ describe.skipIf(!hasTestDb)(
                 email: 'existing-fm@example.com',
                 phoneNumber: '+254799999997',
                 fullName: 'Ignored',
+                idType: 'passport',
+                idNumber: 'A1234567',
               },
             }),
           );
@@ -447,6 +561,8 @@ describe.skipIf(!hasTestDb)(
                 email: 'orphaned-cognito-user@example.com',
                 phoneNumber: '+254700000024',
                 fullName: 'Ghost',
+                idType: 'national_id',
+                idNumber: '11223344',
               },
             }),
           );
@@ -500,6 +616,19 @@ describe.skipIf(!hasTestDb)(
         const response = await request(app)
           .post('/dependants')
           .set('x-test-auth', testAuthHeader('sup-6', 'supervisor'))
+          .send(invalidPayload);
+
+        expect(response.status).toBe(400);
+      });
+
+      it('returns 400 when ward is missing - county/constituency/ward are required for every new registration', async () => {
+        await createTestUser('sup-7', 'supervisor', '+254700000016');
+        const invalidPayload = createDependantPayload();
+        delete invalidPayload.ward;
+
+        const response = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-7', 'supervisor'))
           .send(invalidPayload);
 
         expect(response.status).toBe(400);
@@ -667,6 +796,76 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(dependantBody(response)).toMatchObject({ status: 'deactivated' });
+      });
+
+      it('lets a supervisor update county/constituency/ward (e.g. after re-placing the geofence pin)', async () => {
+        const { dependant, supervisorSub } = await registerDependant();
+
+        const response = await request(app)
+          .patch(`/dependants/${dependant.id}`)
+          .set('x-test-auth', testAuthHeader(supervisorSub, 'supervisor'))
+          .send({ county: 'KIAMBU', constituency: 'THIKA TOWN', ward: 'HOSPITAL' });
+
+        expect(response.status).toBe(200);
+        expect(dependantBody(response)).toMatchObject({
+          county: 'KIAMBU',
+          constituency: 'THIKA TOWN',
+          ward: 'HOSPITAL',
+        });
+      });
+
+      it('lets a supervisor update primaryConditionSummary', async () => {
+        const { dependant, supervisorSub } = await registerDependant();
+
+        const response = await request(app)
+          .patch(`/dependants/${dependant.id}`)
+          .set('x-test-auth', testAuthHeader(supervisorSub, 'supervisor'))
+          .send({ primaryConditionSummary: 'Diabetic, requires daily insulin.' });
+
+        expect(response.status).toBe(200);
+        expect(dependantBody(response)).toMatchObject({
+          primaryConditionSummary: 'Diabetic, requires daily insulin.',
+        });
+      });
+
+      it('cleans up indexed biometric enrollments when deactivated (HEZ-85)', async () => {
+        const faceCollection: BiometricFaceCollection = {
+          checkDuplicate: vi.fn(),
+          indexFace: vi.fn(),
+          deleteFaces: vi.fn().mockResolvedValue(undefined),
+        };
+        const localApp = buildTestApp(cognitoAdmin, faceCollection);
+        await createTestUser('sup-offboard', 'supervisor', '+254700000059');
+        const created = await request(localApp)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('sup-offboard', 'supervisor'))
+          .send(createDependantPayload());
+        const dependantId = dependantBody(created).id;
+        const registeredBy = dependantBody(created).registeredBy;
+
+        const db = getDb();
+        await db.insert(schema.biometricEnrollments).values({
+          subjectType: 'dependant',
+          dependantId,
+          s3Key: `dependant/${dependantId}/1/photo.jpg`,
+          imageOrder: 1,
+          status: 'active',
+          rekognitionFaceId: 'face-id-1',
+          enrolledBy: registeredBy,
+        });
+
+        const response = await request(localApp)
+          .patch(`/dependants/${dependantId}`)
+          .set('x-test-auth', testAuthHeader('sup-offboard', 'supervisor'))
+          .send({ status: 'deactivated' });
+
+        expect(response.status).toBe(200);
+        expect(faceCollection.deleteFaces).toHaveBeenCalledWith(['face-id-1']);
+        const [row] = await db
+          .select()
+          .from(schema.biometricEnrollments)
+          .where(eq(schema.biometricEnrollments.dependantId, dependantId));
+        expect(row?.status).toBe('deleted');
       });
 
       it('lets the primary-contact family member update non-status fields', async () => {
@@ -986,6 +1185,141 @@ describe.skipIf(!hasTestDb)(
           .send({ relationship: 'Nobody' });
 
         expect(response.status).toBe(404);
+      });
+    });
+
+    describe('POST/GET/PATCH /dependants/{dependantId}/care-tasks', () => {
+      it('lets a supervisor create a care task', async () => {
+        const sup = await createTestUser('sup-ct-1', 'supervisor', '+254700000200');
+        const dependant = await createTestDependant(sup.id);
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('sup-ct-1', 'supervisor'))
+          .send({ title: 'Assist with bathing', category: 'Personal care', required: true });
+
+        expect(response.status).toBe(201);
+        expect(careTaskBody(response)).toMatchObject({
+          dependantId: dependant.id,
+          title: 'Assist with bathing',
+          required: true,
+          active: true,
+        });
+      });
+
+      it('rejects a caregiver or family_member trying to create a care task', async () => {
+        const sup = await createTestUser('sup-ct-2', 'supervisor', '+254700000201');
+        const dependant = await createTestDependant(sup.id);
+        await createTestUser('cg-ct-1', 'caregiver', '+254700000202');
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('cg-ct-1', 'caregiver'))
+          .send({ title: 'Assist with bathing' });
+
+        expect(response.status).toBe(403);
+      });
+
+      it('404s creating a task for a nonexistent dependant', async () => {
+        await createTestUser('sup-ct-3', 'supervisor', '+254700000203');
+
+        const response = await request(app)
+          .post('/dependants/00000000-0000-7000-8000-000000000000/care-tasks')
+          .set('x-test-auth', testAuthHeader('sup-ct-3', 'supervisor'))
+          .send({ title: 'Assist with bathing' });
+
+        expect(response.status).toBe(404);
+      });
+
+      it("lists a dependant's care tasks, newest-created last, and supports ?active= filtering", async () => {
+        const sup = await createTestUser('sup-ct-4', 'supervisor', '+254700000204');
+        const dependant = await createTestDependant(sup.id);
+        const first = careTaskBody(
+          await request(app)
+            .post(`/dependants/${dependant.id}/care-tasks`)
+            .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'))
+            .send({ title: 'Assist with bathing' }),
+        );
+        const second = careTaskBody(
+          await request(app)
+            .post(`/dependants/${dependant.id}/care-tasks`)
+            .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'))
+            .send({ title: 'Medication reminder' }),
+        );
+        await request(app)
+          .patch(`/dependants/${dependant.id}/care-tasks/${second.id}`)
+          .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'))
+          .send({ active: false });
+
+        const all = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'));
+        expect(all.status).toBe(200);
+        expect(careTaskListBody(all).map((t) => t.id)).toEqual([first.id, second.id]);
+
+        const activeOnly = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks?active=true`)
+          .set('x-test-auth', testAuthHeader('sup-ct-4', 'supervisor'));
+        expect(careTaskListBody(activeOnly).map((t) => t.id)).toEqual([first.id]);
+      });
+
+      it('lets a linked family member view, but not author, care tasks', async () => {
+        const sup = await createTestUser('sup-ct-5', 'supervisor', '+254700000205');
+        const dependant = await createTestDependant(sup.id);
+        const fm = await createTestUser('fm-ct-1', 'family_member', '+254700000206');
+        await linkFamilyMember(dependant.id, fm.id);
+        await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('sup-ct-5', 'supervisor'))
+          .send({ title: 'Assist with bathing' });
+
+        const viewResponse = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('fm-ct-1', 'family_member'));
+        expect(viewResponse.status).toBe(200);
+        expect(careTaskListBody(viewResponse)).toHaveLength(1);
+
+        const authorResponse = await request(app)
+          .post(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('fm-ct-1', 'family_member'))
+          .send({ title: 'Should be rejected' });
+        expect(authorResponse.status).toBe(403);
+      });
+
+      it('rejects an unlinked family member viewing care tasks', async () => {
+        const sup = await createTestUser('sup-ct-6', 'supervisor', '+254700000207');
+        const dependant = await createTestDependant(sup.id);
+        await createTestUser('fm-ct-2', 'family_member', '+254700000208');
+
+        const response = await request(app)
+          .get(`/dependants/${dependant.id}/care-tasks`)
+          .set('x-test-auth', testAuthHeader('fm-ct-2', 'family_member'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('lets a supervisor retire a task via PATCH, and rejects a non-supervisor', async () => {
+        const sup = await createTestUser('sup-ct-7', 'supervisor', '+254700000209');
+        const dependant = await createTestDependant(sup.id);
+        const task = careTaskBody(
+          await request(app)
+            .post(`/dependants/${dependant.id}/care-tasks`)
+            .set('x-test-auth', testAuthHeader('sup-ct-7', 'supervisor'))
+            .send({ title: 'Assist with bathing' }),
+        );
+
+        const rejected = await request(app)
+          .patch(`/dependants/${dependant.id}/care-tasks/${task.id}`)
+          .set('x-test-auth', testAuthHeader('fm-ct-3', 'family_member'))
+          .send({ active: false });
+        expect(rejected.status).toBe(403);
+
+        const retired = await request(app)
+          .patch(`/dependants/${dependant.id}/care-tasks/${task.id}`)
+          .set('x-test-auth', testAuthHeader('sup-ct-7', 'supervisor'))
+          .send({ active: false });
+        expect(retired.status).toBe(200);
+        expect(careTaskBody(retired).active).toBe(false);
       });
     });
   },

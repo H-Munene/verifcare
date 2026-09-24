@@ -10,6 +10,10 @@ export interface Problem {
   status: number;
   detail?: string;
   instance?: string;
+  // Present on some error responses (e.g. the geofence check's 422 - checkin.ts's
+  // GeofenceFailureReason) so a client can branch deterministically instead of parsing `detail`'s
+  // prose, which is meant for a human, not a switch statement.
+  failureReason?: string;
 }
 
 export function sendProblem(res: Response, problem: Problem): void {

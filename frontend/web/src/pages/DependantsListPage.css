@@ -13,6 +13,11 @@
   margin: 0;
 }
 
+.dependants-page__toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .dependants-page__row {
   cursor: pointer;
 }

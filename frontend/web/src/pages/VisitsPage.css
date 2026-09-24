@@ -1,0 +1,84 @@
+.visits-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.visits-page__title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+  margin: 0;
+}
+
+.visits-page__row {
+  cursor: pointer;
+}
+
+.visits-page__row:hover {
+  background: var(--color-border-divider);
+}
+
+.visits-page__row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.visits-page__empty {
+  text-align: center;
+  color: var(--color-ink-muted);
+  height: 48px;
+}
+
+.visits-page__pagination {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+.visits-page__error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-default);
+  padding: 8px 10px;
+  margin-top: 12px;
+}
+
+.visits-page__modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.visits-page__modal-row {
+  display: flex;
+  gap: 12px;
+}
+
+.visits-page__modal-row > * {
+  flex: 1;
+  /* A flex item's default min-width:auto floors its shrinking at its content's intrinsic width -
+     the same overflow bug FamilyMemberResolver.css already documents and fixes for its own paired
+     fields inside this same 400px Modal. */
+  min-width: 0;
+}
+
+.visits-page__modal-error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-default);
+  padding: 8px 10px;
+}
+
+.visits-page__modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}

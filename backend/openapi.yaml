@@ -402,6 +402,84 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /dependants/{dependantId}/care-tasks:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    post:
+      tags: [Dependants]
+      summary: Create a care-plan task for a dependant
+      description: |
+        Visit task checklist (docs/visit-task-checklist-plan.md). Supervisor-only - the care plan
+        is authored by a supervisor on a dedicated Care Plan screen, not by the caregiver and not
+        part of dependant registration.
+      operationId: createCareTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCareTaskRequest'
+      responses:
+        '201':
+          description: The created task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTask'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      tags: [Dependants]
+      summary: List a dependant's care-plan tasks
+      description: Supervisor sees any dependant's tasks; a family_member sees only a linked dependant's, same ownership rule as `GET /dependants/{dependantId}`.
+      operationId: listCareTasks
+      parameters:
+        - name: active
+          in: query
+          schema:
+            type: boolean
+          description: Omit to list every task (active and retired); set to filter to one or the other.
+      responses:
+        '200':
+          description: The dependant's care-plan tasks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CareTask'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /dependants/{dependantId}/care-tasks/{careTaskId}:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+      - $ref: '#/components/parameters/CareTaskId'
+    patch:
+      tags: [Dependants]
+      summary: Update or retire a care-plan task
+      description: "Supervisor-only. Retiring (`active: false`) keeps the task's history on any `visit_task_completions` rows that already reference it, but stops it appearing on future visits."
+      operationId: updateCareTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCareTaskRequest'
+      responses:
+        '200':
+          description: The updated task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTask'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /biometric-enrollments/upload-url:
     post:
       tags: [Biometric Enrollments]
@@ -469,6 +547,84 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/BiometricEnrollment'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/flagged:
+    get:
+      tags: [Biometric Enrollments]
+      summary: List enrollments flagged as a possible duplicate of a different subject (HEZ-85)
+      description: |
+        Supervisor-only. A row lands here when confirming it found this face already enrolled
+        under a *different* subject above the duplicate-detection threshold - not hard-rejected
+        (see `matchedSubjectType`/`matchedSubjectId`/`matchedSimilarity` on each row for the
+        context a supervisor needs to approve or reject it via the two endpoints below.
+      operationId: listFlaggedBiometricEnrollments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Flagged enrollments across every subject, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollmentPage'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/{id}/approve:
+    post:
+      tags: [Biometric Enrollments]
+      summary: Approve a flagged enrollment as legitimate (HEZ-85)
+      description: |
+        Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
+        until now, since it wasn't indexed while flagged) and promotes the row to `active`,
+        superseding any existing active row for the same subject/imageOrder.
+      operationId: approveBiometricEnrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The now-active enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /biometric-enrollments/{id}/reject:
+    post:
+      tags: [Biometric Enrollments]
+      summary: Reject a flagged enrollment as a genuine duplicate (HEZ-85)
+      description: |
+        Supervisor-only. Marks the row `deleted` - it was never indexed while flagged, so nothing
+        needs to be removed from the enrollment-uniqueness collection.
+      operationId: rejectBiometricEnrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The now-deleted enrollment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BiometricEnrollment'
+        '404':
+          $ref: '#/components/responses/NotFound'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -639,7 +795,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/GeofenceCheckinResult'
         '422':
-          description: Geofence check failed (out of range, insufficient accuracy, or mock location detected).
+          description: |
+            Geofence check failed. `failureReason` is one of `out_of_range`/`insufficient_accuracy`
+            (retriable - the caregiver can move closer or wait for a better fix) or
+            `mock_location_detected` (a hard block - the app should not offer a retry).
           content:
             application/problem+json:
               schema:
@@ -647,22 +806,55 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/challenge:
+  /visit-schedules/{visitScheduleId}/checkin/context:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     get:
       tags: [Check-in]
-      summary: Get a randomized liveness challenge for the caregiver
-      operationId: getCaregiverLivenessChallenge
-      security:
-        - bearerAuth: [sessionToken]
+      summary: Get the dependant display name and geofence for a visit, before check-in starts
+      description: |
+        View-only, pre-geofence - no `X-Checkin-Session-Token` is required (unlike every route past
+        the geofence step), since none exists yet at this point. Lets the caregiver app render the
+        geofence circle/marker and confirm the right dependant/address before attempting a GPS
+        read. Deliberately narrow: not the full dependant record (no `primaryConditionSummary`,
+        `county`/`constituency`/`ward`, etc.) - a caregiver needs enough to render the map and
+        confirm they're at the right home, nothing else. Same caregiver-only, own-visit,
+        still-'scheduled' rule as every other route in this router.
+      operationId: getCheckinContext
       responses:
         '200':
-          description: The challenge to perform on-camera.
+          description: Context for the check-in map screen.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessChallenge'
+                $ref: '#/components/schemas/CheckinContext'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/upload-url:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-in]
+      summary: Get a presigned URL to upload the caregiver's check-in photo
+      description: Called once, before POST .../caregiver-liveness. Uploads go to a separate, short-retention bucket from biometric-enrollments - see architecture.md's storage notes.
+      operationId: createCaregiverLivenessFrameUploadUrl
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
+      responses:
+        '201':
+          description: A presigned PUT URL, short-lived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUpload'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -671,14 +863,21 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the caregiver's captured liveness frames
+      summary: Submit the caregiver's check-in photo
       description: |
-        `DetectFaces` runs across the captured frame burst (pose/eye/mouth attribute checks,
-        frame-to-frame movement), then `CompareFaces` against the caregiver's enrolled reference
-        images. Writes a `verification_attempts` row (`attempt_type: caregiver_liveness`) and, on
-        success, updates `verification_events.caregiver_liveness_passed` /
-        `caregiver_match_confidence`.
+        A single photo, not a liveness/anti-spoofing check - the user explicitly decided to drop
+        multi-frame challenge-response liveness detection in favor of one photo, for caregiver
+        mobile app build simplicity (a deliberate, informed tradeoff - see architecture.md's "Key
+        design decisions"). `DetectFaces` confirms exactly one face is present, then `CompareFaces`
+        runs against the caregiver's enrolled reference images. Writes a `verification_attempts`
+        row (`attempt_type: caregiver_liveness`) and, on success, updates
+        `verification_events.caregiver_liveness_passed` / `caregiver_match_confidence`. The photo
+        is deleted from storage right after processing, pass or fail - it is never needed again
+        either way.
       operationId: submitCaregiverLiveness
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -687,7 +886,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Liveness result.
+          description: Result.
           content:
             application/json:
               schema:
@@ -695,21 +894,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/challenge:
+  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
-    get:
+    post:
       tags: [Check-in]
-      summary: Get a randomized liveness challenge for the dependant
-      description: Only reachable once the caregiver liveness step has passed, and within the configurable bounded co-presence time window.
-      operationId: getDependantLivenessChallenge
+      summary: Get a presigned URL to upload the dependant's check-in photo
+      description: Same flow as the caregiver step's upload-url endpoint.
+      operationId: createDependantLivenessFrameUploadUrl
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
       responses:
-        '200':
-          description: The challenge to perform on-camera.
+        '201':
+          description: A presigned PUT URL, short-lived.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessChallenge'
+                $ref: '#/components/schemas/PresignedUpload'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -718,9 +926,12 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the dependant's captured liveness frames
-      description: 'Same flow as the caregiver step. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both liveness steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
+      summary: Submit the dependant's check-in photo
+      description: 'Same flow as the caregiver step (see its own description for the single-photo-not-liveness reasoning). Only reachable once the caregiver step has passed, within the configurable bounded co-presence time window. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
       operationId: submitDependantLiveness
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -729,7 +940,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Liveness result. On pass, check-in is complete.
+          description: Result. On pass, check-in is complete.
           content:
             application/json:
               schema:
@@ -791,7 +1002,11 @@ paths:
     post:
       tags: [Visit Schedules]
       summary: Check out of a visit
-      description: Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to `completed`.
+      description: |
+        Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to
+        `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
+        dependant_care_tasks row has no matching visit_task_completions row for this visit -
+        "addressed" means any status was recorded, not necessarily `completed`.
       operationId: checkoutVisit
       responses:
         '200':
@@ -801,7 +1016,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/VisitSchedule'
         '409':
-          description: The visit hasn't been checked in yet, or is already completed/cancelled.
+          description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/tasks:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    get:
+      tags: [Visit Schedules]
+      summary: Get this visit's task checklist
+      description: |
+        Visit task checklist (docs/visit-task-checklist-plan.md). Caregiver-only, own visit,
+        `in_progress` only - the checklist is worked through during the visit, after check-in and
+        before checkout. Live-joined against dependant_care_tasks (active, for this visit's
+        dependant) - not a snapshot, so a care-plan edit made mid-visit is reflected immediately.
+      operationId: listVisitTasks
+      responses:
+        '200':
+          description: This visit's task checklist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VisitTask'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/tasks/{careTaskId}:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+      - $ref: '#/components/parameters/CareTaskId'
+    put:
+      tags: [Visit Schedules]
+      summary: Record (or correct) this visit's completion status for one task
+      description: Upserts - a second submission for the same task replaces the first, rather than appending. Rejects with 409 once the visit is no longer `in_progress` ("locked after checkout" - see the plan doc's section 2).
+      operationId: putVisitTaskCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutVisitTaskCompletionRequest'
+      responses:
+        '200':
+          description: The recorded completion.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [careTaskId, status, reason, notes, completedAt]
+                properties:
+                  careTaskId:
+                    type: string
+                    format: uuid
+                  status:
+                    $ref: '#/components/schemas/TaskCompletionStatus'
+                  reason:
+                    allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
+                    nullable: true
+                  notes:
+                    type: [string, 'null']
+                  completedAt:
+                    type: string
+                    format: date-time
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The visit is not `in_progress` (either not yet checked in, or already past checkout).
           content:
             application/problem+json:
               schema:
@@ -942,6 +1229,21 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: A Cognito-issued ID token (not the access token - the `custom:role` custom attribute this API's RBAC relies on is only present in the ID token by default, confirmed against AWS's Cognito documentation; the access token's default claim set does not include custom attributes without a Pre Token Generation Lambda trigger, which this project does not use). The `custom:role` claim drives RBAC.
+    checkinSessionToken:
+      type: apiKey
+      in: header
+      name: X-Checkin-Session-Token
+      description: |
+        The short-lived session token returned by `POST .../checkin/geofence`, required in
+        addition to (not instead of) the normal `bearerAuth` Cognito token on every remaining
+        check-in step (photo upload, submit - caregiver and dependant). Proves this specific
+        visit's geofence step was passed recently, not just that the caller is a valid caregiver in
+        general - defense in depth, confirmed with the user as the more robust of two designs over
+        a session-token-only approach (HEZ-34). A previous draft of this file used
+        `security: [{bearerAuth: [sessionToken]}]` on one endpoint only, an ambiguous OAuth2-style
+        scopes annotation that doesn't apply to an `http`/`bearer` scheme and was never a
+        considered design - superseded by this explicit second scheme, applied consistently to
+        every step past the geofence check.
 
   parameters:
     Cursor:
@@ -987,6 +1289,13 @@ components:
       schema:
         type: string
         format: uuid
+    CareTaskId:
+      name: careTaskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     Problem:
@@ -1027,6 +1336,9 @@ components:
         instance:
           type: string
           format: uri
+        failureReason:
+          type: string
+          description: Present on some error responses (e.g. GeofenceCheckinFailureReason on the geofence check's 422) so a client can branch deterministically instead of parsing `detail`'s prose.
 
     UserRole:
       type: string
@@ -1037,15 +1349,23 @@ components:
     DependantStatus:
       type: string
       enum: [active, deactivated]
-    DependantGender:
+    # Renamed from DependantGender (2026-09-22, HEZ-54) - caregivers now use the same enum, per
+    # backend/src/db/schema.ts's own person_gender rename.
+    PersonGender:
       type: string
       enum: [male, female]
+    CaregiverOccupation:
+      type: string
+      enum: [nurse, community_health_worker, caregiver]
+    IdType:
+      type: string
+      enum: [national_id, passport]
     SubjectType:
       type: string
       enum: [caregiver, dependant]
     BiometricEnrollmentStatus:
       type: string
-      enum: [active, superseded, deleted]
+      enum: [active, superseded, deleted, flagged]
     VisitStatus:
       type: string
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated]
@@ -1135,13 +1455,38 @@ components:
           format: uuid
         fullName:
           type: string
+        email:
+          type: [string, 'null']
+          format: email
         phoneNumber:
           type: [string, 'null']
+        idType:
+          oneOf:
+            - $ref: '#/components/schemas/IdType'
+            - type: 'null'
+        idNumber:
+          type: [string, 'null']
+        dob:
+          type: [string, 'null']
+          format: date
+        gender:
+          oneOf:
+            - $ref: '#/components/schemas/PersonGender'
+            - type: 'null'
+        occupation:
+          oneOf:
+            - $ref: '#/components/schemas/CaregiverOccupation'
+            - type: 'null'
         employeeNumber:
           type: [string, 'null']
+          description: >-
+            Auto-generated at registration ('CG-' plus a zero-padded sequence value, e.g.
+            CG-0001), never client-supplied - see CreateCaregiverRequest. Still editable later via
+            UpdateCaregiverRequest if a supervisor ever needs to correct one by hand.
         hireDate:
           type: [string, 'null']
           format: date
+          description: 'Auto-populated to the actual registration date, never client-supplied - see CreateCaregiverRequest.'
         active:
           type: boolean
         createdAt:
@@ -1152,26 +1497,52 @@ components:
           format: date-time
     CreateCaregiverRequest:
       type: object
-      required: [cognitoSub, phoneNumber, fullName]
+      description: >-
+        employeeNumber/hireDate are deliberately absent here (2026-09-22, HEZ-54) - both are
+        DB-generated at registration, not supervisor-entered. Creates a brand-new Cognito identity
+        itself (like AddFamilyMemberRequest's email path) - a caregiver never self-registers, so a
+        pre-existing Cognito account can never be assumed.
+      required: [fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
       properties:
-        cognitoSub:
-          type: string
-        phoneNumber:
-          type: string
         fullName:
           type: string
-        employeeNumber:
+        email:
           type: string
-        hireDate:
+          format: email
+        phoneNumber:
+          type: string
+        idType:
+          $ref: '#/components/schemas/IdType'
+        idNumber:
+          type: string
+        dob:
           type: string
           format: date
+        gender:
+          $ref: '#/components/schemas/PersonGender'
+        occupation:
+          $ref: '#/components/schemas/CaregiverOccupation'
     UpdateCaregiverRequest:
       type: object
       properties:
-        phoneNumber:
-          type: string
         fullName:
           type: string
+        email:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+        idType:
+          $ref: '#/components/schemas/IdType'
+        idNumber:
+          type: string
+        dob:
+          type: string
+          format: date
+        gender:
+          $ref: '#/components/schemas/PersonGender'
+        occupation:
+          $ref: '#/components/schemas/CaregiverOccupation'
         employeeNumber:
           type: string
         hireDate:
@@ -1215,9 +1586,19 @@ components:
           format: date
         gender:
           oneOf:
-            - $ref: '#/components/schemas/DependantGender'
+            - $ref: '#/components/schemas/PersonGender'
             - type: 'null'
         homeAddressText:
+          type: [string, 'null']
+        primaryConditionSummary:
+          description: Free-text clinical/care context for caregivers/supervisors - not a structured diagnosis field.
+          type: [string, 'null']
+        county:
+          description: Resolved client-side (admin web app) via a point-in-polygon lookup against IEBC ward boundary GeoJSON as the geofence pin is placed. Null for dependants registered before this field existed.
+          type: [string, 'null']
+        constituency:
+          type: [string, 'null']
+        ward:
           type: [string, 'null']
         geofenceLat:
           type: number
@@ -1243,7 +1624,18 @@ components:
           format: date-time
     CreateDependantRequest:
       type: object
-      required: [fullName, dob, geofenceLat, geofenceLng, geofenceRadiusMeters, primaryFamilyMember]
+      required:
+        [
+          fullName,
+          dob,
+          county,
+          constituency,
+          ward,
+          geofenceLat,
+          geofenceLng,
+          geofenceRadiusMeters,
+          primaryFamilyMember,
+        ]
       properties:
         fullName:
           type: string
@@ -1251,8 +1643,17 @@ components:
           type: string
           format: date
         gender:
-          $ref: '#/components/schemas/DependantGender'
+          $ref: '#/components/schemas/PersonGender'
         homeAddressText:
+          type: string
+        primaryConditionSummary:
+          type: string
+        county:
+          description: Required for every new registration, unlike homeAddressText's own optional free-text treatment - resolved client-side as the geofence pin is placed.
+          type: string
+        constituency:
+          type: string
+        ward:
           type: string
         geofenceLat:
           type: number
@@ -1274,8 +1675,16 @@ components:
         fullName:
           type: string
         gender:
-          $ref: '#/components/schemas/DependantGender'
+          $ref: '#/components/schemas/PersonGender'
         homeAddressText:
+          type: string
+        primaryConditionSummary:
+          type: string
+        county:
+          type: string
+        constituency:
+          type: string
+        ward:
           type: string
         geofenceLat:
           type: number
@@ -1343,8 +1752,19 @@ components:
           description: 'Creates a brand-new Cognito identity and sends it a real invitation email. Mutually exclusive with cognitoSub.'
         phoneNumber:
           type: string
+          description: >-
+            Required in E.164 format (e.g. +254712345678) only when email is also set - that's the
+            only path that sends this value to Cognito's AdminCreateUser, which rejects any other
+            format. Not validated against this format when cognitoSub is set instead (linking an
+            existing identity never uses this field).
         fullName:
           type: string
+        idType:
+          allOf: [{ $ref: '#/components/schemas/IdType' }]
+          description: 'Required together with idNumber when registering a brand-new user via email.'
+        idNumber:
+          type: string
+          description: 'Required together with idType when registering a brand-new user via email.'
         relationship:
           type: string
         isPrimaryContact:
@@ -1358,9 +1778,114 @@ components:
         isPrimaryContact:
           type: boolean
 
+    TaskCompletionStatus:
+      type: string
+      enum: [completed, not_completed, not_applicable]
+    TaskSkipReason:
+      type: string
+      enum: [client_declined, client_unavailable, equipment_unavailable, other]
+    CareTask:
+      type: object
+      description: A care-plan task (docs/visit-task-checklist-plan.md), authored by a supervisor for one dependant.
+      required: [id, dependantId, title, required, active, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        dependantId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+          description: Free text, not a fixed ADL/IADL taxonomy - a display grouping label only.
+        required:
+          type: boolean
+          description: A required task with no visit_task_completions row blocks checkout for that visit.
+        active:
+          type: boolean
+          description: A retired (false) task keeps its history but stops appearing on future visits.
+        createdBy:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateCareTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        required:
+          type: boolean
+          default: true
+    UpdateCareTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        required:
+          type: boolean
+        active:
+          type: boolean
+    VisitTask:
+      type: object
+      description: A care-plan task live-joined against this visit's own completion, if any has been recorded yet.
+      required: [careTaskId, title, required, status, reason, notes, completedAt]
+      properties:
+        careTaskId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+        required:
+          type: boolean
+        status:
+          allOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }]
+          nullable: true
+          description: 'Null: not yet addressed this visit.'
+        reason:
+          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
+          nullable: true
+        notes:
+          type: [string, 'null']
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+    PutVisitTaskCompletionRequest:
+      type: object
+      description: "`reason` is required when `status` is `not_completed`, and must be omitted otherwise (matches `visit_task_completions`'s own CHECK constraint)."
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/TaskCompletionStatus'
+        reason:
+          $ref: '#/components/schemas/TaskSkipReason'
+        notes:
+          type: string
+
     BiometricEnrollment:
       type: object
-      required: [id, subjectType, imageOrder, status, enrolledBy, enrolledAt, updatedAt]
+      required: [id, subjectType, imageOrder, imageUrl, status, enrolledBy, enrolledAt, updatedAt]
       properties:
         id:
           type: string
@@ -1377,11 +1902,29 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+        imageUrl:
+          type: string
+          format: uri
+          description: A time-limited presigned S3 GET URL, freshly generated on every response - never a permanent link.
         qualityScore:
           type: [number, 'null']
           format: float
         status:
           $ref: '#/components/schemas/BiometricEnrollmentStatus'
+        matchedSubjectType:
+          description: |
+            Set only when status is (or was) `flagged` (HEZ-85): the *other* subject this image's
+            face matched above the duplicate-detection threshold at confirm time.
+          oneOf:
+            - $ref: '#/components/schemas/SubjectType'
+            - type: 'null'
+        matchedSubjectId:
+          type: [string, 'null']
+          format: uuid
+        matchedSimilarity:
+          description: The Rekognition similarity score (0-100) for the match above.
+          type: [number, 'null']
+          format: float
         enrolledBy:
           type: string
           format: uuid
@@ -1435,6 +1978,16 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+    BiometricEnrollmentPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BiometricEnrollment'
+        nextCursor:
+          type: [string, 'null']
 
     VisitSchedule:
       type: object
@@ -1443,6 +1996,8 @@ components:
           id,
           caregiverId,
           dependantId,
+          caregiverDisplayName,
+          dependantDisplayName,
           scheduledStart,
           scheduledEnd,
           status,
@@ -1460,6 +2015,11 @@ components:
         dependantId:
           type: string
           format: uuid
+        caregiverDisplayName:
+          type: string
+          description: Added for HEZ-66 - every consumer of this endpoint needed a display name per visit and had no other way to get one (a caregiver in particular has no access to GET /dependants at all).
+        dependantDisplayName:
+          type: string
         scheduledStart:
           type: string
           format: date-time
@@ -1575,7 +2135,10 @@ components:
       required: [event, attempts]
       properties:
         event:
-          $ref: '#/components/schemas/VerificationEvent'
+          description: Null when the visit has never reached the geofence step (no verification_events row exists yet).
+          oneOf:
+            - $ref: '#/components/schemas/VerificationEvent'
+            - type: 'null'
         attempts:
           type: array
           items:
@@ -1610,39 +2173,45 @@ components:
         expiresAt:
           type: string
           format: date-time
-
-    LivenessChallenge:
+    CheckinContext:
       type: object
-      required: [challengeId, instructions, expiresAt]
+      required:
+        [
+          dependantDisplayName,
+          dependantHomeAddressText,
+          geofenceLat,
+          geofenceLng,
+          geofenceRadiusMeters,
+        ]
       properties:
-        challengeId:
+        dependantDisplayName:
           type: string
-          format: uuid
-        instructions:
+        dependantHomeAddressText:
           type: string
-          example: Turn your head left, then right.
-        expiresAt:
+          nullable: true
+        geofenceLat:
+          type: number
+          format: double
+        geofenceLng:
+          type: number
+          format: double
+        geofenceRadiusMeters:
+          type: integer
+
+    LivenessFrameUploadUrlRequest:
+      type: object
+      required: [contentType]
+      properties:
+        contentType:
           type: string
-          format: date-time
+          enum: [image/jpeg, image/png]
     LivenessSubmission:
       type: object
-      required: [challengeId, frames]
+      required: [s3Key]
+      description: A single check-in photo, not a multi-frame burst - see submitCaregiverLiveness's own description for why.
       properties:
-        challengeId:
+        s3Key:
           type: string
-          format: uuid
-        frames:
-          type: array
-          minItems: 1
-          items:
-            type: object
-            required: [s3Key, capturedAt]
-            properties:
-              s3Key:
-                type: string
-              capturedAt:
-                type: string
-                format: date-time
     LivenessResult:
       type: object
       required: [passed]

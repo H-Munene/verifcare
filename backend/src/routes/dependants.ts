@@ -49,11 +49,14 @@ import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import {
+  isCognitoInvalidParameterError,
   isCognitoUserAlreadyExistsError,
   isCognitoUserNotFoundError,
   type CognitoAdmin,
 } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
+import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
@@ -65,6 +68,9 @@ import { parseOrSendProblem } from '../validation.js';
 export interface DependantsRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
+  // Optional so existing callers/tests that don't touch biometric enrollment at all (most of them)
+  // don't need to construct one - offboarding cleanup (HEZ-85) is simply skipped without it.
+  faceCollection?: BiometricFaceCollection;
 }
 
 interface DependantResponse {
@@ -73,6 +79,10 @@ interface DependantResponse {
   dob: string;
   gender: 'male' | 'female' | null;
   homeAddressText: string | null;
+  primaryConditionSummary: string | null;
+  county: string | null;
+  constituency: string | null;
+  ward: string | null;
   geofenceLat: number;
   geofenceLng: number;
   geofenceRadiusMeters: number;
@@ -90,12 +100,44 @@ function toDependantResponse(row: typeof schema.dependants.$inferSelect): Depend
     dob: row.dob,
     gender: row.gender,
     homeAddressText: row.homeAddressText,
+    primaryConditionSummary: row.primaryConditionSummary,
+    county: row.county,
+    constituency: row.constituency,
+    ward: row.ward,
     geofenceLat: row.geofenceLat,
     geofenceLng: row.geofenceLng,
     geofenceRadiusMeters: row.geofenceRadiusMeters,
     cognitiveMonitoringEnabled: row.cognitiveMonitoringEnabled,
     status: row.status,
     registeredBy: row.registeredBy,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+interface CareTaskResponse {
+  id: string;
+  dependantId: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  required: boolean;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toCareTaskResponse(row: typeof schema.dependantCareTasks.$inferSelect): CareTaskResponse {
+  return {
+    id: row.id,
+    dependantId: row.dependantId,
+    title: row.title,
+    description: row.description,
+    category: row.category,
+    required: row.required,
+    active: row.active,
+    createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -133,6 +175,10 @@ function dependantColumns() {
     dob: schema.dependants.dob,
     gender: schema.dependants.gender,
     homeAddressText: schema.dependants.homeAddressText,
+    primaryConditionSummary: schema.dependants.primaryConditionSummary,
+    county: schema.dependants.county,
+    constituency: schema.dependants.constituency,
+    ward: schema.dependants.ward,
     geofenceLat: schema.dependants.geofenceLat,
     geofenceLng: schema.dependants.geofenceLng,
     geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
@@ -146,6 +192,17 @@ function dependantColumns() {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+// E.164 (a leading +, then 1-15 digits, first digit non-zero) - Cognito's own `phone_number`
+// attribute requires exactly this format and rejects anything else with an opaque
+// InvalidParameterException. When email is set (the "new user" path below actually calls
+// AdminCreateUser with this value), a locally-formatted number like "0712345678" used to reach
+// Cognito unvalidated and surface as a raw 500 - found via a real "Internal Server Error" report,
+// not assumed. Validating here gives a clean, immediate 400 on the exact field, instead of waiting
+// for Cognito's own rejection (still classified defensively in resolveFamilyMemberIdentity's catch
+// block below, in case some other Cognito-side rejection this regex doesn't anticipate slips
+// through).
+const E164_PHONE_NUMBER = /^\+[1-9]\d{6,14}$/;
+
 // Exactly one of cognitoSub/email identifies the family member - cognitoSub links an identity
 // that already exists in Cognito (resolved by the frontend's search-by-phone/email against our
 // own users table, or supplied directly by any other caller that already knows it); email creates
@@ -158,13 +215,37 @@ const addFamilyMemberRequestSchema = z
     email: z.string().email().optional(),
     phoneNumber: z.string().min(1),
     fullName: z.string().min(1),
+    idType: z.enum(['national_id', 'passport']).optional(),
+    idNumber: z.string().min(1).optional(),
     relationship: z.string().min(1).optional(),
     isPrimaryContact: z.boolean().default(false),
+  })
+  // Only enforced when email is set - that's the only path that actually calls Cognito's
+  // AdminCreateUser with this value (see resolveFamilyMemberIdentity below); the cognitoSub path
+  // (linking an existing identity) never uses body.phoneNumber at all, and the frontend resends
+  // whatever that existing user's own stored phone number happens to be (possibly empty) - a field-
+  // level regex here would wrongly reject linking an existing user over a value that's never used.
+  .refine((data) => !data.email || E164_PHONE_NUMBER.test(data.phoneNumber), {
+    message: 'phoneNumber must be in E.164 format, e.g. +254712345678.',
+    path: ['phoneNumber'],
   })
   .refine((data) => Boolean(data.cognitoSub) !== Boolean(data.email), {
     message:
       'Provide exactly one of cognitoSub (link an existing identity) or email (create a new one).',
     path: ['cognitoSub'],
+  })
+  .refine((data) => Boolean(data.idType) === Boolean(data.idNumber), {
+    message: 'idType and idNumber must be provided together.',
+    path: ['idType'],
+  })
+  // Only enforced on the email path (registering a brand-new user, the admin web app's "New
+  // user" mode) - the cognitoSub path can also create a brand-new `users` row (see
+  // resolveFamilyMemberIdentity's own comment) for a Cognito identity that was created outside
+  // this admin flow entirely, where the admin app never collects an ID document at all. Requiring
+  // it unconditionally would reject that legitimate, already-exercised path.
+  .refine((data) => !data.email || Boolean(data.idType), {
+    message: 'idType and idNumber are required when registering a brand-new user by email.',
+    path: ['idType'],
   });
 type AddFamilyMemberBody = z.infer<typeof addFamilyMemberRequestSchema>;
 
@@ -173,6 +254,13 @@ const createDependantRequestSchema = z.object({
   dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
   gender: z.enum(['male', 'female']).optional(),
   homeAddressText: z.string().min(1).optional(),
+  primaryConditionSummary: z.string().min(1).optional(),
+  // Required for every new registration (confirmed with the user, not assumed) - resolved
+  // client-side in the admin web app as the geofence pin is placed, unlike homeAddressText's own
+  // optional free-text treatment. Nullable at the DB level regardless (see schema.ts's comment).
+  county: z.string().min(1),
+  constituency: z.string().min(1),
+  ward: z.string().min(1),
   geofenceLat: z.number(),
   geofenceLng: z.number(),
   geofenceRadiusMeters: z.number().int().min(1),
@@ -184,6 +272,10 @@ const updateDependantRequestSchema = z.object({
   fullName: z.string().min(1).optional(),
   gender: z.enum(['male', 'female']).optional(),
   homeAddressText: z.string().min(1).optional(),
+  primaryConditionSummary: z.string().min(1).optional(),
+  county: z.string().min(1).optional(),
+  constituency: z.string().min(1).optional(),
+  ward: z.string().min(1).optional(),
   geofenceLat: z.number().optional(),
   geofenceLng: z.number().optional(),
   geofenceRadiusMeters: z.number().int().min(1).optional(),
@@ -194,6 +286,30 @@ const updateDependantRequestSchema = z.object({
 const updateFamilyMemberRequestSchema = z.object({
   relationship: z.string().min(1).optional(),
   isPrimaryContact: z.boolean().optional(),
+});
+
+const careTaskIdParamSchema = z.string().uuid();
+
+const createCareTaskRequestSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+});
+
+const updateCareTaskRequestSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+  active: z.boolean().optional(),
+});
+
+const listCareTasksQuerySchema = z.object({
+  active: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 
 const listDependantsQuerySchema = z.object({
@@ -223,7 +339,9 @@ function getDb(res: Response): Db | undefined {
 // Looks up whether callerSub is linked to dependantId, returning both the caller's own users row
 // (needed by callers for addedBy/registeredBy-style columns) and the link row itself (needed to
 // check isPrimaryContact). Returns undefined if the caller has no users row, or no link exists.
-async function findFamilyMemberLink(
+// Exported for routes/biometricEnrollments.ts (HEZ-31), which needs the exact same
+// family_member-to-dependant ownership check, not a re-derived copy of it.
+export async function findFamilyMemberLink(
   db: Db,
   dependantId: string,
   callerSub: string,
@@ -370,13 +488,23 @@ async function resolveFamilyMemberIdentity(
       });
       return undefined;
     }
+    if (isCognitoInvalidParameterError(err)) {
+      sendProblem(res, {
+        type: 'about:blank',
+        title: 'Bad Request',
+        status: 400,
+        detail:
+          (err as { message?: string }).message ?? 'Cognito rejected one of the submitted fields.',
+      });
+      return undefined;
+    }
     throw err;
   }
 }
 
 export function createDependantsRouter(dependencies: DependantsRouterDependencies): Router {
   const router = Router();
-  const { cognitoAdmin, requireAuth } = dependencies;
+  const { cognitoAdmin, requireAuth, faceCollection } = dependencies;
   // caregiver is forbidden on every route in this file (see the file header comment); the one
   // route that's narrower still (supervisor-only) adds its own requireRole afterward.
   router.use(requireAuth, requireRole('supervisor', 'family_member'));
@@ -432,6 +560,10 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             dob: body.dob,
             gender: body.gender,
             homeAddressText: body.homeAddressText,
+            primaryConditionSummary: body.primaryConditionSummary,
+            county: body.county,
+            constituency: body.constituency,
+            ward: body.ward,
             geofenceLat: body.geofenceLat,
             geofenceLng: body.geofenceLng,
             geofenceRadiusMeters: body.geofenceRadiusMeters,
@@ -455,6 +587,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
+              idType: resolved.body.idType,
+              idNumber: resolved.body.idNumber,
               role: 'family_member',
             })
             .returning();
@@ -659,6 +793,13 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!updated) {
         throw new Error('Update to dependants returned no row.');
       }
+
+      // Best-effort, after the update above has already committed - see
+      // db/biometricOffboarding.ts's header comment for why this isn't inside a transaction.
+      if (body.status === 'deactivated' && faceCollection) {
+        await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
+      }
+
       res.status(200).json(toDependantResponse(updated));
     } catch (err) {
       next(err);
@@ -734,6 +875,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
+              idType: resolved.body.idType,
+              idNumber: resolved.body.idNumber,
               role: 'family_member',
             })
             .returning();
@@ -897,6 +1040,161 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           throw new Error('Update to dependant_family_members returned no row.');
         }
         res.status(200).json(toFamilyMemberResponse(updated));
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Visit task checklist (docs/visit-task-checklist-plan.md) - the care plan itself. Authoring
+  // (POST/PATCH) is supervisor-only, matching the user's own "these will be defined by the
+  // supervisor" confirmation; GET reuses this router's own broader gate (supervisor,
+  // family_member) plus the same ownership check GET /:dependantId already uses, so a family
+  // member can see the care plan for a dependant they're linked to, not author it.
+
+  router.post('/:dependantId/care-tasks', requireRole('supervisor'), async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const body = parseOrSendProblem(createCareTaskRequestSchema, req.body, res);
+    if (!body) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [dependant] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!dependant) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+      if (!callerRow) {
+        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
+      }
+
+      const [row] = await db
+        .insert(schema.dependantCareTasks)
+        .values({
+          id: uuidv7(),
+          dependantId,
+          title: body.title,
+          description: body.description,
+          category: body.category,
+          required: body.required,
+          createdBy: callerRow.id,
+        })
+        .returning();
+      if (!row) {
+        throw new Error('Insert into dependant_care_tasks returned no row.');
+      }
+      res.status(201).json(toCareTaskResponse(row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:dependantId/care-tasks', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const query = parseOrSendProblem(listCareTasksQuerySchema, req.query, res);
+    if (!query) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [dependant] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!dependant) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (caller.role !== 'supervisor') {
+        const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+
+      const conditions = [eq(schema.dependantCareTasks.dependantId, dependantId)];
+      if (query.active !== undefined) {
+        conditions.push(eq(schema.dependantCareTasks.active, query.active));
+      }
+      const rows = await db
+        .select()
+        .from(schema.dependantCareTasks)
+        .where(and(...conditions))
+        .orderBy(asc(schema.dependantCareTasks.createdAt));
+      res.status(200).json(rows.map(toCareTaskResponse));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.patch(
+    '/:dependantId/care-tasks/:careTaskId',
+    requireRole('supervisor'),
+    async (req, res, next) => {
+      const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+      if (!dependantId) {
+        return;
+      }
+      const careTaskId = parseOrSendProblem(careTaskIdParamSchema, req.params.careTaskId, res);
+      if (!careTaskId) {
+        return;
+      }
+      const body = parseOrSendProblem(updateCareTaskRequestSchema, req.body, res);
+      if (!body) {
+        return;
+      }
+      const db = getDb(res);
+      if (!db) {
+        return;
+      }
+
+      try {
+        const [row] = await db
+          .update(schema.dependantCareTasks)
+          .set(body)
+          .where(
+            and(
+              eq(schema.dependantCareTasks.id, careTaskId),
+              eq(schema.dependantCareTasks.dependantId, dependantId),
+            ),
+          )
+          .returning();
+        if (!row) {
+          sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+          return;
+        }
+        res.status(200).json(toCareTaskResponse(row));
       } catch (err) {
         next(err);
       }

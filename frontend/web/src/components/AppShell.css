@@ -1,6 +1,9 @@
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  /* Fixed, not min-height: the shell itself never grows taller than the viewport or scrolls - each
+     of its two children (sidebar, main) manages its own scrolling independently below. */
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-shell__sidebar {
@@ -11,6 +14,9 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+  /* Stays pinned in place while .app-shell__content scrolls - only scrolls its own content if the
+     nav list itself ever grows tall enough to need it. */
+  overflow-y: auto;
 }
 
 .app-shell__brand {
@@ -40,6 +46,10 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* Without this, a flex column's child can never shrink below its own content's intrinsic
+     height, which silently defeats .app-shell__content's own overflow-y below - the well-known
+     "flexbox child won't scroll" gotcha. */
+  min-height: 0;
 }
 
 .app-shell__topbar {
@@ -47,10 +57,30 @@
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  /* Breadcrumbs (far left) and the user/sign-out group (far right) live here now, not inside
+     .app-shell__content, per the user's explicit "breadcrumbs shouldn't scroll with main content"
+     request - this bar is already outside the scrolling .app-shell__content region. */
+  justify-content: space-between;
   gap: 16px;
   padding: 0 24px;
   border-bottom: 1px solid var(--color-border-structural);
+}
+
+.app-shell__topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.app-shell__topbar-left .breadcrumbs {
+  margin-bottom: 0;
+}
+
+.app-shell__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
 }
 
 .app-shell__user {
@@ -75,6 +105,10 @@
   flex: 1;
   padding: 24px;
   max-width: 1200px;
+  /* The one actual scroll region for page content - the sidebar and topbar stay fixed above/
+     beside it, per the user's explicit "sidebar should not scroll with the rest of main content"
+     request. */
+  overflow-y: auto;
 }
 
 @media (max-width: 960px) {
