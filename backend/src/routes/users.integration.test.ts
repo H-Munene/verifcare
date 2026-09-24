@@ -298,6 +298,37 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
     });
   });
 
+  describe('GET /users/me', () => {
+    it("returns the caller's own row, and 404s when the caller has none yet", async () => {
+      await request(app)
+        .post('/users')
+        .set('x-test-auth', testAuthHeader({ sub: 'me-sub', role: undefined, email: undefined }))
+        .send({
+          cognitoSub: 'me-sub',
+          fullName: 'Me Myself',
+          phoneNumber: '+254700000022',
+          role: 'family_member',
+        });
+
+      const own = await request(app)
+        .get('/users/me')
+        .set(
+          'x-test-auth',
+          testAuthHeader({ sub: 'me-sub', role: 'family_member', email: undefined }),
+        );
+      expect(own.status).toBe(200);
+      expect(userBody(own)).toMatchObject({ fullName: 'Me Myself', role: 'family_member' });
+
+      const missing = await request(app)
+        .get('/users/me')
+        .set(
+          'x-test-auth',
+          testAuthHeader({ sub: 'no-row-sub', role: 'family_member', email: undefined }),
+        );
+      expect(missing.status).toBe(404);
+    });
+  });
+
   describe('GET /users/:userId', () => {
     it('lets a supervisor view any user, and 404s for a nonexistent id', async () => {
       const created = await request(app)

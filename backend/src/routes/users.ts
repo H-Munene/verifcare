@@ -24,6 +24,7 @@ import { z } from 'zod';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import type { UserRole } from '../auth/verifier.js';
+import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
@@ -257,6 +258,34 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
       res.status(200).json({ items: items.map(toUserResponse), nextCursor });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /users/me: the caller's own row. Clients only know their Cognito sub, but other responses
+  // refer to users by internal id (e.g. a dependant's family-member links), so without this a
+  // mobile app couldn't tell which link is the caller's own - needed to show "You" and to show
+  // the Edit action only to the primary contact. Registered before /:userId so "me" never
+  // reaches that route's uuid validation.
+  router.get('/me', requireAuth, async (req, res, next) => {
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const row = await getUserByCognitoSub(db, caller.sub);
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      res.status(200).json(toUserResponse(row));
     } catch (err) {
       next(err);
     }

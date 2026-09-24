@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'api/api_client.dart';
+import 'api/biometric_enrollments_api.dart';
 import 'api/dependants_api.dart';
 import 'api/users_api.dart';
+import 'api/visit_schedules_api.dart';
 import 'auth/cognito_auth_service.dart';
 import 'auth/registration.dart';
 import 'screens/dependant_choice_screen.dart';
@@ -19,6 +21,8 @@ void main() {
     authService: authService,
     usersApi: UsersApi(apiClient),
     dependantsApi: DependantsApi(apiClient),
+    visitSchedulesApi: VisitSchedulesApi(apiClient),
+    enrollmentsApi: BiometricEnrollmentsApi(apiClient),
   ));
 }
 
@@ -26,12 +30,16 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   final CognitoAuthService authService;
   final UsersApi usersApi;
   final DependantsApi dependantsApi;
+  final VisitSchedulesApi visitSchedulesApi;
+  final BiometricEnrollmentsApi enrollmentsApi;
 
   const MzaziCareFamilyMemberApp({
     super.key,
     required this.authService,
     required this.usersApi,
     required this.dependantsApi,
+    required this.visitSchedulesApi,
+    required this.enrollmentsApi,
   });
 
   @override
@@ -43,6 +51,8 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
         authService: authService,
         usersApi: usersApi,
         dependantsApi: dependantsApi,
+        visitSchedulesApi: visitSchedulesApi,
+        enrollmentsApi: enrollmentsApi,
       ),
     );
   }
@@ -57,11 +67,15 @@ class _RootScreen extends StatefulWidget {
   final CognitoAuthService authService;
   final UsersApi usersApi;
   final DependantsApi dependantsApi;
+  final VisitSchedulesApi visitSchedulesApi;
+  final BiometricEnrollmentsApi enrollmentsApi;
 
   const _RootScreen({
     required this.authService,
     required this.usersApi,
     required this.dependantsApi,
+    required this.visitSchedulesApi,
+    required this.enrollmentsApi,
   });
 
   @override
@@ -108,6 +122,9 @@ class _RootScreenState extends State<_RootScreen> {
         builder: (_) => HomeScreen(
           authService: widget.authService,
           dependantsApi: widget.dependantsApi,
+          visitSchedulesApi: widget.visitSchedulesApi,
+          enrollmentsApi: widget.enrollmentsApi,
+          usersApi: widget.usersApi,
           identity: identity,
           onSignedOut: () => setState(() => _identity = null),
         ),
@@ -157,6 +174,9 @@ class _RootScreenState extends State<_RootScreen> {
       return HomeScreen(
         authService: widget.authService,
         dependantsApi: widget.dependantsApi,
+        visitSchedulesApi: widget.visitSchedulesApi,
+        enrollmentsApi: widget.enrollmentsApi,
+        usersApi: widget.usersApi,
         identity: identity,
         onSignedOut: () => setState(() => _identity = null),
       );

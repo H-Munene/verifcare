@@ -2,8 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:family_member/api/api_client.dart';
+import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/users_api.dart';
+import 'package:family_member/api/visit_schedules_api.dart';
 import 'package:family_member/auth/cognito_auth_service.dart';
 import 'package:family_member/main.dart';
 
@@ -20,6 +22,8 @@ void main() {
       authService: authService,
       usersApi: UsersApi(apiClient),
       dependantsApi: DependantsApi(apiClient),
+      visitSchedulesApi: VisitSchedulesApi(apiClient),
+      enrollmentsApi: BiometricEnrollmentsApi(apiClient),
     ));
     await tester.pumpAndSettle();
 

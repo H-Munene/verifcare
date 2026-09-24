@@ -7,6 +7,11 @@ class UsersApi {
   final ApiClient _client;
   UsersApi(this._client);
 
+  /// The caller's own internal user id (GET /users/me) - other responses (e.g. family-member
+  /// links) refer to users by this id, not by Cognito sub.
+  Future<String> getMyUserId() async =>
+      (await _client.get('/users/me'))['id'] as String;
+
   Future<void> registerSelf({
     required String cognitoSub,
     required String email,

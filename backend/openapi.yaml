@@ -119,6 +119,28 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get the caller's own user
+      description: |
+        The caller's own `users` row, found by their token's Cognito sub. Clients only know their
+        sub, while other responses refer to users by internal id (e.g. a dependant's
+        family-member links), so this is how a client recognizes its own entries. 404 if the
+        caller hasn't completed registration (`POST /users`) yet.
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: The caller's user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /users/{userId}:
     parameters:
       - $ref: '#/components/parameters/UserId'
