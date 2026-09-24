@@ -65,14 +65,14 @@ export function createMissedVisitSweep(
 
   database.connections.allowDefaultPortFrom(missedVisitSweepFunction);
 
-  // Every 6 hours, not hourly - confirmed with the user 2026-09-13. This
-  // changes the working assumption baked into the already-confirmed
-  // Secrets Manager (800 API calls/month) and Lambda (720 invocations/
-  // month) cost figures in project-state.md (hourly assumed ~720
-  // invocations/month; every 6 hours is ~120/month) - flagged there as
-  // needing a re-check, not recalculated here.
+  // Every 15 minutes (user decision 2026-09-24, replacing the earlier
+  // every-6-hours choice): the caregiver app's calendar turns a day red as
+  // soon as a visit is marked missed, and a 6-hour lag made that signal
+  // useless on the day. ~2,880 invocations/month stays inside the Lambda
+  // free tier; worst case (a cold start per run) is ~2,880 Secrets Manager
+  // GetSecretValue calls/month, about $0.015 - flagged in project-state.md.
   new events.Rule(stack, "MissedVisitSweepSchedule", {
-    schedule: events.Schedule.rate(cdk.Duration.hours(6)),
+    schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
     targets: [new eventsTargets.LambdaFunction(missedVisitSweepFunction)],
   });
 
