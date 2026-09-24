@@ -39,12 +39,9 @@ export function createMissedVisitSweep(
     topicName: "mzazi-care-alerts",
   });
 
-  // Stub only (HEZ-23) - see backend/src/missedVisitSweep.ts for why the
-  // real query/SNS-publish logic is deliberately deferred, not built here.
-  // Still VPC-attached to eu-west-1c and given the same environment
-  // variables api has, even though the stub doesn't use them yet - matches
-  // this project's consistent pattern of wiring networking/environment
-  // ahead of the code that will need it.
+  // Marks overdue scheduled/in_progress visits as missed (see
+  // backend/src/missedVisitSweep.ts). VPC-attached to eu-west-1c, same as api,
+  // since it queries RDS directly.
   const missedVisitSweepFunction = new NodejsFunction(stack, "MissedVisitSweepFunction", {
     entry: path.join(__dirname, "../../backend/src/missedVisitSweep.ts"),
     projectRoot: path.join(__dirname, "../../backend"),
@@ -52,6 +49,10 @@ export function createMissedVisitSweep(
     handler: "handler",
     runtime: lambda.Runtime.NODEJS_22_X,
     architecture: lambda.Architecture.ARM_64,
+    // Not the 3s default: a cold start fetches the DB secret and opens a TLS
+    // connection to RDS before the query runs, which can exceed 3s - the same
+    // reason migrationRunner.ts raises its own timeout.
+    timeout: cdk.Duration.seconds(30),
     vpc,
     vpcSubnets: {
       subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
@@ -64,6 +65,10 @@ export function createMissedVisitSweep(
   });
 
   database.connections.allowDefaultPortFrom(missedVisitSweepFunction);
+  // The stub never read the secret, so this grant was never added - once the
+  // real sweep logic shipped, every run failed with AccessDenied on
+  // GetSecretValue before reaching the database (found 2026-09-24).
+  databaseSecret.grantRead(missedVisitSweepFunction);
 
   // Every 15 minutes (user decision 2026-09-24, replacing the earlier
   // every-6-hours choice): the caregiver app's calendar turns a day red as
