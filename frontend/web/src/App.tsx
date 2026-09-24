@@ -10,7 +10,8 @@ import { FlaggedEnrollmentsPage } from './pages/FlaggedEnrollmentsPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterCaregiverPage } from './pages/RegisterCaregiverPage';
 import { RegisterDependantPage } from './pages/RegisterDependantPage';
-import { SchedulingPage } from './pages/SchedulingPage';
+import { VisitDetailPage } from './pages/VisitDetailPage';
+import { VisitsPage } from './pages/VisitsPage';
 
 export function App() {
   return (
@@ -32,7 +33,8 @@ export function App() {
                 <Route path="/caregivers/new" element={<RegisterCaregiverPage />} />
                 <Route path="/caregivers/:caregiverId" element={<CaregiverDetailPage />} />
                 <Route path="/caregivers/:caregiverId/edit" element={<RegisterCaregiverPage />} />
-                <Route path="/scheduling" element={<SchedulingPage />} />
+                <Route path="/visits" element={<VisitsPage />} />
+                <Route path="/visits/:visitId" element={<VisitDetailPage />} />
                 <Route path="/flagged-enrollments" element={<FlaggedEnrollmentsPage />} />
               </Routes>
             </AppShell>

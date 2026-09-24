@@ -57,6 +57,7 @@ interface BiometricEnrollmentResponse {
   caregiverId: string | null;
   dependantId: string | null;
   imageOrder: number;
+  imageUrl: string;
   qualityScore: number | null;
   status: BiometricEnrollmentStatus;
   matchedSubjectType: 'caregiver' | 'dependant' | null;
@@ -67,15 +68,20 @@ interface BiometricEnrollmentResponse {
   updatedAt: string;
 }
 
-function toResponse(
+// Async, not a plain mapper, since imageUrl is a freshly-signed S3 GET URL (storage.createViewUrl)
+// generated per request - the row itself never exposes its raw s3Key to a client (see
+// biometricStorage.ts's own comment on createViewUrl for why).
+async function toResponse(
   row: typeof schema.biometricEnrollments.$inferSelect,
-): BiometricEnrollmentResponse {
+  storage: BiometricStorage,
+): Promise<BiometricEnrollmentResponse> {
   return {
     id: row.id,
     subjectType: row.subjectType,
     caregiverId: row.caregiverId,
     dependantId: row.dependantId,
     imageOrder: row.imageOrder,
+    imageUrl: await storage.createViewUrl(row.s3Key),
     qualityScore: row.qualityScore,
     status: row.status as BiometricEnrollmentStatus,
     matchedSubjectType: row.matchedSubjectType,
@@ -359,7 +365,7 @@ export function createBiometricEnrollmentsRouter(
         });
       }
 
-      res.status(201).json(toResponse(row));
+      res.status(201).json(await toResponse(row, storage));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -415,7 +421,7 @@ export function createBiometricEnrollmentsRouter(
           sql`${schema.biometricEnrollments.qualityScore} DESC NULLS LAST`,
         );
 
-      res.status(200).json(rows.map(toResponse));
+      res.status(200).json(await Promise.all(rows.map((row) => toResponse(row, storage))));
     } catch (err) {
       next(err);
     }
@@ -459,7 +465,10 @@ export function createBiometricEnrollmentsRouter(
         .limit(query.limit + 1);
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
-      res.status(200).json({ items: items.map(toResponse), nextCursor });
+      res.status(200).json({
+        items: await Promise.all(items.map((row) => toResponse(row, storage))),
+        nextCursor,
+      });
     } catch (err) {
       next(err);
     }
@@ -529,7 +538,7 @@ export function createBiometricEnrollmentsRouter(
       if (!updated) {
         throw new Error('Update to biometric_enrollments returned no row.');
       }
-      res.status(200).json(toResponse(updated));
+      res.status(200).json(await toResponse(updated, storage));
     } catch (err) {
       next(err);
     }
@@ -575,7 +584,7 @@ export function createBiometricEnrollmentsRouter(
       if (!updated) {
         throw new Error('Update to biometric_enrollments returned no row.');
       }
-      res.status(200).json(toResponse(updated));
+      res.status(200).json(await toResponse(updated, storage));
     } catch (err) {
       next(err);
     }

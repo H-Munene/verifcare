@@ -10,22 +10,38 @@ import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
 } from '../components/FamilyMemberResolver';
+import { VisitHistoryList } from '../components/VisitHistoryList';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Input } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
 import { Switch } from '../design-system/Switch';
+import { Tabs } from '../design-system/Tabs';
 import { Tag } from '../design-system/Tag';
 import './DependantDetailPage.css';
 
-// Wireframe page 6 (Dependant Detail). Visit History and Cognitive Trend render as honest empty
-// states rather than faked data - HEZ-32 (visit scheduling) and the audio/cognitive-risk pipeline
-// don't exist yet, so there is genuinely nothing to show there.
+type DetailTab = 'family' | 'enrollment' | 'visits' | 'cognitive';
+
+const TABS = [
+  { id: 'family' as const, label: 'Family' },
+  { id: 'enrollment' as const, label: 'Enrollment' },
+  { id: 'visits' as const, label: 'Visit History' },
+  { id: 'cognitive' as const, label: 'Cognitive Trend' },
+];
+
+// Wireframe page 6 (Dependant Detail), restructured into tabs (2026-09-23, user request, matching
+// temp_images/tabs_ui.PNG) - the identity header (name/status/meta/actions) stays outside the tabs
+// since it applies to the whole page, not to any one section. Cognitive Trend still renders as an
+// honest empty state - the audio/cognitive-risk pipeline doesn't exist yet, so there is genuinely
+// nothing to show there; Visit History is real now (VisitHistoryList, shared with
+// CaregiverDetailPage's identical tab), since HEZ-32/HEZ-42's visit-schedule/verification-audit
+// endpoints exist and are already consumed by VisitsPage/VisitDetailPage.
 export function DependantDetailPage() {
   const { dependantId } = useParams<{ dependantId: string }>();
   const { dependants } = useApi();
   const navigate = useNavigate();
   const [addingMember, setAddingMember] = useState(false);
+  const [activeTab, setActiveTab] = useState<DetailTab>('family');
 
   const dependantQuery = useQuery({
     queryKey: ['dependant', dependantId],
@@ -34,6 +50,7 @@ export function DependantDetailPage() {
   const familyMembersQuery = useQuery({
     queryKey: ['dependant', dependantId, 'family-members'],
     queryFn: () => dependants.listFamilyMembers(dependantId!),
+    enabled: activeTab === 'family',
   });
 
   if (dependantQuery.isLoading) {
@@ -78,41 +95,47 @@ export function DependantDetailPage() {
         </div>
       </div>
 
-      <section className="dependant-detail__section">
-        <div className="dependant-detail__section-header">
-          <h2 className="dependant-detail__section-title">Family Members</h2>
-          <Button onClick={() => setAddingMember(true)}>+ Add Family Member</Button>
-        </div>
-        {familyMembersQuery.data?.length ? (
-          <div className="ds-card">
-            {familyMembersQuery.data.map((member) => (
-              <FamilyMemberRow
-                key={member.familyMemberUserId}
-                dependantId={dependant.id}
-                member={member}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="dependant-detail__empty">No family members linked yet.</p>
-        )}
-      </section>
+      <Tabs
+        tabs={TABS}
+        activeTab={activeTab}
+        onChange={(id) => setActiveTab(id as DetailTab)}
+      />
 
-      <BiometricEnrollmentSection subjectType="dependant" subjectId={dependant.id} />
+      <div className="dependant-detail__tab-panel">
+        {activeTab === 'family' ? (
+          <section className="dependant-detail__section">
+            <div className="dependant-detail__section-header">
+              <h2 className="dependant-detail__section-title">Family Members</h2>
+              <Button onClick={() => setAddingMember(true)}>+ Add Family Member</Button>
+            </div>
+            {familyMembersQuery.data?.length ? (
+              <div className="ds-card">
+                {familyMembersQuery.data.map((member) => (
+                  <FamilyMemberRow
+                    key={member.familyMemberUserId}
+                    dependantId={dependant.id}
+                    member={member}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="dependant-detail__empty">No family members linked yet.</p>
+            )}
+          </section>
+        ) : null}
 
-      <section className="dependant-detail__section">
-        <h2 className="dependant-detail__section-title">Visit History</h2>
-        <p className="dependant-detail__empty">
-          No visits yet - visit scheduling has not been built yet (Linear HEZ-32).
-        </p>
-      </section>
+        {activeTab === 'enrollment' ? (
+          <BiometricEnrollmentSection subjectType="dependant" subjectId={dependant.id} />
+        ) : null}
 
-      <section className="dependant-detail__section">
-        <h2 className="dependant-detail__section-title">Cognitive Trend</h2>
-        <p className="dependant-detail__empty">
-          No cognitive-risk data yet - the acoustic model service has not been built yet.
-        </p>
-      </section>
+        {activeTab === 'visits' ? <VisitHistoryList dependantId={dependant.id} /> : null}
+
+        {activeTab === 'cognitive' ? (
+          <p className="dependant-detail__empty">
+            No cognitive-risk data yet - the acoustic model service has not been built yet.
+          </p>
+        ) : null}
+      </div>
 
       {addingMember ? (
         <AddFamilyMemberModal dependantId={dependant.id} onClose={() => setAddingMember(false)} />

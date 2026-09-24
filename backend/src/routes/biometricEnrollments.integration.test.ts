@@ -168,6 +168,7 @@ function fakeStorage(overrides: Partial<BiometricStorage> = {}): BiometricStorag
       s3Key: 'placeholder/key.jpg',
       expiresAt: new Date('2026-01-01T00:05:00.000Z'),
     }),
+    createViewUrl: vi.fn().mockResolvedValue('https://example-bucket.s3.amazonaws.com/view'),
     objectExists: vi.fn().mockResolvedValue(true),
     assessFaceQuality: vi.fn().mockResolvedValue({ ok: true, qualityScore: 80 }),
     ...overrides,

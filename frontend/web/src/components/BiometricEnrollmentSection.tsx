@@ -89,19 +89,30 @@ function EnrollmentSlotRow({
 }) {
   return (
     <div className="ds-row-store">
-      <div>
-        <div className="ds-row-store__title">Image {imageOrder}</div>
-        <div className="ds-row-store__caption">
-          {enrollment
-            ? `Quality score: ${enrollment.qualityScore?.toFixed(1) ?? 'n/a'}`
-            : 'Not yet uploaded'}
-          {enrollment?.status === 'flagged' ? (
-            <>
-              {' '}
-              · matched a {enrollment.matchedSubjectType} at{' '}
-              {enrollment.matchedSimilarity?.toFixed(1)}% similarity
-            </>
-          ) : null}
+      <div className="biometric-enrollment-section__row-main">
+        {enrollment ? (
+          <img
+            className="biometric-enrollment-section__thumbnail"
+            src={enrollment.imageUrl}
+            alt={`Enrollment image ${imageOrder}`}
+          />
+        ) : (
+          <div className="biometric-enrollment-section__thumbnail biometric-enrollment-section__thumbnail--empty" />
+        )}
+        <div>
+          <div className="ds-row-store__title">Image {imageOrder}</div>
+          <div className="ds-row-store__caption">
+            {enrollment
+              ? `Quality score: ${enrollment.qualityScore?.toFixed(1) ?? 'n/a'}`
+              : 'Not yet uploaded'}
+            {enrollment?.status === 'flagged' ? (
+              <>
+                {' '}
+                · matched a {enrollment.matchedSubjectType} at{' '}
+                {enrollment.matchedSimilarity?.toFixed(1)}% similarity
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
       {enrollment ? (

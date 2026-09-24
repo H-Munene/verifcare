@@ -30,6 +30,10 @@
   margin-top: 4px;
 }
 
+.dependant-detail__tab-panel {
+  margin-top: 20px;
+}
+
 .dependant-detail__section {
   margin-bottom: 24px;
 }

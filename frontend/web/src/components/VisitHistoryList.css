@@ -1,0 +1,12 @@
+.visit-history-list__row {
+  cursor: pointer;
+}
+
+.visit-history-list__row:hover {
+  background: var(--color-border-divider);
+}
+
+.visit-history-list__empty {
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}

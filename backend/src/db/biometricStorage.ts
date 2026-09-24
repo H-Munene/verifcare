@@ -30,11 +30,20 @@ import {
   type FaceDetail,
   type RekognitionClient,
 } from '@aws-sdk/client-rekognition';
-import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  type S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v7 as uuidv7 } from 'uuid';
 
 const UPLOAD_URL_EXPIRY_SECONDS = 300;
+// Long enough to cover a supervisor viewing a caregiver/dependant detail page (the frontend
+// requests a fresh batch of these on every page load, not once and cached), short enough to still
+// be a genuinely time-limited link rather than a de facto permanent public URL.
+const VIEW_URL_EXPIRY_SECONDS = 900;
 const POSE_YAW_MAX_DEGREES = 45;
 const POSE_PITCH_MAX_DEGREES = 45;
 const SOFT_PENALTY_FACTOR = 0.5;
@@ -63,6 +72,7 @@ export type FaceQualityResult =
 
 export interface BiometricStorage {
   createUploadUrl: (params: CreateUploadUrlParams) => Promise<CreatedUploadUrl>;
+  createViewUrl: (s3Key: string) => Promise<string>;
   objectExists: (s3Key: string) => Promise<boolean>;
   assessFaceQuality: (s3Key: string) => Promise<FaceQualityResult>;
 }
@@ -124,6 +134,14 @@ export function createBiometricStorage(params: {
         expiresAt: new Date(Date.now() + UPLOAD_URL_EXPIRY_SECONDS * 1000),
       };
     },
+
+    // A GET presigned URL for the admin web app to actually render a subject's enrolled photos -
+    // the row itself never exposes its raw s3Key (routes/biometricEnrollments.ts's toResponse), so
+    // this is the only way a client ever gets something an <img> tag can load.
+    createViewUrl: (s3Key: string): Promise<string> =>
+      getSignedUrl(s3Client, new GetObjectCommand({ Bucket: bucketName, Key: s3Key }), {
+        expiresIn: VIEW_URL_EXPIRY_SECONDS,
+      }),
 
     objectExists: async (s3Key: string): Promise<boolean> => {
       try {
