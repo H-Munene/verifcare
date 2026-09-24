@@ -1885,7 +1885,7 @@ components:
 
     BiometricEnrollment:
       type: object
-      required: [id, subjectType, imageOrder, status, enrolledBy, enrolledAt, updatedAt]
+      required: [id, subjectType, imageOrder, imageUrl, status, enrolledBy, enrolledAt, updatedAt]
       properties:
         id:
           type: string
@@ -1902,6 +1902,10 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+        imageUrl:
+          type: string
+          format: uri
+          description: A time-limited presigned S3 GET URL, freshly generated on every response - never a permanent link.
         qualityScore:
           type: [number, 'null']
           format: float

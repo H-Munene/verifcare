@@ -26,7 +26,7 @@ export function CarePlanPage() {
     { mode: 'create' } | { mode: 'edit'; task: CareTask } | null
   >(null);
 
-  // Same "hide what you can't use" treatment RegisterCaregiverPage/SchedulingPage already give a
+  // Same "hide what you can't use" treatment RegisterCaregiverPage/VisitsPage already give a
   // non-supervisor - authoring a care plan is supervisor-only per dependants.ts's own RBAC.
   const isSupervisor = identity?.role === 'supervisor';
 

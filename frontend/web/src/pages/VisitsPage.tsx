@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import type { Caregiver } from '../api/caregivers';
 import type { Dependant } from '../api/dependants';
@@ -11,15 +12,18 @@ import { Button } from '../design-system/Button';
 import { Label } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
 import type { VisitSchedule, VisitStatus } from '../api/visitSchedules';
-import './SchedulingPage.css';
+import './VisitsPage.css';
 
-// 07a "Scheduling — Agenda" (temp_images's wireframe canvas). GET /visit-schedules only returns
-// caregiverId/dependantId, not names (HEZ-32's contract), so the caregiver/dependant lists are
-// fetched here too, purely to build id->name lookup maps and to populate 07b's two selects - not
-// re-derived server-side, since a supervisor already has full GET access to both resources
-// (unlike the caregiver-app gap docs/caregiver-checkin-geofence-plan.md raised for a different
-// role). limit:100 - a POC-scale fetch-everything, not real pagination through every caregiver/
-// dependant that exists (matches architecture.md's own "cost-conscious academic PoC" framing).
+// Unifies the former Scheduling and Visits nav entries into one page (2026-09-23, user request):
+// a "Schedule Visit" action plus a live table of every visit, the table's own status column doing
+// double duty as what used to be two separate concerns (an agenda of upcoming visits, and a
+// read-only visit list). caregiverDisplayName/dependantDisplayName come straight off
+// VisitSchedule now (routes/visitSchedules.ts's own toResponse has included them since the
+// caregiver mobile app's schedule calendar needed them) - no separate id->name lookup map built
+// from a second caregivers/dependants fetch the way this page used to, for just the table. That
+// second fetch is still needed for the Schedule Visit modal's own two selects, which genuinely
+// need the full active caregiver/dependant lists, not just whichever names already appear in the
+// current page of visits.
 function statusTone(status: VisitStatus): BadgeTone {
   switch (status) {
     case 'completed':
@@ -32,6 +36,20 @@ function statusTone(status: VisitStatus): BadgeTone {
   }
 }
 
+// "Checked In"/"Checked Out" read far more naturally in a visit table than the raw
+// in_progress/completed status names - the underlying VisitStatus values are unchanged, this is
+// display-only.
+function statusLabel(status: VisitStatus): string {
+  switch (status) {
+    case 'in_progress':
+      return 'Checked In';
+    case 'completed':
+      return 'Checked Out';
+    default:
+      return status.replace('_', ' ');
+  }
+}
+
 function formatWindow(scheduledStart: string, scheduledEnd: string): string {
   const start = new Date(scheduledStart);
   const end = new Date(scheduledEnd);
@@ -40,13 +58,14 @@ function formatWindow(scheduledStart: string, scheduledEnd: string): string {
   return `${dateLabel}, ${start.toLocaleTimeString(undefined, timeOpts)} - ${end.toLocaleTimeString(undefined, timeOpts)}`;
 }
 
-export function SchedulingPage() {
+export function VisitsPage() {
   const { visitSchedules, caregivers, dependants } = useApi();
   const { identity } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  // AppShell already hides the nav entry point for a non-supervisor (POST/PATCH
-  // /visit-schedules are supervisor-only), same as RegisterCaregiverPage's own precedent - this
-  // guards direct URL access too, with a clear message instead of a confusing failed request.
+  // Supervisor-only, same as the old Scheduling page - this app is the Supervisor Console (its own
+  // login screen says so), so every main page here is already gated the same way, confirmed with
+  // the user rather than widened to a read-only view for other roles.
   const isSupervisor = identity?.role === 'supervisor';
   const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([undefined]);
   const currentCursor = cursorStack[cursorStack.length - 1];
@@ -70,13 +89,6 @@ export function SchedulingPage() {
     enabled: isSupervisor,
   });
 
-  const caregiverNames = new Map(
-    (caregiversQuery.data?.items ?? []).map((c) => [c.userId, c.fullName]),
-  );
-  const dependantNames = new Map(
-    (dependantsQuery.data?.items ?? []).map((d) => [d.id, d.fullName]),
-  );
-
   const cancelMutation = useMutation({
     mutationFn: (visitScheduleId: string) =>
       visitSchedules.updateVisitSchedule(visitScheduleId, { status: 'cancelled' }),
@@ -91,63 +103,87 @@ export function SchedulingPage() {
   );
 
   if (!isSupervisor) {
-    return <p>Only supervisors can view or manage scheduling.</p>;
+    return <p>Only supervisors can view or manage visits.</p>;
   }
 
   return (
     <div>
-      <div className="scheduling-page__toolbar">
-        <h1 className="scheduling-page__title">Scheduling</h1>
+      <div className="visits-page__toolbar">
+        <h1 className="visits-page__title">Visits</h1>
         <Button variant="cta-pill" onClick={() => setModalState({ mode: 'create' })}>
           + Schedule Visit
         </Button>
       </div>
 
       {schedulesQuery.isLoading ? <p>Loading...</p> : null}
-      {schedulesQuery.isError ? <p>Failed to load visit schedules.</p> : null}
+      {schedulesQuery.isError ? <p>Failed to load visits.</p> : null}
 
       {schedulesQuery.data ? (
         <>
-          <div className="scheduling-page__list">
-            {rows.map((visit) => (
-              <div key={visit.id} className="scheduling-page__row">
-                <div className="scheduling-page__row-main">
-                  {caregiverNames.get(visit.caregiverId) ?? 'Unknown caregiver'}{' '}
-                  <span className="scheduling-page__arrow">→</span>{' '}
-                  {dependantNames.get(visit.dependantId) ?? 'Unknown dependant'}
-                </div>
-                <div className="scheduling-page__row-window">
-                  {formatWindow(visit.scheduledStart, visit.scheduledEnd)}
-                </div>
-                <Badge tone={statusTone(visit.status)}>{visit.status.replace('_', ' ')}</Badge>
-                <Button
-                  disabled={visit.status !== 'scheduled'}
-                  onClick={() => setModalState({ mode: 'edit', visit })}
+          <table className="ds-table ds-table--table-cell">
+            <thead>
+              <tr>
+                <th>Caregiver</th>
+                <th>Dependant</th>
+                <th>Scheduled window</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((visit) => (
+                <tr
+                  key={visit.id}
+                  className="visits-page__row"
+                  onClick={() => void navigate(`/visits/${visit.id}`)}
                 >
-                  Edit
-                </Button>
-                <Button
-                  disabled={visit.status !== 'scheduled' || cancelMutation.isPending}
-                  onClick={() => cancelMutation.mutate(visit.id)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ))}
-            {rows.length === 0 ? (
-              <div className="scheduling-page__empty">No visits scheduled yet.</div>
-            ) : null}
-          </div>
+                  <td>{visit.caregiverDisplayName}</td>
+                  <td>{visit.dependantDisplayName}</td>
+                  <td>{formatWindow(visit.scheduledStart, visit.scheduledEnd)}</td>
+                  <td>
+                    <Badge tone={statusTone(visit.status)}>{statusLabel(visit.status)}</Badge>
+                  </td>
+                  <td className="visits-page__row-actions">
+                    <Button
+                      disabled={visit.status !== 'scheduled'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setModalState({ mode: 'edit', visit });
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      disabled={visit.status !== 'scheduled' || cancelMutation.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cancelMutation.mutate(visit.id);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="visits-page__empty">
+                    No visits scheduled yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
 
           {cancelMutation.error ? (
-            <div className="scheduling-page__error">
+            <div className="visits-page__error">
               {cancelMutation.error instanceof ApiError
                 ? (cancelMutation.error.problem.detail ?? cancelMutation.error.problem.title)
                 : 'Something went wrong.'}
             </div>
           ) : null}
 
-          <div className="scheduling-page__pagination">
+          <div className="visits-page__pagination">
             <Button
               disabled={cursorStack.length <= 1}
               onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
@@ -197,10 +233,10 @@ interface ScheduleVisitModalProps {
   onClose: () => void;
 }
 
-// 07b "Schedule Visit" (create) and its reschedule counterpart (Edit, from the agenda row) share
-// this one form: caregiverId/dependantId aren't in PATCH /visit-schedules/{id}'s own contract (the
-// backend has no "reassign caregiver/dependant" operation, only reschedule/cancel), so edit mode
-// simply doesn't render those two fields rather than sending values the backend would ignore.
+// Create and reschedule (Edit, from the table row) share this one form: caregiverId/dependantId
+// aren't in PATCH /visit-schedules/{id}'s own contract (the backend has no "reassign
+// caregiver/dependant" operation, only reschedule/cancel), so edit mode simply doesn't render
+// those two fields rather than sending values the backend would ignore.
 function ScheduleVisitModal({
   mode,
   existing,
@@ -242,7 +278,7 @@ function ScheduleVisitModal({
 
   return (
     <Modal title={mode === 'create' ? 'Schedule Visit' : 'Edit Visit'} onClose={onClose}>
-      <form className="scheduling-page__modal-form" onSubmit={handleSubmit} autoComplete="off">
+      <form className="visits-page__modal-form" onSubmit={handleSubmit} autoComplete="off">
         {mode === 'create' ? (
           <>
             <div>
@@ -285,7 +321,7 @@ function ScheduleVisitModal({
             </div>
           </>
         ) : null}
-        <div className="scheduling-page__modal-row">
+        <div className="visits-page__modal-row">
           <div>
             <Label htmlFor="scheduleStart" required>
               Start time
@@ -314,13 +350,13 @@ function ScheduleVisitModal({
           </div>
         </div>
         {mutation.error ? (
-          <div className="scheduling-page__modal-error">
+          <div className="visits-page__modal-error">
             {mutation.error instanceof ApiError
               ? (mutation.error.problem.detail ?? mutation.error.problem.title)
               : 'Something went wrong.'}
           </div>
         ) : null}
-        <div className="scheduling-page__modal-actions">
+        <div className="visits-page__modal-actions">
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>

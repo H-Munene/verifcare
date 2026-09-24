@@ -12,6 +12,7 @@ export interface BiometricEnrollment {
   caregiverId: string | null;
   dependantId: string | null;
   imageOrder: number;
+  imageUrl: string;
   qualityScore: number | null;
   status: BiometricEnrollmentStatus;
   matchedSubjectType: SubjectType | null;

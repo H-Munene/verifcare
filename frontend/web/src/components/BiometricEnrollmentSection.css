@@ -26,6 +26,25 @@
   color: var(--color-ink-muted);
 }
 
+.biometric-enrollment-section__row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.biometric-enrollment-section__thumbnail {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-default);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.biometric-enrollment-section__thumbnail--empty {
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-structural);
+}
+
 .biometric-enrollment-section__modal-form {
   display: flex;
   flex-direction: column;

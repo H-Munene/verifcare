@@ -1,20 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
 import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
+import { VisitHistoryList } from '../components/VisitHistoryList';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
+import { Tabs } from '../design-system/Tabs';
 import './CaregiverDetailPage.css';
 
-// No Visit History section here - deliberately out of scope (matches the wireframe and HEZ-54's
-// own stated scope; there's no visit-history UI anywhere yet, same reasoning as
-// DependantDetailPage's own Visit History empty-state).
+type DetailTab = 'enrollment' | 'visits';
+
+const TABS = [
+  { id: 'enrollment' as const, label: 'Enrollment' },
+  { id: 'visits' as const, label: 'Visit History' },
+];
+
+// Restructured into tabs (2026-09-23, user request, matching temp_images/tabs_ui.PNG) - the
+// identity header (name/status/meta/edit/activate) stays outside the tabs since it applies to the
+// whole page. Visit History is new here: this page had none at all before (matches the wireframe
+// and HEZ-54's own stated scope at the time, since there was no real visit data to show), now
+// backed by the same VisitHistoryList DependantDetailPage's own identical tab uses.
 export function CaregiverDetailPage() {
   const { caregiverId } = useParams<{ caregiverId: string }>();
   const { caregivers } = useApi();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<DetailTab>('enrollment');
 
   const caregiverQuery = useQuery({
     queryKey: ['caregiver', caregiverId],
@@ -64,7 +77,14 @@ export function CaregiverDetailPage() {
         </Button>
       </div>
 
-      <BiometricEnrollmentSection subjectType="caregiver" subjectId={caregiver.userId} />
+      <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
+
+      <div className="caregiver-detail__tab-panel">
+        {activeTab === 'enrollment' ? (
+          <BiometricEnrollmentSection subjectType="caregiver" subjectId={caregiver.userId} />
+        ) : null}
+        {activeTab === 'visits' ? <VisitHistoryList caregiverId={caregiver.userId} /> : null}
+      </div>
 
       {setActiveMutation.error ? (
         <div className="caregiver-detail__error">
