@@ -37,6 +37,7 @@ interface DependantBody {
   id: string;
   fullName: string;
   geofenceLat: number;
+  geofenceRadiusMeters: number;
   status: string;
   registeredBy: string;
 }
@@ -47,6 +48,7 @@ interface DependantPageBody {
 interface FamilyMemberBody {
   dependantId: string;
   familyMemberUserId: string;
+  fullName: string;
   isPrimaryContact: boolean;
   relationship: string | null;
 }
@@ -868,7 +870,23 @@ describe.skipIf(!hasTestDb)(
         expect(row?.status).toBe('deleted');
       });
 
-      it('lets the primary-contact family member update non-status fields', async () => {
+      it('lets the primary-contact family member move the location', async () => {
+        const { dependant, primarySub } = await registerDependant();
+
+        const response = await request(app)
+          .patch(`/dependants/${dependant.id}`)
+          .set('x-test-auth', testAuthHeader(primarySub, 'family_member'))
+          .send({ geofenceLat: -1.3, geofenceLng: 36.9, ward: 'HOSPITAL' });
+
+        expect(response.status).toBe(200);
+        expect(dependantBody(response)).toMatchObject({
+          geofenceLat: -1.3,
+          geofenceLng: 36.9,
+          ward: 'HOSPITAL',
+        });
+      });
+
+      it('forbids the primary-contact family member from changing the geofence radius', async () => {
         const { dependant, primarySub } = await registerDependant();
 
         const response = await request(app)
@@ -876,8 +894,13 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader(primarySub, 'family_member'))
           .send({ geofenceRadiusMeters: 250 });
 
-        expect(response.status).toBe(200);
-        expect(dependantBody(response)).toMatchObject({ geofenceRadiusMeters: 250 });
+        expect(response.status).toBe(403);
+        const db = getDb();
+        const [row] = await db
+          .select()
+          .from(schema.dependants)
+          .where(eq(schema.dependants.id, dependant.id));
+        expect(row?.geofenceRadiusMeters).toBe(dependant.geofenceRadiusMeters);
       });
 
       it('forbids the primary-contact family member from changing status', async () => {
@@ -906,7 +929,7 @@ describe.skipIf(!hasTestDb)(
         const response = await request(app)
           .patch(`/dependants/${dependant.id}`)
           .set('x-test-auth', testAuthHeader('fm-nonprimary', 'family_member'))
-          .send({ geofenceRadiusMeters: 300 });
+          .send({ homeAddressText: 'Moved house' });
 
         expect(response.status).toBe(403);
       });
@@ -989,6 +1012,55 @@ describe.skipIf(!hasTestDb)(
         );
       });
 
+      it('forbids a non-primary family member from adding someone as the primary contact', async () => {
+        const { dependant, supervisorSub } = await registerDependant();
+        await createTestUser('fm-add-nonprimary', 'family_member', '+254700000067');
+        await request(app)
+          .post(`/dependants/${dependant.id}/family-members`)
+          .set('x-test-auth', testAuthHeader(supervisorSub, 'supervisor'))
+          .send({ cognitoSub: 'fm-add-nonprimary', phoneNumber: '+254700000067', fullName: 'NP' });
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/family-members`)
+          .set('x-test-auth', testAuthHeader('fm-add-nonprimary', 'family_member'))
+          .send({
+            cognitoSub: 'new-usurper-sub',
+            phoneNumber: '+254700000068',
+            fullName: 'Usurper',
+            isPrimaryContact: true,
+          });
+
+        expect(response.status).toBe(403);
+        const db = getDb();
+        const primaryLinks = (
+          await db
+            .select()
+            .from(schema.dependantFamilyMembers)
+            .where(eq(schema.dependantFamilyMembers.dependantId, dependant.id))
+        ).filter((l) => l.isPrimaryContact);
+        expect(primaryLinks).toHaveLength(1);
+      });
+
+      it('lets the current primary contact hand the role to a new member', async () => {
+        const { dependant } = await registerDependant();
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/family-members`)
+          .set('x-test-auth', testAuthHeader('fm-add-primary', 'family_member'))
+          .send({
+            cognitoSub: 'fm-successor',
+            phoneNumber: '+254700000069',
+            fullName: 'Successor',
+            isPrimaryContact: true,
+          });
+
+        expect(response.status).toBe(201);
+        expect(familyMemberBody(response)).toMatchObject({
+          isPrimaryContact: true,
+          fullName: 'Successor',
+        });
+      });
+
       it('returns 409 for a duplicate (dependantId, familyMemberUserId) link', async () => {
         const { dependant, supervisorSub } = await registerDependant();
 
@@ -1030,6 +1102,9 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(familyMemberListBody(response)).toHaveLength(1);
+        // The name is what lets a family member see who the other members are - they can't
+        // resolve other users through GET /users/{id}.
+        expect(familyMemberListBody(response)[0]?.fullName).toBe('User fm-list-fm');
       });
 
       it('forbids an unlinked family member', async () => {

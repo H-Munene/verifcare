@@ -794,5 +794,120 @@ describe.skipIf(!hasTestDb)(
         expect(response.status).toBe(404);
       });
     });
+
+    describe('GET /visit-schedules/{visitScheduleId}/task-outcomes', () => {
+      // A completed visit with two recorded outcomes (one done, one skipped with a reason) and one
+      // care task the caregiver never recorded anything for.
+      async function completedVisitWithOutcomes() {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const familyMember = await createTestUser('fam-1', 'family_member', '+254700000004');
+        await linkFamilyMember(dependant.id, familyMember.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+        const bathing = await createTestCareTask(dependant.id, supervisor.id);
+        const walk = await createTestCareTask(dependant.id, supervisor.id, {
+          title: 'Short walk',
+          required: false,
+        });
+        await createTestCareTask(dependant.id, supervisor.id, { title: 'Never recorded' });
+        const db = getDb();
+        await db.insert(schema.visitTaskCompletions).values([
+          { visitScheduleId: visit.id, careTaskId: bathing.id, status: 'completed' },
+          {
+            visitScheduleId: visit.id,
+            careTaskId: walk.id,
+            status: 'not_completed',
+            reason: 'client_declined',
+            notes: 'Too tired today',
+          },
+        ]);
+        await db
+          .update(schema.visitSchedules)
+          .set({ status: 'completed' })
+          .where(eq(schema.visitSchedules.id, visit.id));
+        return { visit };
+      }
+
+      it('lets a linked family member read the recorded outcomes of a completed visit', async () => {
+        const { visit } = await completedVisitWithOutcomes();
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/task-outcomes`)
+          .set('x-test-auth', testAuthHeader('fam-1', 'family_member'));
+
+        expect(response.status).toBe(200);
+        // Only recorded outcomes - "Never recorded" has no completion row, so it isn't listed.
+        expect(response.body).toMatchObject([
+          { title: 'Assist with bathing', status: 'completed', reason: null, required: true },
+          {
+            title: 'Short walk',
+            status: 'not_completed',
+            reason: 'client_declined',
+            notes: 'Too tired today',
+            required: false,
+          },
+        ]);
+      });
+
+      it('lets a supervisor read them too', async () => {
+        const { visit } = await completedVisitWithOutcomes();
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/task-outcomes`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+
+        expect(response.status).toBe(200);
+        expect(response.body).toHaveLength(2);
+      });
+
+      it('returns an empty list for a visit that never started', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const created = await request(app)
+          .post('/visit-schedules')
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visitBody(created).id}/task-outcomes`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual([]);
+      });
+
+      it('rejects a family member not linked to the dependant with 403', async () => {
+        const { visit } = await completedVisitWithOutcomes();
+        await createTestUser('fam-2', 'family_member', '+254700000005');
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/task-outcomes`)
+          .set('x-test-auth', testAuthHeader('fam-2', 'family_member'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it("rejects a caregiver reading another caregiver's visit with 403", async () => {
+        const { visit } = await completedVisitWithOutcomes();
+        await createTestCaregiver('cg-2', '+254700000006');
+
+        const response = await request(app)
+          .get(`/visit-schedules/${visit.id}/task-outcomes`)
+          .set('x-test-auth', testAuthHeader('cg-2', 'caregiver'));
+
+        expect(response.status).toBe(403);
+      });
+
+      it('returns 404 for a nonexistent visit', async () => {
+        await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const response = await request(app)
+          .get('/visit-schedules/01a0bfb1-61b8-7260-b9e3-2d549e1bda49/task-outcomes')
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+
+        expect(response.status).toBe(404);
+      });
+    });
   },
 );

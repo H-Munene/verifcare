@@ -46,6 +46,7 @@ import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
+import type { AuthenticatedUser } from '../auth/verifier.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
@@ -244,6 +245,29 @@ function getDb(res: Response): Db | undefined {
     });
   }
   return db;
+}
+
+// The read rule shared by GET /{id}, /verification and /task-outcomes: a supervisor sees any
+// visit, a caregiver only their own, a family_member only visits for a dependant they're linked
+// to. Sends the 403 itself and returns false, the same "send the response, return a falsy
+// sentinel" style used elsewhere in this router.
+async function canReadVisit(
+  db: Db,
+  visit: typeof schema.visitSchedules.$inferSelect,
+  caller: AuthenticatedUser,
+  res: Response,
+): Promise<boolean> {
+  let allowed = true;
+  if (caller.role === 'caregiver') {
+    const callerRow = await getUserByCognitoSub(db, caller.sub);
+    allowed = callerRow !== undefined && visit.caregiverId === callerRow.id;
+  } else if (caller.role === 'family_member') {
+    allowed = (await findFamilyMemberLink(db, visit.dependantId, caller.sub)) !== undefined;
+  }
+  if (!allowed) {
+    sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+  }
+  return allowed;
 }
 
 // Maps an EXCLUDE-constraint violation to a specific, readable detail message rather than a
@@ -478,19 +502,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
         return;
       }
-
-      if (caller.role === 'caregiver') {
-        const callerRow = await getUserByCognitoSub(db, caller.sub);
-        if (!callerRow || row.caregiverId !== callerRow.id) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
-      } else if (caller.role === 'family_member') {
-        const found = await findFamilyMemberLink(db, row.dependantId, caller.sub);
-        if (!found) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
+      if (!(await canReadVisit(db, row, caller, res))) {
+        return;
       }
 
       const [response] = await attachDisplayNames(db, [row]);
@@ -533,19 +546,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
         return;
       }
-
-      if (caller.role === 'caregiver') {
-        const callerRow = await getUserByCognitoSub(db, caller.sub);
-        if (!callerRow || visit.caregiverId !== callerRow.id) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
-      } else if (caller.role === 'family_member') {
-        const found = await findFamilyMemberLink(db, visit.dependantId, caller.sub);
-        if (!found) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
+      if (!(await canReadVisit(db, visit, caller, res))) {
+        return;
       }
 
       const [event] = await db
@@ -562,6 +564,73 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         event: event ? toVerificationEventResponse(event) : null,
         attempts: attempts.map(toVerificationAttemptResponse),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /{id}/task-outcomes: what the caregiver recorded for each care task on this visit, for any
+  // visit status. GET .../tasks (routes/visitTasks.ts) is the caregiver's own working view and only
+  // exists while a visit is in_progress, so once a visit ended nobody - not even a supervisor -
+  // could read these back. Only recorded outcomes are returned (not the live care plan), so a task
+  // deactivated after the visit still shows what was done, and a never-started visit returns [].
+  // Lives in this router, not visitTasks.ts: the check-in router mounted between the two rejects
+  // every non-caregiver request that reaches it.
+  router.get('/:visitScheduleId/task-outcomes', async (req, res, next) => {
+    const visitScheduleId = parseOrSendProblem(
+      visitScheduleIdParamSchema,
+      req.params.visitScheduleId,
+      res,
+    );
+    if (!visitScheduleId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [visit] = await db
+        .select()
+        .from(schema.visitSchedules)
+        .where(eq(schema.visitSchedules.id, visitScheduleId));
+      if (!visit) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (!(await canReadVisit(db, visit, caller, res))) {
+        return;
+      }
+
+      const rows = await db
+        .select({ task: schema.dependantCareTasks, completion: schema.visitTaskCompletions })
+        .from(schema.visitTaskCompletions)
+        .innerJoin(
+          schema.dependantCareTasks,
+          eq(schema.dependantCareTasks.id, schema.visitTaskCompletions.careTaskId),
+        )
+        .where(eq(schema.visitTaskCompletions.visitScheduleId, visitScheduleId))
+        .orderBy(asc(schema.dependantCareTasks.createdAt));
+
+      res.status(200).json(
+        rows.map(({ task, completion }) => ({
+          careTaskId: task.id,
+          title: task.title,
+          description: task.description,
+          category: task.category,
+          required: task.required,
+          status: completion.status,
+          reason: completion.reason,
+          notes: completion.notes,
+          completedAt: completion.completedAt.toISOString(),
+        })),
+      );
     } catch (err) {
       next(err);
     }

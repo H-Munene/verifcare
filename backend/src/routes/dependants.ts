@@ -146,6 +146,10 @@ function toCareTaskResponse(row: typeof schema.dependantCareTasks.$inferSelect):
 interface DependantFamilyMemberResponse {
   dependantId: string;
   familyMemberUserId: string;
+  // The linked member's own name, joined from users. Without it a family_member caller had no way
+  // to show who the other members are: GET /users/{id} is self-only for non-supervisors, and
+  // widening that would also expose other members' email and phone number.
+  fullName: string;
   relationship: string | null;
   isPrimaryContact: boolean;
   addedBy: string;
@@ -154,15 +158,31 @@ interface DependantFamilyMemberResponse {
 
 function toFamilyMemberResponse(
   row: typeof schema.dependantFamilyMembers.$inferSelect,
+  fullName: string,
 ): DependantFamilyMemberResponse {
   return {
     dependantId: row.dependantId,
     familyMemberUserId: row.familyMemberUserId,
+    fullName,
     relationship: row.relationship,
     isPrimaryContact: row.isPrimaryContact,
     addedBy: row.addedBy,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+async function familyMemberResponseWithName(
+  db: Db,
+  row: typeof schema.dependantFamilyMembers.$inferSelect,
+): Promise<DependantFamilyMemberResponse> {
+  const [user] = await db
+    .select({ fullName: schema.users.fullName })
+    .from(schema.users)
+    .where(eq(schema.users.id, row.familyMemberUserId));
+  if (!user) {
+    throw new Error(`No users row for linked family member ${row.familyMemberUserId}.`);
+  }
+  return toFamilyMemberResponse(row, user.fullName);
 }
 
 // Explicit column map (not a bare .select()) so a joined query (the family_member branch of
@@ -772,6 +792,18 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
+        // The primary contact may move the location (e.g. after a house move), but not the
+        // radius: caregiver check-in is verified against it, so widening it would weaken that
+        // check for every future visit (user decision 2026-09-24).
+        if (body.geofenceRadiusMeters !== undefined) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'Only a supervisor may change a dependant’s geofence radius.',
+          });
+          return;
+        }
         const found = await findFamilyMemberLink(db, dependantId, caller.sub);
         if (!found?.link.isPrimaryContact) {
           sendProblem(res, {
@@ -854,6 +886,19 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
+        // Adding someone as primary demotes the current primary contact (below), and editing an
+        // existing link is supervisor-only - so a non-primary member must not be able to take that
+        // role away from the current primary contact by this route instead.
+        if (body.isPrimaryContact && !found.link.isPrimaryContact) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail:
+              'Only a supervisor or the current primary contact may add a family member as the primary contact.',
+          });
+          return;
+        }
         callerRowId = found.callerRow.id;
       }
 
@@ -914,7 +959,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return row;
       });
 
-      res.status(201).json(toFamilyMemberResponse(link));
+      res.status(201).json(await familyMemberResponseWithName(db, link));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -963,10 +1008,14 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       }
 
       const rows = await db
-        .select()
+        .select({ link: schema.dependantFamilyMembers, fullName: schema.users.fullName })
         .from(schema.dependantFamilyMembers)
+        .innerJoin(
+          schema.users,
+          eq(schema.users.id, schema.dependantFamilyMembers.familyMemberUserId),
+        )
         .where(eq(schema.dependantFamilyMembers.dependantId, dependantId));
-      res.status(200).json(rows.map(toFamilyMemberResponse));
+      res.status(200).json(rows.map((row) => toFamilyMemberResponse(row.link, row.fullName)));
     } catch (err) {
       next(err);
     }
@@ -1039,7 +1088,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         if (!updated) {
           throw new Error('Update to dependant_family_members returned no row.');
         }
-        res.status(200).json(toFamilyMemberResponse(updated));
+        res.status(200).json(await familyMemberResponseWithName(db, updated));
       } catch (err) {
         next(err);
       }

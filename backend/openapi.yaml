@@ -315,7 +315,11 @@ paths:
     patch:
       tags: [Dependants]
       summary: Update a dependant
-      description: Covers geofence adjustments, cognitive monitoring toggle, and offboarding via `status`.
+      description: |
+        Covers geofence adjustments, cognitive monitoring toggle, and offboarding via `status`.
+        A supervisor may change any field. The dependant's primary-contact family member may change
+        every field except `status` and `geofenceRadiusMeters` (403): the radius is what caregiver
+        check-in is verified against, so widening it stays a supervisor decision.
       operationId: updateDependant
       requestBody:
         required: true
@@ -341,6 +345,11 @@ paths:
     post:
       tags: [Dependants]
       summary: Link an additional family member to a dependant
+      description: |
+        Allowed for a supervisor or any family member already linked to the dependant. Adding
+        someone with `isPrimaryContact: true` demotes the current primary contact, so a linked
+        family member may only do that if they are the current primary contact themselves (403
+        otherwise).
       operationId: addDependantFamilyMember
       requestBody:
         required: true
@@ -763,6 +772,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VerificationAudit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /visit-schedules/{visitScheduleId}/task-outcomes:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    get:
+      tags: [Visit Schedules]
+      summary: Get the recorded care-task outcomes for a visit
+      description: |
+        What the caregiver recorded for each care task on this visit, for any visit status, under
+        the same read rule as `GET /visit-schedules/{visitScheduleId}` (supervisor: any visit;
+        caregiver: own visits; family member: visits for a linked dependant). Only recorded
+        outcomes are returned, not the live care plan, so a task deactivated after the visit still
+        shows, and a visit that never started returns an empty array.
+      operationId: getVisitTaskOutcomes
+      responses:
+        '200':
+          description: The recorded outcomes, in care-plan order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VisitTaskOutcome'
         '404':
           $ref: '#/components/responses/NotFound'
         default:
@@ -1712,7 +1748,7 @@ components:
 
     DependantFamilyMember:
       type: object
-      required: [dependantId, familyMemberUserId, isPrimaryContact, addedBy, createdAt]
+      required: [dependantId, familyMemberUserId, fullName, isPrimaryContact, addedBy, createdAt]
       properties:
         dependantId:
           type: string
@@ -1720,6 +1756,9 @@ components:
         familyMemberUserId:
           type: string
           format: uuid
+        fullName:
+          type: string
+          description: The linked member's own name, so a family member can see who the other members are without access to `GET /users/{userId}`.
         relationship:
           type: [string, 'null']
         isPrimaryContact:
@@ -1870,6 +1909,33 @@ components:
           type: [string, 'null']
         completedAt:
           type: [string, 'null']
+          format: date-time
+    VisitTaskOutcome:
+      type: object
+      description: One recorded care-task outcome for a visit.
+      required: [careTaskId, title, required, status, reason, notes, completedAt]
+      properties:
+        careTaskId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: [string, 'null']
+        category:
+          type: [string, 'null']
+        required:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/TaskCompletionStatus'
+        reason:
+          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
+          nullable: true
+          description: 'Set only when status is not_completed.'
+        notes:
+          type: [string, 'null']
+        completedAt:
+          type: string
           format: date-time
     PutVisitTaskCompletionRequest:
       type: object
