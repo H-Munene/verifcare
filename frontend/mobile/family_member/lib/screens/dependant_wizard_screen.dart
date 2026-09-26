@@ -214,7 +214,19 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   /// any step.
   String? get _saveBlocker =>
       _detailsBlocker ??
-      (_ward == null ? 'Choose the county, constituency and ward.' : null);
+      (_ward == null ? 'Choose the county, constituency and ward.' : null) ??
+      // Changing the county clears the pin, and _save needs one - without this, Save from the
+      // title bar after a county change would throw on the missing pin.
+      (_pin == null ? 'Tap the map to place the pin on the home.' : null);
+
+  /// Editing only: every step is already filled in and Save checks them all, so the step header
+  /// lets the user jump straight to any step instead of paging through with Next/Back.
+  void _goToStep(int step) {
+    if (step == _step || _submitting) return;
+    setState(() => _step = step);
+    // Same map start as arriving by Next (a no-op when the saved pin already set it).
+    if (step == 2) unawaited(_locateInitialCamera());
+  }
 
   Future<void> _next() async {
     switch (_step) {
@@ -448,7 +460,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         ),
         body: Column(
           children: [
-            _StepHeader(current: _step),
+            _StepHeader(current: _step, onStepTap: _editing ? _goToStep : null),
             Expanded(
               child: switch (_step) {
                 0 => _buildDetails(),
@@ -928,7 +940,11 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
 
 class _StepHeader extends StatelessWidget {
   final int current;
-  const _StepHeader({required this.current});
+
+  /// Set when editing: each step becomes a button that jumps to it.
+  final ValueChanged<int>? onStepTap;
+
+  const _StepHeader({required this.current, this.onStepTap});
 
   @override
   Widget build(BuildContext context) {
@@ -939,39 +955,58 @@ class _StepHeader extends StatelessWidget {
         Row(
           children: [
             for (final (i, label) in _stepLabels.indexed)
-              Expanded(
-                child: Column(
-                  children: [
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundColor: i <= current ? primaryBlue : borderColor,
-                      foregroundColor: i <= current
-                          ? Colors.white
-                          : inkSecondary,
-                      child: i < current
-                          ? const Icon(Icons.check, size: 14)
-                          : Text(
-                              '${i + 1}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: i == current ? inkDefault : inkTertiary,
-                        fontWeight: i == current
-                            ? FontWeight.w500
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              Expanded(child: _step(i, label)),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _step(int i, String label) {
+    final onTap = onStepTap;
+    // Editing: every step is filled in, so the others show as reachable (tinted) rather than as
+    // done or not-yet-reached.
+    final (Color background, Color foreground) = switch ((onTap, i)) {
+      (_, _) when i == current => (primaryBlue, Colors.white),
+      (final _?, _) => (primaryBlue.withValues(alpha: 0.12), primaryBlue),
+      (null, _) when i < current => (primaryBlue, Colors.white),
+      (null, _) => (borderColor, inkSecondary),
+    };
+    final column = Column(
+      children: [
+        CircleAvatar(
+          radius: 12,
+          backgroundColor: background,
+          foregroundColor: foreground,
+          child: onTap == null && i < current
+              ? const Icon(Icons.check, size: 14)
+              : Text('${i + 1}', style: const TextStyle(fontSize: 12)),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            color: i == current ? inkDefault : inkTertiary,
+            fontWeight: i == current ? FontWeight.w500 : FontWeight.normal,
+          ),
+        ),
+      ],
+    );
+    if (onTap == null) return column;
+    return Semantics(
+      button: true,
+      selected: i == current,
+      label: 'Step ${i + 1}, $label',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => onTap(i),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: column,
         ),
       ),
     );

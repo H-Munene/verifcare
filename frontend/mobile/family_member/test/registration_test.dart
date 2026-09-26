@@ -190,6 +190,14 @@ void main() {
     // Changing the county clears the constituency and ward below it.
     await choose('County', 'MOMBASA');
     expect(next().onPressed, isNull);
+
+    // Registering goes step by step - the header isn't a shortcut.
+    await tester.tap(find.text('Photo'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Choose the county, constituency and ward.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -297,9 +305,17 @@ void main() {
         await tester.pump();
         expect(save().onPressed, isNotNull);
 
-        // The saved location is matched back to the dropdowns by name.
-        await tester.tap(find.widgetWithText(ElevatedButton, 'Next'));
+        // Editing: the step header jumps straight to any step.
+        await tester.tap(find.bySemanticsLabel('Step 4, Photo'));
         await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Replace it if it no longer looks like them'),
+          findsOneWidget,
+        );
+        await tester.tap(find.bySemanticsLabel('Step 2, Location'));
+        await tester.pumpAndSettle();
+
+        // The saved location is matched back to the dropdowns by name.
         expect(find.widgetWithText(TextField, 'KILELESHWA'), findsOneWidget);
 
         await tester.tap(find.widgetWithText(TextButton, 'Save'));
@@ -321,6 +337,75 @@ void main() {
       // Never the radius (supervisor-only) or date of birth (not editable).
       expect(patched.containsKey('geofenceRadiusMeters'), isFalse);
       expect(patched.containsKey('dob'), isFalse);
+    },
+  );
+
+  testWidgets(
+    'editing: a new county clears the pin, so Save waits for a new one',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final existing = Dependant.fromJson({
+        'id': 'd1',
+        'fullName': 'Wanjiku Kamau',
+        'dob': '1950-06-15',
+        'gender': null,
+        'homeAddressText': null,
+        'primaryConditionSummary': null,
+        'county': 'NAIROBI',
+        'constituency': 'DAGORETTI NORTH',
+        'ward': 'KILELESHWA',
+        'geofenceLat': -1.2833,
+        'geofenceLng': 36.7833,
+        'cognitiveMonitoringEnabled': false,
+        'status': 'active',
+      });
+      final backend = MockClient(
+        (_) async => http.Response(
+          '[]',
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      );
+      await http.runWithClient(() async {
+        final client = ApiClient(() async => null);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: DependantWizardScreen.edit(
+              dependantsApi: DependantsApi(client),
+              enrollmentsApi: BiometricEnrollmentsApi(client),
+              existing: existing,
+            ),
+          ),
+        );
+        await tester.runAsync(() async {
+          await KenyaAreas.load();
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        TextButton save() =>
+            tester.widget<TextButton>(find.widgetWithText(TextButton, 'Save'));
+        expect(save().onPressed, isNotNull);
+
+        await tester.tap(find.bySemanticsLabel('Step 2, Location'));
+        await tester.pumpAndSettle();
+        Future<void> choose(String menu, String option) async {
+          await tester.tap(find.widgetWithText(DropdownMenu<Area>, menu));
+          await tester.pumpAndSettle();
+          await tester.enterText(find.widgetWithText(TextField, menu), option);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(option).last);
+          await tester.pumpAndSettle();
+        }
+
+        await choose('County', 'MOMBASA');
+        await choose('Constituency', 'CHANGAMWE');
+        await choose('Ward', 'PORT REITZ');
+        // Every dropdown is filled again, but the Nairobi pin is gone.
+        expect(save().onPressed, isNull);
+      }, () => backend);
     },
   );
 }
