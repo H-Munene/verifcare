@@ -5,7 +5,15 @@
 // the backend's own day, and today's view refreshes every minute because visit states move with
 // the clock.
 
-import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+import {
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  CalendarRemove02Icon,
+  CameraOff02Icon,
+  Clock01Icon,
+  UserIcon,
+  UserSearch01Icon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -436,17 +444,32 @@ function AttentionList({
               <ul className="overview__attention-list">
                 {alerts.map((alert) => (
                   <li key={alert.id} className="overview__attention-item">
-                    <span
-                      className="overview__state-dot"
-                      style={{ background: STATE_META.no_checkin.color }}
+                    <HugeiconsIcon
+                      icon={CalendarRemove02Icon}
+                      size={18}
+                      strokeWidth={1.6}
+                      className="overview__attention-icon"
+                      color="var(--color-state-no-checkin-icon)"
                       aria-hidden
                     />
                     <div className="overview__attention-body">
                       <p className="overview__attention-title">
                         Missed visit to {alert.dependantName}
                       </p>
-                      <p className="overview__attention-meta">
-                        {alert.caregiverName}, due {due(alert.scheduledStart)}
+                      <p className="overview__attention-meta overview__attention-facts">
+                        <span>
+                          <HugeiconsIcon icon={UserIcon} size={13} strokeWidth={1.8} aria-hidden />
+                          {alert.caregiverName}
+                        </span>
+                        <span>
+                          <HugeiconsIcon
+                            icon={Clock01Icon}
+                            size={13}
+                            strokeWidth={1.8}
+                            aria-hidden
+                          />
+                          Due {due(alert.scheduledStart)}
+                        </span>
                       </p>
                       {linksEnabled ? (
                         <div className="overview__attention-actions">
@@ -488,9 +511,12 @@ function AttentionList({
               <p className="overview__empty">No photos waiting for review.</p>
             ) : (
               <div className="overview__attention-item">
-                <span
-                  className="overview__state-dot"
-                  style={{ background: STATE_META.awaiting_checkin.color }}
+                <HugeiconsIcon
+                  icon={UserSearch01Icon}
+                  size={18}
+                  strokeWidth={1.6}
+                  className="overview__attention-icon"
+                  color="var(--color-state-awaiting-icon)"
                   aria-hidden
                 />
                 <div className="overview__attention-body">
@@ -521,9 +547,12 @@ function AttentionList({
                 <ul className="overview__attention-list">
                   {withoutPhoto.map((d) => (
                     <li key={d.id} className="overview__attention-item">
-                      <span
-                        className="overview__state-dot"
-                        style={{ background: STATE_META.upcoming.color }}
+                      <HugeiconsIcon
+                        icon={CameraOff02Icon}
+                        size={18}
+                        strokeWidth={1.6}
+                        className="overview__attention-icon"
+                        color="var(--color-state-upcoming-icon)"
                         aria-hidden
                       />
                       <div className="overview__attention-body">

@@ -418,8 +418,28 @@
   padding-top: 0;
 }
 
-.overview__attention-item > .overview__state-dot {
-  margin-top: 4px;
+/* What each entry is, as an icon in its category's colour (user request, 2026-09-26). */
+.overview__attention-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* The caregiver and the due time, each behind a small icon, as in the map's summary. */
+.overview__attention-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.overview__attention-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.overview__attention-facts svg {
+  flex: none;
+  color: var(--color-ink-muted);
 }
 
 .overview__attention-body {
