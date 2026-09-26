@@ -33,78 +33,31 @@
   pointer-events: none;
 }
 
-.visits-map__tooltip {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  width: 260px;
-  background: var(--color-page-background);
-  border: 1px solid var(--color-border-structural);
-  /* Sharp corners, like the map's own frame and the Overview's grid (user request). */
-  border-radius: 0;
-  box-shadow: 0 6px 20px rgb(41 41 41 / 14%);
-  font-family: var(--font-body);
-  pointer-events: none;
+/* ---------- OpenStreetMap version (OsmVisitsMap.tsx) ---------- */
+
+/* Leaflet stacks its panes up to z-index 1000; keep them below the page's own menus. */
+.visits-map--osm .visits-map__canvas {
+  z-index: 0;
 }
 
-/* The vertical rule: the icon column's right edge, unbroken from top to bottom because the rows
-   have no gap between them. */
-/* The vertical rule: the icon column's right edge, unbroken from top to bottom because the rows
-   have no gap between them. */
-.visits-map__icon-cell {
-  display: flex;
-  justify-content: center;
-  padding: 10px 0;
-  border-right: 1px solid var(--color-border-structural);
+/* Muted tiles, so the status colours stay the loudest thing on the map. */
+.visits-map--osm .leaflet-tile-pane {
+  filter: saturate(0.2) brightness(1.04);
 }
 
-.visits-map__detail-cell {
-  min-width: 0;
-  padding: 10px 14px;
+/* The home summary brings its own frame; drop Leaflet's tooltip box and arrow around it. */
+.visits-map__leaflet-tooltip.leaflet-tooltip {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  white-space: normal;
 }
 
-/* A line under every row - the dependant's name and each visit - across both columns, edge to
-   edge (user request). The last visit has none, since the summary's own border is there. */
-.visits-map__icon-cell:not(:nth-last-child(2)),
-.visits-map__detail-cell:not(:last-child) {
-  border-bottom: 1px solid var(--color-border-structural);
+.visits-map__leaflet-tooltip.leaflet-tooltip::before {
+  display: none;
 }
 
-.visits-map__dependant {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-ink-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.visits-map__caregiver {
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 18px;
-  color: var(--color-ink-default);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.visits-map__times {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 12px;
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--color-ink-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.visits-map__time {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.visits-map__time-icon {
-  flex: none;
-  color: var(--color-ink-muted);
+.visits-map--osm .visits-map__empty {
+  z-index: 500;
 }

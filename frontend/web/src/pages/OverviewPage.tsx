@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { DashboardOverview, OverviewVisit, VisitState } from '../api/dashboard';
 import { useApi } from '../api/useApi';
+import { OsmVisitsMap } from '../components/OsmVisitsMap';
 import { OutcomeSummary } from '../components/OutcomeSummary';
 import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
@@ -21,6 +22,7 @@ import { SegmentedControl } from '../design-system/SegmentedControl';
 import './OverviewPage.css';
 
 const TIME_ZONE = 'Africa/Nairobi';
+const USE_GOOGLE_MAP = import.meta.env.VITE_OVERVIEW_MAP === 'google';
 const REFRESH_MS = 60_000;
 
 function today(): string {
@@ -227,13 +229,24 @@ export function OverviewPage() {
             </h2>
           </div>
           <div className="overview__map-frame">
-            <VisitsMap
-              apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
-              visits={shownVisits}
-              timeZone={overview.timeZone}
-              activeId={activeHome}
-              onActiveChange={setActiveHome}
-            />
+            {/* OpenStreetMap by default (the user's experiment, 2026-09-26);
+                VITE_OVERVIEW_MAP=google switches back to Google Maps. */}
+            {USE_GOOGLE_MAP ? (
+              <VisitsMap
+                apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+                visits={shownVisits}
+                timeZone={overview.timeZone}
+                activeId={activeHome}
+                onActiveChange={setActiveHome}
+              />
+            ) : (
+              <OsmVisitsMap
+                visits={shownVisits}
+                timeZone={overview.timeZone}
+                activeId={activeHome}
+                onActiveChange={setActiveHome}
+              />
+            )}
           </div>
         </section>
 
