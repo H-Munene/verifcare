@@ -194,6 +194,20 @@ class DependantsApi {
         .toList();
   }
 
+  /// The primary contact links someone who already has an account, by their exact email
+  /// (POST .../family-members/link). A 404 means no account uses that email - they need to sign
+  /// up and send a link request instead.
+  Future<FamilyMemberLink> linkExistingMember(
+    String dependantId, {
+    required String email,
+    String? relationship,
+  }) async => FamilyMemberLink.fromJson(
+    await _client.post('/dependants/$dependantId/family-members/link', {
+      'email': email,
+      'relationship': ?relationship,
+    }),
+  );
+
   Future<List<CareTask>> listActiveCareTasks(String dependantId) async {
     final json = await _client.getList(
       '/dependants/$dependantId/care-tasks?active=true',

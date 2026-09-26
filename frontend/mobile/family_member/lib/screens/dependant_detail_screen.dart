@@ -4,6 +4,7 @@ import '../api/biometric_enrollments_api.dart';
 import '../api/dependants_api.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
+import '../widgets/family_link_panel.dart';
 import '../widgets/visit_widgets.dart';
 import 'dependant_wizard_screen.dart';
 import 'upcoming_visit_screen.dart';
@@ -110,7 +111,8 @@ class _DependantDetailScreenState extends State<DependantDetailScreen> {
                   // Only the primary contact can add it (Edit's Photo step); everyone else is
                   // told who can.
                   onAddPhoto: _isPrimaryContact
-                      ? () => _edit(initialStep: 3)
+                      ? () =>
+                            _edit(initialStep: DependantWizardScreen.photoStep)
                       : null,
                 ),
               ),
@@ -131,6 +133,7 @@ class _DependantDetailScreenState extends State<DependantDetailScreen> {
                 key: ValueKey('family-$_version'),
                 dependantId: dependant.id,
                 myUserId: widget.myUserId,
+                isPrimaryContact: _isPrimaryContact,
                 dependantsApi: widget.dependantsApi,
               ),
             ],
@@ -539,12 +542,15 @@ class _VisitRow extends StatelessWidget {
 class _FamilyTab extends StatefulWidget {
   final String dependantId;
   final String? myUserId;
+  // The primary contact can link more family members from here.
+  final bool isPrimaryContact;
   final DependantsApi dependantsApi;
 
   const _FamilyTab({
     super.key,
     required this.dependantId,
     required this.myUserId,
+    required this.isPrimaryContact,
     required this.dependantsApi,
   });
 
@@ -584,6 +590,45 @@ class _FamilyTabState extends State<_FamilyTab>
     }
   }
 
+  Future<void> _linkMember() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      builder: (sheetContext) => Padding(
+        // Lifts the form above the keyboard.
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          20 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Link a family member',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: inkDefault,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FamilyLinkPanel(
+                dependantsApi: widget.dependantsApi,
+                dependantId: widget.dependantId,
+                onLinked: (_) => _load(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -605,6 +650,15 @@ class _FamilyTabState extends State<_FamilyTab>
             ],
           ),
         ),
+        if (widget.isPrimaryContact)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: OutlinedButton.icon(
+              onPressed: _linkMember,
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              label: const Text('Link a family member'),
+            ),
+          ),
       ],
     );
   }

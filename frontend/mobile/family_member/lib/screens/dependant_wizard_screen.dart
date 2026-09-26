@@ -10,6 +10,7 @@ import '../api/biometric_enrollments_api.dart';
 import '../api/dependants_api.dart';
 import '../api/users_api.dart';
 import '../app_ui.dart';
+import '../widgets/family_link_panel.dart';
 import '../auth/cognito_auth_service.dart';
 import '../geo/kenya_areas.dart';
 
@@ -63,11 +64,18 @@ class DependantWizardScreen extends StatefulWidget {
        identity = null,
        onDone = null;
 
+  /// The Photo step's index, for opening the edit wizard straight on it.
+  static const photoStep = _photoStep;
+
   @override
   State<DependantWizardScreen> createState() => _DependantWizardScreenState();
 }
 
-const _stepLabels = ['Details', 'Location', 'Pin', 'Photo'];
+const _stepLabels = ['Details', 'Location', 'Pin', 'Family', 'Photo'];
+// Named, since editing's header jumps and the photo banner open specific steps. Family comes
+// after Pin because the dependant has to exist before anyone can be linked to them.
+const _familyStep = 3;
+const _photoStep = 4;
 const _kenyaCentre = LatLng(0.0236, 37.9062);
 
 class _DependantWizardScreenState extends State<DependantWizardScreen> {
@@ -102,6 +110,9 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   Uint8List? _photo;
   String? _photoResult; // 'active' | 'flagged' once enrolled
   List<BiometricEnrollment>? _currentPhotos; // editing: what's enrolled already
+  List<FamilyMemberLink>?
+  _members; // the Family step's list, loaded when first shown
+  bool _membersRequested = false;
 
   @override
   void initState() {
@@ -381,13 +392,81 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
       if (!mounted) return;
       setState(() {
         _created = dependant;
-        _step = 3;
+        _step = _familyStep;
       });
     } catch (e) {
       if (mounted) showSnack(context, errorText(e));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  // ------------------------------------------------------------------------------------------
+  // Family
+
+  Future<void> _loadMembers() async {
+    try {
+      final members = await widget.dependantsApi.listFamilyMembers(
+        (_created ?? widget.existing)!.id,
+      );
+      members.sort(
+        (a, b) => a.isPrimaryContact != b.isPrimaryContact
+            ? (a.isPrimaryContact ? -1 : 1)
+            : a.fullName.compareTo(b.fullName),
+      );
+      if (mounted) setState(() => _members = members);
+    } catch (_) {
+      // Only the list above the link form - linking still works without it.
+      if (mounted) setState(() => _members = const []);
+    }
+  }
+
+  Widget _buildFamily() {
+    final dependant = (_created ?? widget.existing)!;
+    if (!_membersRequested) {
+      _membersRequested = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadMembers());
+    }
+    final members = _members;
+    return _formList([
+      Text(
+        _editing
+            ? 'Family members linked to ${dependant.fullName}.'
+            : '${dependant.fullName} is registered. Link other family members who help care '
+                  'for them - or continue, and do it later from their page.',
+        style: const TextStyle(fontSize: 14, color: inkSecondary),
+      ),
+      if (members == null)
+        const Center(child: CircularProgressIndicator())
+      else if (members.isNotEmpty)
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            children: [
+              for (final member in members)
+                ListTile(
+                  dense: true,
+                  title: Text(member.fullName),
+                  subtitle: Text(
+                    [
+                      member.relationship ?? 'Relationship not set',
+                      if (member.isPrimaryContact) 'Primary contact',
+                    ].join(' · '),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      FamilyLinkPanel(
+        dependantsApi: widget.dependantsApi,
+        dependantId: dependant.id,
+        onLinked: (member) => setState(() => _members = [...?_members, member]),
+      ),
+    ]);
   }
 
   // ------------------------------------------------------------------------------------------
@@ -471,6 +550,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
                 0 => _buildDetails(),
                 1 => _buildLocation(),
                 2 => _buildExactLocation(),
+                _familyStep => _buildFamily(),
                 _ => _buildPhoto(),
               },
             ),
@@ -482,7 +562,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   }
 
   Widget _buildActions() {
-    final blocker = _editing && _step == 3 ? _saveBlocker : _blocker;
+    final blocker = _editing && _step == _photoStep ? _saveBlocker : _blocker;
     final Widget primary;
     final Widget? secondary;
     final back = OutlinedButton(
@@ -495,7 +575,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
       ),
       child: const Text('Back'),
     );
-    if (_editing && _step == 3) {
+    if (_editing && _step == _photoStep) {
       primary = ElevatedButton(
         onPressed: blocker == null && !_submitting ? _save : null,
         style: pillButtonStyle,
@@ -511,7 +591,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
             : const Text('Save'),
       );
       secondary = back;
-    } else if (_step == 3) {
+    } else if (_step == _photoStep) {
       primary = ElevatedButton(
         onPressed: _submitting ? null : widget.onDone,
         style: pillButtonStyle,
@@ -533,7 +613,11 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
               )
             : Text(_step == 2 && !_editing ? 'Register' : 'Next'),
       );
-      secondary = _step == 0 ? null : back;
+      // No Back from Family when registering: the dependant exists by then, and going back to Pin
+      // would register them again.
+      secondary = _step == 0 || (!_editing && _step == _familyStep)
+          ? null
+          : back;
     }
     return Material(
       color: Colors.white,
@@ -544,7 +628,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (blocker != null && (_step < 3 || _editing))
+                if (blocker != null && (_step < _familyStep || _editing))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(

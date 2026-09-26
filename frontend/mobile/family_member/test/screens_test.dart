@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:family_member/api/api_client.dart';
 import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
+import 'package:family_member/api/family_link_requests_api.dart';
 import 'package:family_member/api/users_api.dart';
 import 'package:family_member/api/visit_schedules_api.dart';
 import 'package:family_member/auth/cognito_auth_service.dart';
@@ -66,6 +67,7 @@ MockClient _backend({
       'nextCursor': null,
     },
     '/users/me' => {'id': 'u1', 'fullName': 'Achieng Otieno'},
+    '/family-link-requests' => {'incoming': [], 'outgoing': []},
     '/visit-schedules' when query['status'] == 'in_progress' => {
       'items': [_visit('v-now', 'in_progress', _now)],
       'nextCursor': null,
@@ -162,6 +164,7 @@ Future<void> _pumpHome(WidgetTester tester, Size size) async {
         visitSchedulesApi: VisitSchedulesApi(client),
         enrollmentsApi: BiometricEnrollmentsApi(client),
         usersApi: UsersApi(client),
+        linkRequestsApi: FamilyLinkRequestsApi(client),
         identity: IdentityClaims(sub: 'sub-1', role: 'family_member'),
         onSignedOut: () {},
       ),

@@ -306,7 +306,7 @@ void main() {
         expect(save().onPressed, isNotNull);
 
         // Editing: the step header jumps straight to any step.
-        await tester.tap(find.bySemanticsLabel('Step 4, Photo'));
+        await tester.tap(find.bySemanticsLabel('Step 5, Photo'));
         await tester.pumpAndSettle();
         expect(
           find.textContaining('Replace it if it no longer looks like them'),

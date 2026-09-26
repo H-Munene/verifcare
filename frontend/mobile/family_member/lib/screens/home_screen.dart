@@ -1,23 +1,31 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api/biometric_enrollments_api.dart';
 import '../api/dependants_api.dart';
+import '../api/family_link_requests_api.dart';
 import '../api/users_api.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
+import '../widgets/link_requests_sheet.dart';
 import '../widgets/visit_widgets.dart';
 import 'dependant_detail_screen.dart';
 import 'dependant_wizard_screen.dart';
+import 'join_family_screen.dart';
 
 /// The family member's dependants, each marked "In progress" while a caregiver is with them.
 /// The "Register a dependant" action keeps the post-sign-up "skip for now" choice reachable later.
+/// The bell holds family link requests: ones waiting for the caller's answer as a primary contact,
+/// and the outcome of the caller's own (the in-app notification, 2026-09-26).
 class HomeScreen extends StatefulWidget {
   final CognitoAuthService authService;
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
   final BiometricEnrollmentsApi enrollmentsApi;
   final UsersApi usersApi;
+  final FamilyLinkRequestsApi linkRequestsApi;
   final IdentityClaims identity;
   final VoidCallback onSignedOut;
 
@@ -28,6 +36,7 @@ class HomeScreen extends StatefulWidget {
     required this.visitSchedulesApi,
     required this.enrollmentsApi,
     required this.usersApi,
+    required this.linkRequestsApi,
     required this.identity,
     required this.onSignedOut,
   });
@@ -41,6 +50,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _dependantsWithOngoingVisit = {};
   String? _myUserId;
   String? _error;
+  // Link requests needing the caller's attention - the bell's count.
+  int _attention = 0;
 
   @override
   void initState() {
@@ -48,7 +59,41 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
   }
 
+  Future<void> _loadRequests() async {
+    try {
+      final requests = await widget.linkRequestsApi.list();
+      if (mounted) setState(() => _attention = requests.attentionCount);
+    } catch (_) {
+      // Only the bell's count - the sheet itself shows any error when opened.
+    }
+  }
+
+  Future<void> _openRequests() async {
+    await showLinkRequestsSheet(
+      context,
+      linkRequestsApi: widget.linkRequestsApi,
+      onJoinFamily: () {
+        Navigator.of(context).pop();
+        _joinFamily();
+      },
+      // An approval can add dependants to someone's list, and seen outcomes clear the count.
+      onChanged: _load,
+    );
+    if (mounted) _load();
+  }
+
+  Future<void> _joinFamily() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            JoinFamilyScreen(linkRequestsApi: widget.linkRequestsApi),
+      ),
+    );
+    if (mounted) _loadRequests();
+  }
+
   Future<void> _load() async {
+    unawaited(_loadRequests());
     setState(() => _error = null);
     try {
       // One in_progress query covers every dependant (it's already scoped to the caller's own),
@@ -132,6 +177,15 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('My dependants', style: TextStyle(fontSize: 16)),
         actions: [
           IconButton(
+            tooltip: 'Family requests',
+            onPressed: _openRequests,
+            icon: Badge(
+              isLabelVisible: _attention > 0,
+              label: Text('$_attention'),
+              child: const Icon(Icons.notifications_none),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
             onPressed: _signOut,
@@ -180,13 +234,25 @@ class _HomeScreenState extends State<HomeScreen> {
       ];
     }
     if (dependants.isEmpty) {
-      return const [
+      return [
         SectionCard(
-          padding: EdgeInsets.all(20),
-          child: Text(
-            "You haven't registered or been linked to a dependant yet. "
-            'Register one with the button below.',
-            style: TextStyle(color: inkSecondary),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "You haven't registered or been linked to a dependant yet. Register one with "
+                'the button below, or if someone in your family already registered them, ask '
+                'them to link you.',
+                style: TextStyle(color: inkSecondary),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: _joinFamily,
+                icon: const Icon(Icons.group_add_outlined),
+                label: const Text('Ask to join a family'),
+              ),
+            ],
           ),
         ),
       ];

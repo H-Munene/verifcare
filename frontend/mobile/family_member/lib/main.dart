@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api/api_client.dart';
 import 'api/biometric_enrollments_api.dart';
 import 'api/dependants_api.dart';
+import 'api/family_link_requests_api.dart';
 import 'api/terms_api.dart';
 import 'api/users_api.dart';
 import 'api/visit_schedules_api.dart';
@@ -11,6 +12,7 @@ import 'auth/registration.dart';
 import 'screens/consent_screen.dart';
 import 'screens/dependant_choice_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/join_family_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/dependant_wizard_screen.dart';
 import 'screens/sign_up_screen.dart';
@@ -27,6 +29,7 @@ void main() {
       visitSchedulesApi: VisitSchedulesApi(apiClient),
       enrollmentsApi: BiometricEnrollmentsApi(apiClient),
       termsApi: TermsApi(apiClient),
+      linkRequestsApi: FamilyLinkRequestsApi(apiClient),
     ),
   );
 }
@@ -38,6 +41,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   final VisitSchedulesApi visitSchedulesApi;
   final BiometricEnrollmentsApi enrollmentsApi;
   final TermsApi termsApi;
+  final FamilyLinkRequestsApi linkRequestsApi;
 
   const MzaziCareFamilyMemberApp({
     super.key,
@@ -47,6 +51,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
     required this.visitSchedulesApi,
     required this.enrollmentsApi,
     required this.termsApi,
+    required this.linkRequestsApi,
   });
 
   @override
@@ -64,6 +69,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
         visitSchedulesApi: visitSchedulesApi,
         enrollmentsApi: enrollmentsApi,
         termsApi: termsApi,
+        linkRequestsApi: linkRequestsApi,
       ),
     );
   }
@@ -81,6 +87,7 @@ class _RootScreen extends StatefulWidget {
   final VisitSchedulesApi visitSchedulesApi;
   final BiometricEnrollmentsApi enrollmentsApi;
   final TermsApi termsApi;
+  final FamilyLinkRequestsApi linkRequestsApi;
 
   const _RootScreen({
     required this.authService,
@@ -89,6 +96,7 @@ class _RootScreen extends StatefulWidget {
     required this.visitSchedulesApi,
     required this.enrollmentsApi,
     required this.termsApi,
+    required this.linkRequestsApi,
   });
 
   @override
@@ -145,6 +153,7 @@ class _RootScreenState extends State<_RootScreen> {
             visitSchedulesApi: widget.visitSchedulesApi,
             enrollmentsApi: widget.enrollmentsApi,
             usersApi: widget.usersApi,
+            linkRequestsApi: widget.linkRequestsApi,
             identity: identity,
             onSignedOut: () => setState(() => _identity = null),
           ),
@@ -172,6 +181,15 @@ class _RootScreenState extends State<_RootScreen> {
                   ),
                 ),
               );
+            },
+            onJoinFamily: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      JoinFamilyScreen(linkRequestsApi: widget.linkRequestsApi),
+                ),
+              );
+              _goToHome(identity);
             },
             onSkip: () => _goToHome(identity),
           ),
@@ -208,6 +226,7 @@ class _RootScreenState extends State<_RootScreen> {
           visitSchedulesApi: widget.visitSchedulesApi,
           enrollmentsApi: widget.enrollmentsApi,
           usersApi: widget.usersApi,
+          linkRequestsApi: widget.linkRequestsApi,
           identity: identity,
           onSignedOut: () => setState(() => _identity = null),
         ),
