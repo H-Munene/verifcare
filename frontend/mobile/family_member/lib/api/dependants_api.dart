@@ -48,12 +48,7 @@ class Dependant {
     _ => throw FormatException('Unexpected dependant: $json'),
   };
 
-  int ageOn(DateTime today) {
-    final hadBirthday =
-        today.month > dob.month ||
-        (today.month == dob.month && today.day >= dob.day);
-    return today.year - dob.year - (hadBirthday ? 0 : 1);
-  }
+  int ageOn(DateTime today) => ageOnDate(dob, today);
 
   /// "Ward, Constituency, County", skipping any that are missing.
   String? get areaText {
@@ -158,31 +153,38 @@ class DependantsApi {
         .toList();
   }
 
-  // POST /dependants. A family_member caller may only name themselves as primaryFamilyMember
-  // (enforced server-side). Still missing county/constituency/ward, which the backend now
-  // requires - the registration wizard rebuild (docs/family-app-plan.md step 4) fixes this.
-  Future<void> registerDependant({
+  /// POST /dependants, naming the caller as primary contact - a family_member may only name
+  /// themselves (enforced server-side). The radius is always the standard 20 m: widening it is a
+  /// supervisor decision (docs/family-app-plan.md, B3). Returns the new dependant.
+  Future<Dependant> registerDependant({
     required String fullName,
-    required String dob,
+    required DateTime dob,
+    required String county,
+    required String constituency,
+    required String ward,
     required double geofenceLat,
     required double geofenceLng,
-    required int geofenceRadiusMeters,
     required bool cognitiveMonitoringEnabled,
     required String selfCognitoSub,
     required String selfPhoneNumber,
     required String selfFullName,
     String? gender,
     String? homeAddressText,
+    String? primaryConditionSummary,
     String? relationship,
   }) async {
-    await _client.post('/dependants', {
+    final json = await _client.post('/dependants', {
       'fullName': fullName,
-      'dob': dob,
+      'dob': _isoDate(dob),
       'gender': ?gender,
       'homeAddressText': ?homeAddressText,
+      'primaryConditionSummary': ?primaryConditionSummary,
+      'county': county,
+      'constituency': constituency,
+      'ward': ward,
       'geofenceLat': geofenceLat,
       'geofenceLng': geofenceLng,
-      'geofenceRadiusMeters': geofenceRadiusMeters,
+      'geofenceRadiusMeters': standardGeofenceRadiusMeters,
       'cognitiveMonitoringEnabled': cognitiveMonitoringEnabled,
       'primaryFamilyMember': {
         'cognitoSub': selfCognitoSub,
@@ -192,5 +194,25 @@ class DependantsApi {
         'isPrimaryContact': true,
       },
     });
+    return Dependant.fromJson(json);
   }
+
+  static String _isoDate(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
+
+/// Whole years, counting a birthday only once it has passed this year.
+int ageOnDate(DateTime dob, DateTime today) {
+  final hadBirthday =
+      today.month > dob.month ||
+      (today.month == dob.month && today.day >= dob.day);
+  return today.year - dob.year - (hadBirthday ? 0 : 1);
+}
+
+/// The check-in radius every family-registered dependant gets: the web app's settled default,
+/// wide enough for typical phone GPS accuracy (~5 m outdoors, worse indoors).
+const standardGeofenceRadiusMeters = 20;
+
+/// Cognitive monitoring is only offered for dependants over this age - the same rule as the admin
+/// web wizard (RegisterDependantPage.tsx).
+const cognitiveMonitoringMinAgeExclusive = 65;

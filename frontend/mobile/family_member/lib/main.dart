@@ -142,6 +142,8 @@ class _RootScreenState extends State<_RootScreen> {
               MaterialPageRoute(
                 builder: (_) => RegisterDependantScreen(
                   dependantsApi: widget.dependantsApi,
+                  enrollmentsApi: widget.enrollmentsApi,
+                  usersApi: widget.usersApi,
                   identity: identity,
                   onDone: () => _goToHome(identity),
                 ),

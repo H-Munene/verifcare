@@ -81,8 +81,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // leaves that label off rather than blocking the list.
     if (_myUserId == null) {
       try {
-        final id = await widget.usersApi.getMyUserId();
-        if (mounted) setState(() => _myUserId = id);
+        final me = await widget.usersApi.getMe();
+        if (mounted) setState(() => _myUserId = me.id);
       } catch (_) {}
     }
   }
@@ -97,6 +97,8 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute<void>(
         builder: (_) => RegisterDependantScreen(
           dependantsApi: widget.dependantsApi,
+          enrollmentsApi: widget.enrollmentsApi,
+          usersApi: widget.usersApi,
           identity: widget.identity,
           onDone: () => Navigator.of(context).pop(),
         ),

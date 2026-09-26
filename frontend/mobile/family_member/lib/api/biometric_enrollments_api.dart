@@ -39,6 +39,35 @@ class BiometricEnrollmentsApi {
   final ApiClient _client;
   BiometricEnrollmentsApi(this._client);
 
+  /// Enrolls one reference photo: presign, PUT straight to S3, then confirm - the same three
+  /// calls as the admin web wizard's Photo step. Returns the new enrollment's status: 'active',
+  /// or 'flagged' when the face matches someone already enrolled (a supervisor then decides).
+  /// A photo with no face or several faces is rejected with a 422 ApiException.
+  Future<String> enrollDependantPhoto({
+    required String dependantId,
+    required List<int> jpegBytes,
+    int imageOrder = 1,
+  }) async {
+    final presign = await _client.post('/biometric-enrollments/upload-url', {
+      'subjectType': 'dependant',
+      'subjectId': dependantId,
+      'imageOrder': imageOrder,
+      'contentType': 'image/jpeg',
+    });
+    await ApiClient.uploadToPresignedUrl(
+      presign['uploadUrl'] as String,
+      jpegBytes,
+      'image/jpeg',
+    );
+    final enrollment = await _client.post('/biometric-enrollments', {
+      'subjectType': 'dependant',
+      'subjectId': dependantId,
+      's3Key': presign['s3Key'] as String,
+      'imageOrder': imageOrder,
+    });
+    return enrollment['status'] as String;
+  }
+
   /// The dependant's current photos: active and flagged ones. Superseded photos (replaced by a
   /// newer one) are left out, since they're no longer what check-in compares against.
   Future<List<BiometricEnrollment>> listCurrentForDependant(
