@@ -1,18 +1,14 @@
 // The Overview's visit-outcomes card, styled on the user's inspiration
 // (temp_images/visit_outcomes_inpiration_ui.png, 2026-09-26): the completion rate as a big number
 // with its change against the previous 14 days, the same percentage as a row of thin bars, three
-// supporting numbers, and when it was updated. (The per-outcome list below it was removed at the
+// supporting numbers. (The per-outcome list below it was removed at the
 // user's request, 2026-09-26; the chart carries its own legend instead.)
 //
 // The completion rate is completed / (completed + missed): open and cancelled visits haven't had
 // the chance to succeed or fail, so they don't count either way.
 
-import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
-import { HugeiconsIcon } from '@hugeicons/react';
-import { Link } from 'react-router-dom';
 import type { DashboardOverview } from '../api/dashboard';
 import { OUTCOME_SERIES, dayLabel } from './outcomeSeries';
-import { formatTime } from './visitStates';
 import './OutcomeSummary.css';
 
 const TICKS = 40;
@@ -56,7 +52,7 @@ export function OutcomeSummary({ overview }: { overview: DashboardOverview }) {
             >
               {change > 0 ? '+' : change < 0 ? '−' : '±'}
               {Math.abs(change)} pts
-              <span className="outcome-summary__sr-only"> from the previous 14 days</span>
+              <span className="sr-only"> from the previous 14 days</span>
             </span>
           ) : null}
         </div>
@@ -102,14 +98,6 @@ export function OutcomeSummary({ overview }: { overview: DashboardOverview }) {
             <dd>{perDay.toFixed(perDay < 10 ? 1 : 0)}</dd>
           </div>
         </dl>
-      </div>
-
-      <div className="outcome-summary__footer">
-        <span>Updated {formatTime(overview.generatedAt, overview.timeZone)}</span>
-        <Link to="/visits" className="outcome-summary__link">
-          View visits
-          <HugeiconsIcon icon={ArrowRight01Icon} size={14} strokeWidth={1.8} aria-hidden />
-        </Link>
       </div>
     </div>
   );

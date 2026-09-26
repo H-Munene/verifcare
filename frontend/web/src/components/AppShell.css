@@ -110,6 +110,11 @@
      is on the page inside it. Capping this element instead left the scrollbar floating
      mid-window with empty space to its right on wide screens (user report, 2026-09-26). */
   overflow-y: auto;
+  /* The containing block for anything absolutely positioned on a page that has no nearer
+     positioned ancestor - a visually hidden label, say. Without it such an element is placed
+     against the whole document, escapes this scroll area and gives the window a second
+     scrollbar (it happened twice on the Overview, 2026-09-26). */
+  position: relative;
 }
 
 /* 1200px wide including the 24px side padding, as before, and centred so the space either side

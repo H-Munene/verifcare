@@ -92,7 +92,7 @@ export function CarePlanPage() {
                 <Th icon={AlertCircleIcon}>Required</Th>
                 <Th icon={CheckmarkBadge01Icon}>Status</Th>
                 <Th>
-                  <span className="care-plan-page__sr-only">Actions</span>
+                  <span className="sr-only">Actions</span>
                 </Th>
               </tr>
             </thead>

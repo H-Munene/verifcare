@@ -264,7 +264,7 @@ export function VisitsPage() {
                   </SortableTh>
                   <Th icon={CheckmarkBadge01Icon}>Status</Th>
                   <Th>
-                    <span className="visits-page__sr-only">Actions</span>
+                    <span className="sr-only">Actions</span>
                   </Th>
                 </tr>
               </thead>

@@ -96,32 +96,3 @@
   color: var(--color-ink-primary);
   font-variant-numeric: tabular-nums;
 }
-
-.outcome-summary__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-  color: var(--color-ink-subtle);
-}
-
-.outcome-summary__link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-ink-primary);
-  font-weight: 500;
-}
-
-.outcome-summary__link:hover {
-  color: var(--color-accent);
-}
-
-.outcome-summary__sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}

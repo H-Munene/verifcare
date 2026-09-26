@@ -207,6 +207,29 @@
   grid-area: attention;
 }
 
+.overview__panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border-structural);
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.overview__foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-ink-primary);
+  font-weight: 500;
+}
+
+.overview__foot-link:hover {
+  color: var(--color-accent);
+}
+
 .overview__outcomes {
   display: flex;
   flex-wrap: wrap;
@@ -338,6 +361,14 @@
 .overview__visit-state .overview__state-dot {
   width: 8px;
   height: 8px;
+}
+
+.overview__attention-panel {
+  margin-top: 14px;
+}
+
+.overview__attention-intro {
+  margin: 0 0 10px;
 }
 
 .overview__attention-list {
