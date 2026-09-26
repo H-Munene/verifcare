@@ -93,6 +93,46 @@
   box-shadow: 0 0 0 3px var(--color-accent-tint-bg);
 }
 
+.ds-input-wrap {
+  position: relative;
+  display: flex;
+}
+
+.ds-input-wrap .ds-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Room for the toggle so typed text never runs under it. */
+.ds-input--with-toggle {
+  padding-right: 36px;
+}
+
+.ds-input__toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: var(--control-height);
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+  border-radius: var(--radius-default);
+}
+
+.ds-input__toggle:hover {
+  color: var(--color-ink-primary);
+}
+
+.ds-input__toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
 .ds-input--error {
   border-color: var(--color-danger-text);
 }

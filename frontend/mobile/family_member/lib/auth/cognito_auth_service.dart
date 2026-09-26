@@ -154,8 +154,14 @@ class CognitoAuthService {
   /// (the pool's account recovery is email-only, see infra/lib/auth.ts). With user-existence
   /// errors prevented on this app client, an unknown email also completes normally without
   /// sending anything, so the screen must not claim a code was definitely sent.
+  /// UserNotFoundException is treated the same way in case the client ever answers the legacy
+  /// way, so the screen never reveals whether an email is registered.
   Future<void> requestPasswordReset(String email) async {
-    await CognitoUser(email, _pool).forgotPassword();
+    try {
+      await CognitoUser(email, _pool).forgotPassword();
+    } on CognitoClientException catch (e) {
+      if (e.code != 'UserNotFoundException') rethrow;
+    }
   }
 
   /// Sets the new password using the emailed code (ConfirmForgotPassword). The user signs in
