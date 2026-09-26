@@ -98,6 +98,13 @@
   font-variant-numeric: tabular-nums;
 }
 
-.visits-map__time-label {
+.visits-map__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.visits-map__time-icon {
+  flex: none;
   color: var(--color-ink-muted);
 }
