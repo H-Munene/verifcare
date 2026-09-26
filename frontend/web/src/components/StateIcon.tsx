@@ -10,12 +10,8 @@ import { CheckIcon } from '@/components/icons/check';
 import { CircleDashedIcon } from '@/components/icons/circle-dashed';
 import { ClockIcon } from '@/components/icons/clock';
 import { XIcon } from '@/components/icons/x';
+import type { AnimatedIconHandle } from '../lib/animatedIcon';
 import { STATE_META } from './visitStates';
-
-interface AnimatedIconHandle {
-  startAnimation: () => void;
-  stopAnimation: () => void;
-}
 
 const ICONS = {
   upcoming: { Icon: ClockIcon, color: 'var(--color-state-upcoming-icon)' },

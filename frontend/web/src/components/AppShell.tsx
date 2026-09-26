@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { BellIcon } from '@/components/icons/bell';
+import { CalendarCheckIcon } from '@/components/icons/calendar-check';
+import { HandHeartIcon } from '@/components/icons/hand-heart';
+import { LayoutGridIcon } from '@/components/icons/layout-grid';
+import { ShieldCheckIcon } from '@/components/icons/shield-check';
+import { UsersIcon } from '@/components/icons/users';
 import { NavItem } from '../design-system/NavItem';
 import { Breadcrumbs } from './Breadcrumbs';
 import './AppShell.css';
@@ -9,13 +15,15 @@ import './AppShell.css';
 // sections, top bar with the signed-in user's identity and sign-out. Overview, Caregivers,
 // Dependants and Visits are real routes - every other section renders present-but-disabled, so the
 // shell matches the design without claiming functionality that doesn't exist yet.
+// Icons are lucide-animated (2026-09-26): caregivers are the staff (users), dependants the people
+// cared for (a hand holding a heart).
 const NAV_SECTIONS = [
-  { label: 'Overview', path: '/overview' },
-  { label: 'Caregivers', path: '/caregivers' },
-  { label: 'Dependants', path: '/dependants' },
-  { label: 'Visits', path: '/visits' },
-  { label: 'Alerts', path: undefined },
-  { label: 'Compliance', path: undefined },
+  { label: 'Overview', path: '/overview', icon: LayoutGridIcon },
+  { label: 'Caregivers', path: '/caregivers', icon: UsersIcon },
+  { label: 'Dependants', path: '/dependants', icon: HandHeartIcon },
+  { label: 'Visits', path: '/visits', icon: CalendarCheckIcon },
+  { label: 'Alerts', path: undefined, icon: BellIcon },
+  { label: 'Compliance', path: undefined, icon: ShieldCheckIcon },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -50,6 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavItem
               key={section.label}
               label={section.label}
+              icon={section.icon}
               disabled={!section.path}
               active={Boolean(section.path && location.pathname.startsWith(section.path))}
               onClick={

@@ -217,8 +217,8 @@ export function OverviewPage() {
         </div>
 
         <section className="overview__map" aria-labelledby="overview-map">
-          {/* Same height as the visit list's header, so the map's top border and the line under
-              "All visits" meet as one line (user request, 2026-09-26). */}
+          {/* Same height as the visit list's header, and both have an edge-to-edge line under
+              them, so the line under "Map" and the one under "All visits" read as one. */}
           <div className="overview__section-head">
             <h2 id="overview-map" className="overview__panel-title">
               Map
@@ -236,7 +236,7 @@ export function OverviewPage() {
         </section>
 
         <section className="overview__panel overview__visits" aria-labelledby="overview-visits">
-          <div className="overview__section-head overview__visits-head">
+          <div className="overview__section-head">
             <h2 id="overview-visits" className="overview__panel-title">
               {focusState ? STATE_META[focusState].label : 'All visits'}
             </h2>
