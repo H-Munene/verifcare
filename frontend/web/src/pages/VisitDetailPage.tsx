@@ -113,11 +113,7 @@ export function VisitDetailPage() {
 
       <Card className="visit-detail-page__timeline-card">
         <div className="visit-detail-page__section-title">Visit Timeline</div>
-        {verificationQuery.isLoading ? (
-          <p>Loading...</p>
-        ) : (
-          <Timeline steps={steps} />
-        )}
+        {verificationQuery.isLoading ? <p>Loading...</p> : <Timeline steps={steps} />}
       </Card>
     </div>
   );

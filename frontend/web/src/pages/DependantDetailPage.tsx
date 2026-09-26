@@ -95,11 +95,7 @@ export function DependantDetailPage() {
         </div>
       </div>
 
-      <Tabs
-        tabs={TABS}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as DetailTab)}
-      />
+      <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 
       <div className="dependant-detail__tab-panel">
         {activeTab === 'family' ? (
