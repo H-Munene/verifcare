@@ -41,8 +41,12 @@ export interface DashboardOverview {
   generatedAt: string;
   visits: OverviewVisit[];
   trend: TrendDay[];
-  /** Completed and missed visits in the 14 days before the trend, to compare rates with. */
-  previousPeriod: { completed: number; missed: number };
+  /**
+   * Completed and missed visits in the 14 days before the trend, to compare rates with. Optional
+   * because the web app and the API deploy separately: an API from before 2026-09-26's change
+   * doesn't send it, and the page then just leaves the comparison out.
+   */
+  previousPeriod?: { completed: number; missed: number };
   attention: {
     missedVisitAlerts: { total: number; items: MissedVisitAlert[] };
     flaggedPhotos: number;

@@ -24,7 +24,9 @@ export function OutcomeSummary({ overview }: { overview: DashboardOverview }) {
     OUTCOME_SERIES.map((s) => [s.key, trend.reduce((n, d) => n + d[s.key], 0)]),
   ) as Record<(typeof OUTCOME_SERIES)[number]['key'], number>;
   const rate = rateOf(totals.completed, totals.missed);
-  const previousRate = rateOf(previousPeriod.completed, previousPeriod.missed);
+  const previousRate = previousPeriod
+    ? rateOf(previousPeriod.completed, previousPeriod.missed)
+    : null;
   const change = rate !== null && previousRate !== null ? Math.round(rate - previousRate) : null;
   const allVisits = Object.values(totals).reduce((a, b) => a + b, 0);
   const perDay = allVisits / trend.length;

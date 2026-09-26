@@ -11,6 +11,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import { NavItem } from '../design-system/NavItem';
 import { Breadcrumbs } from './Breadcrumbs';
+import { ErrorBoundary } from './ErrorBoundary';
 import './AppShell.css';
 
 // Matches the wireframe's global chrome (temp_images's design prompt): left sidebar nav with all
@@ -86,7 +87,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
           </div>
         </header>
-        <main className="app-shell__content">{children}</main>
+        <main className="app-shell__content">
+          {/* A page that fails to render shows a message here instead of blanking the app; keyed
+              by route, so moving to another page tries again. */}
+          <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
+        </main>
       </div>
     </div>
   );
