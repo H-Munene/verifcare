@@ -398,7 +398,14 @@
 }
 
 .overview__attention-body {
+  flex: 1;
   min-width: 0;
+}
+
+/* A row's action sits on its right, level with the title. */
+.overview__attention-button {
+  flex: none;
+  align-self: flex-start;
 }
 
 .overview__attention-title {

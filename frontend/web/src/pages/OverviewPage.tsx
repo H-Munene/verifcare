@@ -372,6 +372,8 @@ export function OverviewPage() {
 
 type AttentionCategory = 'missed' | 'photos' | 'noPhoto';
 
+const ATTENTION_SHOWN = 3;
+
 // "Needs your attention", one category at a time behind segmented buttons (user request,
 // 2026-09-26): missed visits to acknowledge, photos flagged for review, and dependants who can't
 // be scheduled without a photo. It opens on the first category with anything in it.
@@ -391,6 +393,10 @@ function AttentionList({
   onAcknowledge: (notificationId: string) => void;
 }) {
   const { missedVisitAlerts, flaggedPhotos, dependantsWithoutPhoto } = attention;
+  // At most three entries per category (user request, 2026-09-26); the server sends five, so the
+  // next one moves up as soon as one is acknowledged.
+  const alerts = missedVisitAlerts.items.slice(0, ATTENTION_SHOWN);
+  const withoutPhoto = dependantsWithoutPhoto.items.slice(0, ATTENTION_SHOWN);
   const segments: { id: AttentionCategory; label: string; count: number }[] = [
     { id: 'missed', label: 'Missed visits', count: missedVisitAlerts.total },
     { id: 'photos', label: 'Photo review', count: flaggedPhotos },
@@ -427,7 +433,7 @@ function AttentionList({
             <p className="overview__empty">No missed visits to acknowledge.</p>
           ) : (
             <ul className="overview__attention-list">
-              {missedVisitAlerts.items.map((alert) => (
+              {alerts.map((alert) => (
                 <li key={alert.id} className="overview__attention-item">
                   <span
                     className="overview__state-dot"
@@ -441,25 +447,26 @@ function AttentionList({
                     <p className="overview__attention-meta">
                       {alert.caregiverName}, due {due(alert.scheduledStart)}
                     </p>
-                    <div className="overview__attention-actions">
-                      <Button
-                        type="button"
-                        disabled={acknowledging === alert.id}
-                        onClick={() => onAcknowledge(alert.id)}
-                      >
-                        {acknowledging === alert.id ? 'Acknowledging...' : 'Acknowledge'}
-                      </Button>
-                      {linksEnabled ? (
+                    {linksEnabled ? (
+                      <div className="overview__attention-actions">
                         <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
-                      ) : null}
-                    </div>
+                      </div>
+                    ) : null}
                   </div>
+                  <Button
+                    type="button"
+                    className="overview__attention-button"
+                    disabled={acknowledging === alert.id}
+                    onClick={() => onAcknowledge(alert.id)}
+                  >
+                    {acknowledging === alert.id ? 'Acknowledging...' : 'Acknowledge'}
+                  </Button>
                 </li>
               ))}
-              {missedVisitAlerts.total > missedVisitAlerts.items.length ? (
+              {missedVisitAlerts.total > alerts.length ? (
                 <li className="overview__attention-more">
                   {plural(
-                    missedVisitAlerts.total - missedVisitAlerts.items.length,
+                    missedVisitAlerts.total - alerts.length,
                     'more missed visit',
                     'more missed visits',
                   )}{' '}
@@ -511,7 +518,7 @@ function AttentionList({
                 Visits can't be scheduled for these dependants until a photo is added.
               </p>
               <ul className="overview__attention-list">
-                {dependantsWithoutPhoto.items.map((d) => (
+                {withoutPhoto.map((d) => (
                   <li key={d.id} className="overview__attention-item">
                     <span
                       className="overview__state-dot"
@@ -529,9 +536,9 @@ function AttentionList({
                     </div>
                   </li>
                 ))}
-                {dependantsWithoutPhoto.total > dependantsWithoutPhoto.items.length ? (
+                {dependantsWithoutPhoto.total > withoutPhoto.length ? (
                   <li className="overview__attention-more">
-                    And {dependantsWithoutPhoto.total - dependantsWithoutPhoto.items.length} more.
+                    And {dependantsWithoutPhoto.total - withoutPhoto.length} more.
                   </li>
                 ) : null}
               </ul>
