@@ -25,7 +25,9 @@ export interface DashboardRouterDependencies {
 const TIME_ZONE = 'Africa/Nairobi';
 const UTC_OFFSET = '+03:00';
 const TREND_DAYS = 14;
-const ATTENTION_LIST_LIMIT = 5;
+// The Overview lists every item needing attention in a scrolling panel (user request,
+// 2026-09-26); the cap only bounds the response, and `total` still says how many there are.
+const ATTENTION_LIST_LIMIT = 100;
 
 /**
  * Where a visit stands, as the Overview map colours it (user's definitions, 2026-09-26):

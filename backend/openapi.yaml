@@ -1787,7 +1787,7 @@ components:
           properties:
             missedVisitAlerts:
               type: object
-              description: Unacknowledged missed-visit alerts; `items` is the newest five.
+              description: Unacknowledged missed-visit alerts, newest first; `items` holds up to 100.
               properties:
                 total: { type: integer }
                 items:
@@ -1806,7 +1806,7 @@ components:
               description: Photos flagged as possible duplicates, waiting for review.
             dependantsWithoutPhoto:
               type: object
-              description: Active dependants with no usable photo, who can't be scheduled; `items` is the first five by name.
+              description: Active dependants with no usable photo, who can't be scheduled; `items` holds up to 100, by name.
               properties:
                 total: { type: integer }
                 items:
