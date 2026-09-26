@@ -231,6 +231,16 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   Future<void> _save() async {
     setState(() => _submitting = true);
     try {
+      // Save is the one button for the whole edit, so it also enrols a replacement photo.
+      // Photo first: a rejected one (no face, several faces) stops here with nothing saved, and a
+      // retry after a failed PATCH skips the photo that already went through.
+      if (_photo case final photo? when _photoResult == null) {
+        final status = await widget.enrollmentsApi.enrollDependantPhoto(
+          dependantId: widget.existing!.id,
+          jpegBytes: photo,
+        );
+        if (mounted) setState(() => _photoResult = status);
+      }
       final updated = await widget.dependantsApi.updateDependant(
         widget.existing!.id,
         fullName: '${_text(_firstName)} ${_text(_lastName)}',
@@ -245,7 +255,17 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         cognitiveMonitoringEnabled:
             _cognitiveMonitoringAllowed && _cognitiveMonitoring,
       );
-      if (mounted) Navigator.of(context).pop(updated);
+      if (!mounted) return;
+      // The screen closes, so the review notice goes in a snack that outlives it.
+      if (_photoResult == 'flagged') {
+        showSnack(
+          context,
+          'Saved. The new photo looks like someone already enrolled, so a '
+          'supervisor will review it.',
+          error: false,
+        );
+      }
+      Navigator.of(context).pop(updated);
     } catch (e) {
       if (mounted) showSnack(context, errorText(e));
     } finally {
@@ -376,8 +396,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         jpegBytes: _photo!,
       );
       if (mounted) setState(() => _photoResult = status);
-      // Editing: the new photo supersedes the old one in the same slot, so refresh the preview.
-      if (_editing) unawaited(_loadCurrentPhotos());
     } catch (e) {
       // e.g. a 422 for a photo with no face or several faces - the server's detail says which.
       if (mounted) showSnack(context, errorText(e));
@@ -810,7 +828,8 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
       Text(
         _editing
             ? 'Caregivers confirm who they are visiting against this photo at '
-                  'every check-in. Replace it if it no longer looks like them.'
+                  'every check-in. Replace it if it no longer looks like them - '
+                  'the new photo is used once you save.'
             : '$name is registered. Add a clear photo of their face - caregivers '
                   'confirm who they are visiting against it at every check-in.',
         style: const TextStyle(fontSize: 14, color: inkSecondary),
@@ -859,7 +878,8 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         _ => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (photo != null) ...[
+            // Registering has no Save - Finish only closes - so the upload needs its own button.
+            if (photo != null && !_editing) ...[
               ElevatedButton(
                 onPressed: _submitting ? null : _uploadPhoto,
                 style: pillButtonStyle,
