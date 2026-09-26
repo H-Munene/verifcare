@@ -159,10 +159,24 @@ export function createDashboardRouter(dependencies: DashboardRouterDependencies)
       const date = query.date ?? nairobiDate(now);
       const nextDay = addDays(date, 1);
       const trendFrom = addDays(date, -(TREND_DAYS - 1));
+      // The 14 days before the trend, for the Overview's "change vs the previous 14 days"
+      // (2026-09-26): its completion rate is compared with this period's.
+      const previousFrom = addDays(trendFrom, -TREND_DAYS);
 
-      // ponytail: the trend loads 14 days of visit rows and counts them here, fine at pilot
-      // volume; move the counting into a GROUP BY if a supervisor's visit volume gets large.
-      const trendVisits = await visitsBetween(db, dayStart(trendFrom), dayStart(nextDay));
+      // ponytail: loads 28 days of visit rows and counts them here, fine at pilot volume; move
+      // the counting into a GROUP BY if a supervisor's visit volume gets large.
+      const loaded = await visitsBetween(db, dayStart(previousFrom), dayStart(nextDay));
+      const trendStart = dayStart(trendFrom);
+      const trendVisits = loaded.filter((v) => v.scheduledStart >= trendStart);
+      const previousPeriod = { completed: 0, missed: 0 };
+      for (const visit of loaded) {
+        if (visit.scheduledStart < trendStart) {
+          const outcome = trendOutcome(visit, now);
+          if (outcome === 'completed' || outcome === 'missed') {
+            previousPeriod[outcome] += 1;
+          }
+        }
+      }
       const dayFrom = dayStart(date);
       const dayVisits = trendVisits.filter((v) => v.scheduledStart >= dayFrom);
 
@@ -250,6 +264,7 @@ export function createDashboardRouter(dependencies: DashboardRouterDependencies)
             dependant: { id: v.dependantId, fullName: v.dependantName, lat: v.lat, lng: v.lng },
           })),
         trend: trendDays,
+        previousPeriod,
         attention: {
           missedVisitAlerts: {
             total: alertTotal?.count ?? 0,

@@ -1735,7 +1735,7 @@ components:
   schemas:
     DashboardOverview:
       type: object
-      required: [date, timeZone, generatedAt, visits, trend, attention]
+      required: [date, timeZone, generatedAt, visits, trend, previousPeriod, attention]
       properties:
         date: { type: string, format: date }
         timeZone: { type: string, example: Africa/Nairobi }
@@ -1776,6 +1776,12 @@ components:
               missed: { type: integer }
               cancelled: { type: integer }
               open: { type: integer }
+        previousPeriod:
+          type: object
+          description: Completed and missed visits in the 14 days before `trend`, so a client can compare completion rates.
+          properties:
+            completed: { type: integer }
+            missed: { type: integer }
         attention:
           type: object
           properties:

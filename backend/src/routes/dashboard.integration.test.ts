@@ -87,6 +87,7 @@ interface OverviewBody {
     dependant: { fullName: string; lat: number; lng: number };
   }[];
   trend: { date: string; completed: number; missed: number; cancelled: number; open: number }[];
+  previousPeriod: { completed: number; missed: number };
   attention: {
     missedVisitAlerts: {
       total: number;
@@ -278,9 +279,10 @@ describe.skipIf(!hasTestDb)('GET /dashboard/overview (real Postgres)', () => {
       cancelled: 1,
       open: 3,
     });
-    // The 12th is outside the window.
+    // The 12th is outside the window, but in the 14 days before it, for the comparison.
     const total = body.trend.reduce((n, d) => n + d.completed + d.missed + d.cancelled + d.open, 0);
     expect(total).toBe(7);
+    expect(body.previousPeriod).toEqual({ completed: 0, missed: 1 });
   });
 
   it('shows another day when asked', async () => {
