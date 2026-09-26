@@ -103,6 +103,13 @@
   min-width: 0;
 }
 
+/* Edge (and old IE) add their own reveal eye to password inputs; PasswordInput has its own
+   toggle, so the browser's is hidden to avoid showing two. */
+.ds-input--with-toggle::-ms-reveal,
+.ds-input--with-toggle::-ms-clear {
+  display: none;
+}
+
 /* Room for the toggle so typed text never runs under it. */
 .ds-input--with-toggle {
   padding-right: 36px;
