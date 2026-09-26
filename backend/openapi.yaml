@@ -1713,45 +1713,45 @@ components:
       type: object
       required: [date, timeZone, generatedAt, visits, trend, attention]
       properties:
-        date: {type: string, format: date}
-        timeZone: {type: string, example: Africa/Nairobi}
-        generatedAt: {type: string, format: date-time}
+        date: { type: string, format: date }
+        timeZone: { type: string, example: Africa/Nairobi }
+        generatedAt: { type: string, format: date-time }
         visits:
           type: array
           items:
             type: object
             properties:
-              id: {type: string, format: uuid}
-              state: {type: string, enum: [upcoming, awaiting_checkin, checked_in, no_checkin]}
-              status: {type: string}
-              scheduledStart: {type: string, format: date-time}
-              scheduledEnd: {type: string, format: date-time}
-              checkinAt: {type: [string, 'null'], format: date-time}
-              checkoutAt: {type: [string, 'null'], format: date-time}
+              id: { type: string, format: uuid }
+              state: { type: string, enum: [upcoming, awaiting_checkin, checked_in, no_checkin] }
+              status: { type: string }
+              scheduledStart: { type: string, format: date-time }
+              scheduledEnd: { type: string, format: date-time }
+              checkinAt: { type: [string, 'null'], format: date-time }
+              checkoutAt: { type: [string, 'null'], format: date-time }
               caregiver:
                 type: object
                 properties:
-                  id: {type: string, format: uuid}
-                  fullName: {type: string}
-                  phoneNumber: {type: string}
+                  id: { type: string, format: uuid }
+                  fullName: { type: string }
+                  phoneNumber: { type: string }
               dependant:
                 type: object
                 properties:
-                  id: {type: string, format: uuid}
-                  fullName: {type: string}
-                  lat: {type: number}
-                  lng: {type: number}
+                  id: { type: string, format: uuid }
+                  fullName: { type: string }
+                  lat: { type: number }
+                  lng: { type: number }
         trend:
           type: array
           description: 14 days, oldest first. `open` is visits not yet completed or missed.
           items:
             type: object
             properties:
-              date: {type: string, format: date}
-              completed: {type: integer}
-              missed: {type: integer}
-              cancelled: {type: integer}
-              open: {type: integer}
+              date: { type: string, format: date }
+              completed: { type: integer }
+              missed: { type: integer }
+              cancelled: { type: integer }
+              open: { type: integer }
         attention:
           type: object
           properties:
@@ -1759,18 +1759,18 @@ components:
               type: object
               description: Unacknowledged missed-visit alerts; `items` is the newest five.
               properties:
-                total: {type: integer}
+                total: { type: integer }
                 items:
                   type: array
                   items:
                     type: object
                     properties:
-                      id: {type: string, format: uuid}
-                      sentAt: {type: [string, 'null'], format: date-time}
-                      visitScheduleId: {type: string, format: uuid}
-                      scheduledStart: {type: string, format: date-time}
-                      dependantName: {type: string}
-                      caregiverName: {type: string}
+                      id: { type: string, format: uuid }
+                      sentAt: { type: [string, 'null'], format: date-time }
+                      visitScheduleId: { type: string, format: uuid }
+                      scheduledStart: { type: string, format: date-time }
+                      dependantName: { type: string }
+                      caregiverName: { type: string }
             flaggedPhotos:
               type: integer
               description: Photos flagged as possible duplicates, waiting for review.
@@ -1778,14 +1778,14 @@ components:
               type: object
               description: Active dependants with no usable photo, who can't be scheduled; `items` is the first five by name.
               properties:
-                total: {type: integer}
+                total: { type: integer }
                 items:
                   type: array
                   items:
                     type: object
                     properties:
-                      id: {type: string, format: uuid}
-                      fullName: {type: string}
+                      id: { type: string, format: uuid }
+                      fullName: { type: string }
     FamilyLinkRequests:
       type: object
       required: [incoming, outgoing]
@@ -1796,43 +1796,43 @@ components:
             type: object
             required: [id, requester, relationship, createdAt, dependants]
             properties:
-              id: {type: string, format: uuid}
+              id: { type: string, format: uuid }
               requester:
                 type: object
                 properties:
-                  fullName: {type: string}
-                  email: {type: [string, 'null']}
-                  phoneNumber: {type: [string, 'null']}
-              relationship: {type: [string, 'null']}
-              createdAt: {type: string, format: date-time}
+                  fullName: { type: string }
+                  email: { type: [string, 'null'] }
+                  phoneNumber: { type: [string, 'null'] }
+              relationship: { type: [string, 'null'] }
+              createdAt: { type: string, format: date-time }
               dependants:
                 type: array
                 items:
                   type: object
                   properties:
-                    id: {type: string, format: uuid}
-                    fullName: {type: string}
-                    alreadyLinked: {type: boolean}
+                    id: { type: string, format: uuid }
+                    fullName: { type: string }
+                    alreadyLinked: { type: boolean }
         outgoing:
           type: array
           items:
             type: object
             required: [id, targetContact, status, createdAt, decidedAt, unread, linkedDependants]
             properties:
-              id: {type: string, format: uuid}
-              targetContact: {type: string}
-              relationship: {type: [string, 'null']}
-              status: {type: string, enum: [pending, approved, rejected]}
-              createdAt: {type: string, format: date-time}
-              decidedAt: {type: [string, 'null'], format: date-time}
-              unread: {type: boolean}
+              id: { type: string, format: uuid }
+              targetContact: { type: string }
+              relationship: { type: [string, 'null'] }
+              status: { type: string, enum: [pending, approved, rejected] }
+              createdAt: { type: string, format: date-time }
+              decidedAt: { type: [string, 'null'], format: date-time }
+              unread: { type: boolean }
               linkedDependants:
                 type: array
                 items:
                   type: object
                   properties:
-                    id: {type: string, format: uuid}
-                    fullName: {type: string}
+                    id: { type: string, format: uuid }
+                    fullName: { type: string }
     CurrentTerms:
       type: object
       required: [document, version, title, effectiveDate, sections, acceptedAt]
@@ -2274,7 +2274,17 @@ components:
         absent from a family member's response altogether, since a national ID number is
         sensitive and another family member has no need for it.
       required:
-        [dependantId, familyMemberUserId, fullName, isPrimaryContact, addedBy, createdAt, email, phoneNumber, addedByName]
+        [
+          dependantId,
+          familyMemberUserId,
+          fullName,
+          isPrimaryContact,
+          addedBy,
+          createdAt,
+          email,
+          phoneNumber,
+          addedByName,
+        ]
       properties:
         dependantId:
           type: string
