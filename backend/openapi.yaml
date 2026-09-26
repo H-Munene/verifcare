@@ -34,6 +34,8 @@ security:
   - bearerAuth: []
 
 tags:
+  - name: Terms
+    description: The terms of use and privacy notice each mobile app's users must accept (the consent screen).
   - name: Users
     description: Generic user profiles (any role) - creation, lookup, and offboarding.
   - name: Caregivers
@@ -1232,6 +1234,83 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /terms/current:
+    get:
+      tags: [Terms]
+      summary: Get the current terms for the caller's app
+      description: |
+        The current terms of use and privacy notice for the caller's role (`caregiver` or
+        `family_member`; supervisors have none), and whether the caller has accepted this exact
+        version. The mobile apps show a consent screen that can't be dismissed until it's accepted.
+        Publishing a new `version` asks every user of that app to accept again.
+      operationId: getCurrentTerms
+      responses:
+        '200':
+          description: The current document and the caller's acceptance of it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentTerms'
+        '403':
+          description: The caller has no users row yet (a family member must finish registering first).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: There are no app terms for the caller's role (supervisor).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /terms/current/accept:
+    post:
+      tags: [Terms]
+      summary: Accept the current terms
+      description: |
+        Records the caller's acceptance of the version they were shown. Idempotent: accepting again
+        keeps the original acceptance time (acceptances are append-only).
+      operationId: acceptCurrentTerms
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: string
+                  description: The version the user was shown; must be the current one.
+      responses:
+        '200':
+          description: Accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [document, version, acceptedAt]
+                properties:
+                  document:
+                    type: string
+                    enum: [caregiver, family_member]
+                  version:
+                    type: string
+                  acceptedAt:
+                    type: string
+                    format: date-time
+        '409':
+          description: The terms were updated since the app loaded them - the user must review the current version.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /notifications:
     get:
       tags: [Notifications]
@@ -1390,6 +1469,36 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
+    CurrentTerms:
+      type: object
+      required: [document, version, title, effectiveDate, sections, acceptedAt]
+      properties:
+        document:
+          type: string
+          enum: [caregiver, family_member]
+        version:
+          type: string
+        title:
+          type: string
+        effectiveDate:
+          type: string
+          format: date
+        sections:
+          type: array
+          items:
+            type: object
+            required: [heading, paragraphs]
+            properties:
+              heading:
+                type: string
+              paragraphs:
+                type: array
+                items:
+                  type: string
+        acceptedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the caller accepted this exact version, or null if they haven't.
     Problem:
       type: object
       description: RFC 7807 Problem Details.

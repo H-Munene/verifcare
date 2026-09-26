@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'api/api_client.dart';
 import 'api/biometric_enrollments_api.dart';
 import 'api/dependants_api.dart';
+import 'api/terms_api.dart';
 import 'api/users_api.dart';
 import 'api/visit_schedules_api.dart';
 import 'auth/cognito_auth_service.dart';
 import 'auth/registration.dart';
+import 'screens/consent_screen.dart';
 import 'screens/dependant_choice_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -17,13 +19,16 @@ import 'screens/welcome_screen.dart';
 void main() {
   final authService = CognitoAuthService();
   final apiClient = ApiClient(authService.getIdToken);
-  runApp(MzaziCareFamilyMemberApp(
-    authService: authService,
-    usersApi: UsersApi(apiClient),
-    dependantsApi: DependantsApi(apiClient),
-    visitSchedulesApi: VisitSchedulesApi(apiClient),
-    enrollmentsApi: BiometricEnrollmentsApi(apiClient),
-  ));
+  runApp(
+    MzaziCareFamilyMemberApp(
+      authService: authService,
+      usersApi: UsersApi(apiClient),
+      dependantsApi: DependantsApi(apiClient),
+      visitSchedulesApi: VisitSchedulesApi(apiClient),
+      enrollmentsApi: BiometricEnrollmentsApi(apiClient),
+      termsApi: TermsApi(apiClient),
+    ),
+  );
 }
 
 class MzaziCareFamilyMemberApp extends StatelessWidget {
@@ -32,6 +37,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
   final BiometricEnrollmentsApi enrollmentsApi;
+  final TermsApi termsApi;
 
   const MzaziCareFamilyMemberApp({
     super.key,
@@ -40,19 +46,24 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
     required this.dependantsApi,
     required this.visitSchedulesApi,
     required this.enrollmentsApi,
+    required this.termsApi,
   });
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mzazi Care - Family Member',
-      theme: ThemeData(colorSchemeSeed: const Color(0xFF0077E6), useMaterial3: true),
+      theme: ThemeData(
+        colorSchemeSeed: const Color(0xFF0077E6),
+        useMaterial3: true,
+      ),
       home: _RootScreen(
         authService: authService,
         usersApi: usersApi,
         dependantsApi: dependantsApi,
         visitSchedulesApi: visitSchedulesApi,
         enrollmentsApi: enrollmentsApi,
+        termsApi: termsApi,
       ),
     );
   }
@@ -69,6 +80,7 @@ class _RootScreen extends StatefulWidget {
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
   final BiometricEnrollmentsApi enrollmentsApi;
+  final TermsApi termsApi;
 
   const _RootScreen({
     required this.authService,
@@ -76,6 +88,7 @@ class _RootScreen extends StatefulWidget {
     required this.dependantsApi,
     required this.visitSchedulesApi,
     required this.enrollmentsApi,
+    required this.termsApi,
   });
 
   @override
@@ -116,17 +129,25 @@ class _RootScreenState extends State<_RootScreen> {
     });
   }
 
+  // Everything reachable once signed in sits behind the consent screen (2026-09-26): the home
+  // screen, and the "register a dependant now?" screen a brand-new account lands on first.
+  Widget _behindConsent(IdentityClaims identity, Widget child) =>
+      ConsentGate(termsApi: widget.termsApi, sub: identity.sub, child: child);
+
   void _goToHome(IdentityClaims identity) {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
-        builder: (_) => HomeScreen(
-          authService: widget.authService,
-          dependantsApi: widget.dependantsApi,
-          visitSchedulesApi: widget.visitSchedulesApi,
-          enrollmentsApi: widget.enrollmentsApi,
-          usersApi: widget.usersApi,
-          identity: identity,
-          onSignedOut: () => setState(() => _identity = null),
+        builder: (_) => _behindConsent(
+          identity,
+          HomeScreen(
+            authService: widget.authService,
+            dependantsApi: widget.dependantsApi,
+            visitSchedulesApi: widget.visitSchedulesApi,
+            enrollmentsApi: widget.enrollmentsApi,
+            usersApi: widget.usersApi,
+            identity: identity,
+            onSignedOut: () => setState(() => _identity = null),
+          ),
         ),
       ),
       (route) => false,
@@ -136,28 +157,34 @@ class _RootScreenState extends State<_RootScreen> {
   void _goToDependantChoice(IdentityClaims identity) {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
-        builder: (_) => DependantChoiceScreen(
-          onRegisterNow: () {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => DependantWizardScreen.register(
-                  dependantsApi: widget.dependantsApi,
-                  enrollmentsApi: widget.enrollmentsApi,
-                  usersApi: widget.usersApi,
-                  identity: identity,
-                  onDone: () => _goToHome(identity),
+        builder: (_) => _behindConsent(
+          identity,
+          DependantChoiceScreen(
+            onRegisterNow: () {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => DependantWizardScreen.register(
+                    dependantsApi: widget.dependantsApi,
+                    enrollmentsApi: widget.enrollmentsApi,
+                    usersApi: widget.usersApi,
+                    identity: identity,
+                    onDone: () => _goToHome(identity),
+                  ),
                 ),
-              ),
-            );
-          },
-          onSkip: () => _goToHome(identity),
+              );
+            },
+            onSkip: () => _goToHome(identity),
+          ),
         ),
       ),
       (route) => false,
     );
   }
 
-  void _onAuthenticated(IdentityClaims identity, {required bool justRegistered}) {
+  void _onAuthenticated(
+    IdentityClaims identity, {
+    required bool justRegistered,
+  }) {
     setState(() => _identity = identity);
     if (justRegistered) {
       _goToDependantChoice(identity);
@@ -173,14 +200,17 @@ class _RootScreenState extends State<_RootScreen> {
     }
     final identity = _identity;
     if (identity != null) {
-      return HomeScreen(
-        authService: widget.authService,
-        dependantsApi: widget.dependantsApi,
-        visitSchedulesApi: widget.visitSchedulesApi,
-        enrollmentsApi: widget.enrollmentsApi,
-        usersApi: widget.usersApi,
-        identity: identity,
-        onSignedOut: () => setState(() => _identity = null),
+      return _behindConsent(
+        identity,
+        HomeScreen(
+          authService: widget.authService,
+          dependantsApi: widget.dependantsApi,
+          visitSchedulesApi: widget.visitSchedulesApi,
+          enrollmentsApi: widget.enrollmentsApi,
+          usersApi: widget.usersApi,
+          identity: identity,
+          onSignedOut: () => setState(() => _identity = null),
+        ),
       );
     }
     return WelcomeScreen(
@@ -210,7 +240,9 @@ class _RootScreenState extends State<_RootScreen> {
   // role-less identity via completeSelfRegistrationIfNeeded.
   void _pushSignUp(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => SignUpScreen(authService: widget.authService)),
+      MaterialPageRoute(
+        builder: (_) => SignUpScreen(authService: widget.authService),
+      ),
     );
   }
 }

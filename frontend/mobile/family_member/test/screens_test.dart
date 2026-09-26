@@ -250,6 +250,11 @@ void main() {
           visitsList,
           const Offset(0, -100),
         );
+        // dragUntilVisible stops once the label is even partly on screen, so its centre (where
+        // the tap lands) could sit just past the bottom edge - it did on some dates, since the
+        // fixture's visits are relative to today. Bring it fully into view first.
+        await tester.ensureVisible(find.text('Completed'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Completed'));
         await tester.pumpAndSettle();
         expect(find.text('Care activities'), findsOneWidget);

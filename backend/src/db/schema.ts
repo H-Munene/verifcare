@@ -39,6 +39,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -575,6 +576,43 @@ export const consentRecords = pgTable(
     index('idx_consent_records_dependant').on(table.dependantId),
     index('idx_consent_records_type').on(table.consentType),
     index('idx_consent_records_granted_by').on(table.grantedBy),
+  ],
+);
+
+// ============================================================================
+// terms_acceptances (append-only) - a user accepting the app's terms of use and privacy notice
+// (2026-09-26, the mobile apps' consent screen). Not consent_records: that table is consent given
+// *about a subject* (a caregiver's or dependant's biometrics/audio), often by someone else on
+// their behalf; this is the signed-in user agreeing to the terms for themselves. One row per
+// document version accepted, so publishing a new version (src/terms.ts) asks everyone again while
+// the record of what each person agreed to, and when, is kept.
+// ============================================================================
+
+export const termsAcceptances = pgTable(
+  'terms_acceptances',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id),
+    // Which document: the caregiver and family-member apps have different terms.
+    document: text().notNull(),
+    version: text().notNull(),
+    acceptedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_terms_acceptances_document',
+      sql`${table.document} IN ('caregiver', 'family_member')`,
+    ),
+    unique('uq_terms_acceptances_user_document_version').on(
+      table.userId,
+      table.document,
+      table.version,
+    ),
+    // `trg_terms_acceptances_append_only` (rejects UPDATE/DELETE) is added by migration 0012.
   ],
 );
 
