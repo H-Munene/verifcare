@@ -40,6 +40,7 @@ interface DependantBody {
   geofenceRadiusMeters: number;
   status: string;
   registeredBy: string;
+  checkinPhotoStatus: 'ready' | 'awaiting_review' | 'missing';
 }
 interface DependantPageBody {
   items: DependantBody[];
@@ -726,6 +727,49 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('GET /dependants/{dependantId}', () => {
+      it('reports checkinPhotoStatus as missing, awaiting review, then ready, on single and list reads', async () => {
+        const supervisor = await createTestUser('sup-photo', 'supervisor', '+254700000044');
+        const dependant = await createTestDependant(supervisor.id);
+        const read = async () => {
+          const one = dependantBody(
+            await request(app)
+              .get(`/dependants/${dependant.id}`)
+              .set('x-test-auth', testAuthHeader('sup-photo', 'supervisor')),
+          );
+          const list = dependantPageBody(
+            await request(app)
+              .get('/dependants')
+              .set('x-test-auth', testAuthHeader('sup-photo', 'supervisor')),
+          );
+          const listed = list.items.find((item) => item.id === dependant.id);
+          expect(listed?.checkinPhotoStatus).toBe(one.checkinPhotoStatus);
+          return one.checkinPhotoStatus;
+        };
+        const enroll = (status: 'active' | 'flagged') =>
+          getDb()
+            .insert(schema.biometricEnrollments)
+            .values({
+              subjectType: 'dependant',
+              dependantId: dependant.id,
+              s3Key: `test/${dependant.id}/${status}.jpg`,
+              imageOrder: 1,
+              status,
+              ...(status === 'flagged' && {
+                matchedSubjectType: 'dependant' as const,
+                matchedSubjectId: dependant.id,
+                matchedSimilarity: 99,
+              }),
+              enrolledBy: supervisor.id,
+            });
+
+        expect(await read()).toBe('missing');
+        // Waiting for a supervisor's review - check-in can't use it yet.
+        await enroll('flagged');
+        expect(await read()).toBe('awaiting_review');
+        await enroll('active');
+        expect(await read()).toBe('ready');
+      });
+
       it('returns 404 for a nonexistent dependant', async () => {
         await createTestUser('sup-get-404', 'supervisor', '+254700000040');
         const response = await request(app)

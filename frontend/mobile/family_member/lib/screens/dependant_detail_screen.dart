@@ -61,13 +61,14 @@ class _DependantDetailScreenState extends State<DependantDetailScreen> {
     } catch (_) {}
   }
 
-  Future<void> _edit() async {
+  Future<void> _edit({int initialStep = 0}) async {
     final updated = await Navigator.of(context).push<Dependant>(
       MaterialPageRoute(
         builder: (_) => DependantWizardScreen.edit(
           dependantsApi: widget.dependantsApi,
           enrollmentsApi: widget.enrollmentsApi,
           existing: _dependant,
+          initialStep: initialStep,
         ),
       ),
     );
@@ -102,6 +103,17 @@ class _DependantDetailScreenState extends State<DependantDetailScreen> {
         body: NestedScrollView(
           headerSliverBuilder: (context, _) => [
             SliverToBoxAdapter(child: _Header(dependant)),
+            if (dependant.needsPhoto)
+              SliverToBoxAdapter(
+                child: _PhotoNeededBanner(
+                  dependant: dependant,
+                  // Only the primary contact can add it (Edit's Photo step); everyone else is
+                  // told who can.
+                  onAddPhoto: _isPrimaryContact
+                      ? () => _edit(initialStep: 3)
+                      : null,
+                ),
+              ),
             const SliverPersistentHeader(
               pinned: true,
               delegate: _TabBarHeader(),
@@ -172,6 +184,100 @@ class _Header extends StatelessWidget {
                     style: const TextStyle(fontSize: 13, color: inkSecondary),
                   ),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Caregivers confirm who they're visiting against this photo, and the backend won't schedule a
+/// visit until there is one - so it's called out above the tabs rather than left to be noticed.
+class _PhotoNeededBanner extends StatelessWidget {
+  final Dependant dependant;
+  final VoidCallback? onAddPhoto;
+
+  const _PhotoNeededBanner({required this.dependant, required this.onAddPhoto});
+
+  @override
+  Widget build(BuildContext context) {
+    final firstName = dependant.fullName.split(' ').first;
+    final awaitingReview =
+        dependant.checkinPhotoStatus == CheckinPhotoStatus.awaitingReview;
+    final (title, body) = switch ((awaitingReview, onAddPhoto)) {
+      (true, _) => (
+        "$firstName's photo is waiting for review",
+        'It looked like someone already enrolled, so a supervisor is checking it. Visits can be '
+            'scheduled once it is approved.',
+      ),
+      (false, _?) => (
+        'Add a photo of $firstName',
+        "Caregivers confirm who they're visiting against this photo, so visits can't be "
+            'scheduled until there is one.',
+      ),
+      (false, null) => (
+        '$firstName has no photo yet',
+        "Visits can't be scheduled until the primary contact adds one.",
+      ),
+    };
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: constrainedContent(
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: dangerTint,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(
+                  Icons.photo_camera_outlined,
+                  color: dangerRed,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: inkDefault,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      body,
+                      style: const TextStyle(fontSize: 13, color: inkSecondary),
+                    ),
+                    if (!awaitingReview && onAddPhoto != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: FilledButton.icon(
+                          onPressed: onAddPhoto,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: dangerRed,
+                          ),
+                          icon: const Icon(
+                            Icons.photo_camera_outlined,
+                            size: 18,
+                          ),
+                          label: const Text('Add photo'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),

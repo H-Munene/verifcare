@@ -42,12 +42,13 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, or } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/verifier.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
+import { isCheckinPhoto } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
@@ -234,6 +235,43 @@ const listVisitSchedulesQuerySchema = z.object({
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
 const visitScheduleIdParamSchema = z.string().uuid();
 
+// Scheduling guardrail (2026-09-26, user request): a visit can't be scheduled or rescheduled until
+// both the caregiver and the dependant have a photo check-in can verify against - otherwise the
+// visit is bound to fail at the door with 'not_enrolled'. "Has a photo" is db/checkinPhotos.ts's
+// isCheckinPhoto, the same rule check-in's face match and the apps' "photo needed" alert use.
+// Returns the Problem detail, or null when both have one.
+async function missingPhotoDetail(
+  db: Db,
+  caregiverId: string,
+  dependantId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ subjectType: schema.biometricEnrollments.subjectType })
+    .from(schema.biometricEnrollments)
+    .where(
+      and(
+        isCheckinPhoto,
+        or(
+          eq(schema.biometricEnrollments.caregiverId, caregiverId),
+          eq(schema.biometricEnrollments.dependantId, dependantId),
+        ),
+      ),
+    );
+  const has = new Set(rows.map((row) => row.subjectType));
+  const missing = [
+    has.has('caregiver') ? null : 'the caregiver',
+    has.has('dependant') ? null : 'the dependant',
+  ].filter((who): who is string => who !== null);
+  if (missing.length === 0) {
+    return null;
+  }
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} a photo for check-in. Add the photo first (a photo awaiting review doesn't count yet).`;
+}
+
+function sendMissingPhoto(res: Response, detail: string): void {
+  sendProblem(res, { type: 'about:blank', title: 'Unprocessable Entity', status: 422, detail });
+}
+
 function getDb(res: Response): Db | undefined {
   const db = res.req.app.locals.db as Db | undefined;
   if (!db) {
@@ -338,6 +376,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           status: 400,
           detail: 'dependantId does not reference an existing dependant.',
         });
+        return;
+      }
+
+      const photoDetail = await missingPhotoDetail(db, body.caregiverId, body.dependantId);
+      if (photoDetail) {
+        sendMissingPhoto(res, photoDetail);
         return;
       }
 
@@ -690,6 +734,20 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           detail: 'scheduledEnd must be after scheduledStart.',
         });
         return;
+      }
+
+      // Moving a visit is scheduling it again, so the photo guardrail applies; a status-only change
+      // (e.g. cancelling) doesn't, so an existing visit can always be cancelled.
+      if (body.scheduledStart !== undefined || body.scheduledEnd !== undefined) {
+        const photoDetail = await missingPhotoDetail(
+          db,
+          existing.caregiverId,
+          existing.dependantId,
+        );
+        if (photoDetail) {
+          sendMissingPhoto(res, photoDetail);
+          return;
+        }
       }
 
       const [updated] = await db

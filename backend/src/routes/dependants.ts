@@ -58,6 +58,7 @@ import { requireRole } from '../auth/middleware.js';
 import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
+import { checkinPhotoStatuses, type CheckinPhotoStatus } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
@@ -91,9 +92,15 @@ interface DependantResponse {
   registeredBy: string;
   createdAt: string;
   updatedAt: string;
+  // Where their check-in photo stands (2026-09-26) - see db/checkinPhotos.ts. Drives the family
+  // app's "photo needed" alert; a visit can only be scheduled once it's 'ready'.
+  checkinPhotoStatus: CheckinPhotoStatus;
 }
 
-function toDependantResponse(row: typeof schema.dependants.$inferSelect): DependantResponse {
+function toDependantResponse(
+  row: typeof schema.dependants.$inferSelect,
+  checkinPhotoStatus: CheckinPhotoStatus,
+): DependantResponse {
   return {
     id: row.id,
     fullName: row.fullName,
@@ -112,7 +119,29 @@ function toDependantResponse(row: typeof schema.dependants.$inferSelect): Depend
     registeredBy: row.registeredBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    checkinPhotoStatus,
   };
+}
+
+// Every response path goes through here, so each one reports checkinPhotoStatus with one extra
+// query no matter how many dependants it returns.
+async function toDependantResponses(
+  db: Db,
+  rows: (typeof schema.dependants.$inferSelect)[],
+): Promise<DependantResponse[]> {
+  const statuses = await checkinPhotoStatuses(
+    db,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => toDependantResponse(row, statuses.get(row.id) ?? 'missing'));
+}
+
+async function toOneDependantResponse(
+  db: Db,
+  row: typeof schema.dependants.$inferSelect,
+): Promise<DependantResponse> {
+  const statuses = await checkinPhotoStatuses(db, [row.id]);
+  return toDependantResponse(row, statuses.get(row.id) ?? 'missing');
 }
 
 interface CareTaskResponse {
@@ -632,7 +661,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return dependant;
       });
 
-      res.status(201).json(toDependantResponse(dependantRow));
+      // Just registered, so no photo yet - the photo step comes after registration.
+      res.status(201).json(toDependantResponse(dependantRow, 'missing'));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -710,7 +740,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       }
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
-      res.status(200).json({ items: items.map(toDependantResponse), nextCursor });
+      res.status(200).json({ items: await toDependantResponses(db, items), nextCursor });
     } catch (err) {
       next(err);
     }
@@ -747,7 +777,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           return;
         }
       }
-      res.status(200).json(toDependantResponse(row));
+      res.status(200).json(await toOneDependantResponse(db, row));
     } catch (err) {
       next(err);
     }
@@ -832,7 +862,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
       }
 
-      res.status(200).json(toDependantResponse(updated));
+      res.status(200).json(await toOneDependantResponse(db, updated));
     } catch (err) {
       next(err);
     }

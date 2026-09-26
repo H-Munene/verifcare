@@ -41,6 +41,22 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('needs a photo until check-in has one it can use', () {
+      Dependant withPhoto(Object? status, {String active = 'active'}) =>
+          Dependant.fromJson({
+            ..._dependantJson(),
+            'checkinPhotoStatus': status,
+            'status': active,
+          });
+      expect(withPhoto('missing').needsPhoto, isTrue);
+      expect(withPhoto('awaiting_review').needsPhoto, isTrue);
+      expect(withPhoto('ready').needsPhoto, isFalse);
+      // An older API that doesn't say: no alert on a guess.
+      expect(Dependant.fromJson(_dependantJson()).needsPhoto, isFalse);
+      // A deactivated dependant won't be visited, so isn't nagged about.
+      expect(withPhoto('missing', active: 'deactivated').needsPhoto, isFalse);
+    });
   });
 
   test('FamilyMemberLink reads the name added for family members', () {

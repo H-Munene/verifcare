@@ -687,6 +687,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/MissingCheckinPhoto'
         default:
           $ref: '#/components/responses/Problem'
     get:
@@ -776,6 +778,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/MissingCheckinPhoto'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -1362,6 +1366,16 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    MissingCheckinPhoto:
+      description: |
+        The caregiver or the dependant (or both) has no active photo, so check-in couldn't verify
+        them and the visit can't be scheduled, or moved to a new time, until one is added. A photo
+        still awaiting a supervisor's review doesn't count. Status-only updates (e.g. cancelling)
+        are never blocked by this.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     NotFound:
       description: No resource exists at this location.
       content:
@@ -1633,6 +1647,7 @@ components:
         - registeredBy
         - createdAt
         - updatedAt
+        - checkinPhotoStatus
       properties:
         id:
           type: string
@@ -1680,6 +1695,15 @@ components:
         updatedAt:
           type: string
           format: date-time
+        checkinPhotoStatus:
+          type: string
+          enum: [ready, awaiting_review, missing]
+          description: |
+            Where this dependant's check-in photo stands. `ready`: an active photo check-in can
+            verify against. `awaiting_review`: only a photo flagged for a supervisor's review, which
+            check-in can't use yet. `missing`: none. A visit can only be scheduled once it's
+            `ready`. Always `missing` straight after registration, since the photo is added
+            afterwards.
     CreateDependantRequest:
       type: object
       required:

@@ -51,14 +51,18 @@ final _dependant = {
 };
 
 /// [callerIsPrimary]: whether the signed-in user (u1) is the dependant's primary contact.
-MockClient _backend({bool callerIsPrimary = true}) => MockClient((
-  request,
-) async {
+/// [photoStatus]: the dependant's checkinPhotoStatus.
+MockClient _backend({
+  bool callerIsPrimary = true,
+  String photoStatus = 'ready',
+}) => MockClient((request) async {
   final path = request.url.path.replaceFirst('/prod', '');
   final query = request.url.queryParameters;
   final Object body = switch (path) {
     '/dependants' => {
-      'items': [_dependant],
+      'items': [
+        {..._dependant, 'checkinPhotoStatus': photoStatus},
+      ],
       'nextCursor': null,
     },
     '/users/me' => {'id': 'u1', 'fullName': 'Achieng Otieno'},
@@ -270,4 +274,69 @@ void main() {
       }, () => _backend(callerIsPrimary: false));
     },
   );
+
+  group('a dependant without a usable photo', () {
+    Future<void> openDependant(WidgetTester tester) async {
+      await _pumpHome(tester, const Size(360, 780));
+      await tester.tap(find.text('Wanjiku Kamau'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'the primary contact is told to add one, and taken to the Photo step',
+      (tester) async {
+        await http.runWithClient(() async {
+          await _pumpHome(tester, const Size(360, 780));
+          expect(find.text('Photo needed'), findsOneWidget);
+
+          await tester.tap(find.text('Wanjiku Kamau'));
+          await tester.pumpAndSettle();
+          expect(find.text('Add a photo of Wanjiku'), findsOneWidget);
+
+          await tester.tap(find.widgetWithText(FilledButton, 'Add photo'));
+          await tester.pumpAndSettle();
+          expect(find.text('Edit details'), findsOneWidget);
+          expect(
+            find.textContaining('Replace it if it no longer looks like them'),
+            findsOneWidget,
+          );
+        }, () => _backend(photoStatus: 'missing'));
+      },
+    );
+
+    testWidgets(
+      'another family member is told the primary contact must add it',
+      (tester) async {
+        await http.runWithClient(() async {
+          await openDependant(tester);
+          expect(find.text('Wanjiku has no photo yet'), findsOneWidget);
+          expect(find.widgetWithText(FilledButton, 'Add photo'), findsNothing);
+        }, () => _backend(callerIsPrimary: false, photoStatus: 'missing'));
+      },
+    );
+
+    testWidgets('a photo waiting for review is not asked for again', (
+      tester,
+    ) async {
+      await http.runWithClient(() async {
+        await _pumpHome(tester, const Size(360, 780));
+        expect(find.text('Photo awaiting review'), findsOneWidget);
+        await tester.tap(find.text('Wanjiku Kamau'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text("Wanjiku's photo is waiting for review"),
+          findsOneWidget,
+        );
+        expect(find.widgetWithText(FilledButton, 'Add photo'), findsNothing);
+      }, () => _backend(photoStatus: 'awaiting_review'));
+    });
+
+    testWidgets('nothing is shown once the photo is ready', (tester) async {
+      await http.runWithClient(() async {
+        await openDependant(tester);
+        expect(find.text('Photo needed'), findsNothing);
+        expect(find.byIcon(Icons.photo_camera_outlined), findsNothing);
+      }, _backend);
+    });
+  });
 }

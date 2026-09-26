@@ -258,6 +258,34 @@ class _DependantCard extends StatelessWidget {
                           color: inkTertiary,
                         ),
                       ),
+                      if (dependant.needsPhoto)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.photo_camera_outlined,
+                                size: 14,
+                                color: dangerRed,
+                              ),
+                              const SizedBox(width: 4),
+                              // Wraps rather than overflowing on a narrow phone, where the
+                              // "In progress" pill shares the row.
+                              Flexible(
+                                child: Text(
+                                  dependant.checkinPhotoStatus ==
+                                          CheckinPhotoStatus.awaitingReview
+                                      ? 'Photo awaiting review'
+                                      : 'Photo needed',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: dangerRed,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),

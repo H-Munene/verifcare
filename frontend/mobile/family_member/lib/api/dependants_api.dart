@@ -1,6 +1,9 @@
 import 'api_client.dart';
 
 /// A dependant as returned by GET /dependants and GET /dependants/{id}.
+/// GET /dependants' checkinPhotoStatus: only [ready] lets a visit be scheduled.
+enum CheckinPhotoStatus { ready, awaitingReview, missing }
+
 class Dependant {
   final String id;
   final String fullName;
@@ -16,6 +19,10 @@ class Dependant {
   final bool cognitiveMonitoringEnabled;
   final bool active;
 
+  /// Where their check-in photo stands. Null when the server doesn't say (an older API), so no
+  /// alert is shown on a guess.
+  final CheckinPhotoStatus? checkinPhotoStatus;
+
   Dependant({
     required this.id,
     required this.fullName,
@@ -30,6 +37,7 @@ class Dependant {
     required this.geofenceLng,
     required this.cognitiveMonitoringEnabled,
     required this.active,
+    this.checkinPhotoStatus,
   });
 
   factory Dependant.fromJson(Map<String, dynamic> json) => switch (json) {
@@ -56,11 +64,24 @@ class Dependant {
         geofenceLng: geofenceLng.toDouble(),
         cognitiveMonitoringEnabled: cognitiveMonitoringEnabled,
         active: status == 'active',
+        checkinPhotoStatus: switch (json['checkinPhotoStatus']) {
+          'ready' => CheckinPhotoStatus.ready,
+          'awaiting_review' => CheckinPhotoStatus.awaitingReview,
+          'missing' => CheckinPhotoStatus.missing,
+          _ => null,
+        },
       ),
     _ => throw FormatException('Unexpected dependant: $json'),
   };
 
   int ageOn(DateTime today) => ageOnDate(dob, today);
+
+  /// No photo check-in can use yet, so visits can't be scheduled (the backend refuses). Not for a
+  /// deactivated dependant, who won't be visited anyway.
+  bool get needsPhoto =>
+      active &&
+      checkinPhotoStatus != null &&
+      checkinPhotoStatus != CheckinPhotoStatus.ready;
 
   /// "Ward, Constituency, County", skipping any that are missing.
   String? get areaText {

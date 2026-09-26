@@ -35,6 +35,9 @@ class DependantWizardScreen extends StatefulWidget {
   final DependantsApi dependantsApi;
   final BiometricEnrollmentsApi enrollmentsApi;
   final Dependant? existing;
+
+  /// Editing only: the step to open on - e.g. the Photo step (3) from the "photo needed" banner.
+  final int initialStep;
   // Registration only.
   final UsersApi? usersApi;
   final IdentityClaims? identity;
@@ -47,13 +50,15 @@ class DependantWizardScreen extends StatefulWidget {
     required UsersApi this.usersApi,
     required IdentityClaims this.identity,
     required VoidCallback this.onDone,
-  }) : existing = null;
+  }) : existing = null,
+       initialStep = 0;
 
   const DependantWizardScreen.edit({
     super.key,
     required this.dependantsApi,
     required this.enrollmentsApi,
     required Dependant this.existing,
+    this.initialStep = 0,
   }) : usersApi = null,
        identity = null,
        onDone = null;
@@ -66,7 +71,7 @@ const _stepLabels = ['Details', 'Location', 'Pin', 'Photo'];
 const _kenyaCentre = LatLng(0.0236, 37.9062);
 
 class _DependantWizardScreenState extends State<DependantWizardScreen> {
-  int _step = 0;
+  late int _step = widget.initialStep;
 
   bool get _editing => widget.existing != null;
 
