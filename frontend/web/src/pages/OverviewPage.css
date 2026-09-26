@@ -48,6 +48,15 @@
   outline-offset: 1px;
 }
 
+.overview__sample-note {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-state-awaiting);
+  background: #fff8e1;
+  font-size: 13px;
+  color: var(--color-ink-default);
+}
+
 .overview__message {
   padding: 48px 16px;
   text-align: center;
