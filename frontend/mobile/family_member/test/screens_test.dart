@@ -167,9 +167,7 @@ void main() {
     ('narrow phone', const Size(320, 640)),
     ('tablet', const Size(1024, 768)),
   ]) {
-    testWidgets('home, visits, family and photos render on a $name', (
-      tester,
-    ) async {
+    testWidgets('home, visits and family render on a $name', (tester) async {
       await http.runWithClient(() async {
         await _pumpHome(tester, size);
 
@@ -210,9 +208,8 @@ void main() {
         expect(find.text('Brian Kamau'), findsOneWidget);
         expect(find.text('Primary contact'), findsOneWidget);
 
-        await tester.tap(find.text('Photos'));
-        await tester.pumpAndSettle();
-        expect(find.text('No photos enrolled yet.'), findsOneWidget);
+        // No Photos tab any more - the photo is managed from Edit's Photo step.
+        expect(find.text('Photos'), findsNothing);
       }, _backend);
     });
   }

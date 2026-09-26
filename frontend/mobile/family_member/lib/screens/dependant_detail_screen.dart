@@ -6,14 +6,13 @@ import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 import '../widgets/visit_widgets.dart';
 import 'dependant_wizard_screen.dart';
-import 'photo_preview_screen.dart';
 import 'upcoming_visit_screen.dart';
 import 'visit_timeline_screen.dart';
 
-/// One dependant: a header with their details, then three tabs - Visits (in progress, upcoming,
-/// history), Family (every linked member) and Photos (enrolled images). Each tab loads and fails
-/// on its own, so a slow photo list never holds up the visits. The primary contact also gets an
-/// Edit action.
+/// One dependant: a header with their details, then two tabs - Visits (in progress, upcoming,
+/// history) and Family (every linked member). Each tab loads and fails on its own. The primary
+/// contact also gets an Edit action. (A Photos tab was removed 2026-09-26 at the user's request -
+/// the enrolled photo is managed from Edit's Photo step.)
 class DependantDetailScreen extends StatefulWidget {
   final Dependant dependant;
   final String? myUserId;
@@ -85,7 +84,7 @@ class _DependantDetailScreenState extends State<DependantDetailScreen> {
   Widget build(BuildContext context) {
     final dependant = _dependant;
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         backgroundColor: const Color(0xFFF7F7F7),
         appBar: AppBar(
@@ -121,11 +120,6 @@ class _DependantDetailScreenState extends State<DependantDetailScreen> {
                 dependantId: dependant.id,
                 myUserId: widget.myUserId,
                 dependantsApi: widget.dependantsApi,
-              ),
-              _PhotosTab(
-                key: ValueKey('photos-$_version'),
-                dependantId: dependant.id,
-                enrollmentsApi: widget.enrollmentsApi,
               ),
             ],
           ),
@@ -207,7 +201,6 @@ class _TabBarHeader extends SliverPersistentHeaderDelegate {
           tabs: [
             Tab(text: 'Visits'),
             Tab(text: 'Family'),
-            Tab(text: 'Photos'),
           ],
         ),
       );
@@ -539,161 +532,4 @@ class _FamilyTabState extends State<_FamilyTab>
       .take(2)
       .map((part) => part[0].toUpperCase())
       .join();
-}
-
-// ---------------------------------------------------------------------------------------------
-// Photos
-
-class _PhotosTab extends StatefulWidget {
-  final String dependantId;
-  final BiometricEnrollmentsApi enrollmentsApi;
-
-  const _PhotosTab({
-    super.key,
-    required this.dependantId,
-    required this.enrollmentsApi,
-  });
-
-  @override
-  State<_PhotosTab> createState() => _PhotosTabState();
-}
-
-class _PhotosTabState extends State<_PhotosTab>
-    with AutomaticKeepAliveClientMixin {
-  List<BiometricEnrollment>? _photos;
-  String? _error;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  // Also the recovery path for an expired link: each imageUrl is signed for 15 minutes, and
-  // re-listing is what issues fresh ones.
-  Future<void> _load() async {
-    setState(() => _error = null);
-    try {
-      final photos = await widget.enrollmentsApi.listCurrentForDependant(
-        widget.dependantId,
-      );
-      photos.sort((a, b) => a.imageOrder.compareTo(b.imageOrder));
-      if (mounted) setState(() => _photos = photos);
-    } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return _TabBody<List<BiometricEnrollment>>(
-      data: _photos,
-      error: _error,
-      onRefresh: _load,
-      builder: (photos) => [
-        if (photos.isEmpty)
-          const _Empty('No photos enrolled yet.')
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            // Column count follows the available width rather than a fixed 2 or 3.
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 180,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
-            itemCount: photos.length,
-            itemBuilder: (context, i) =>
-                _PhotoTile(photo: photos[i], onExpired: _load),
-          ),
-      ],
-    );
-  }
-}
-
-class _PhotoTile extends StatelessWidget {
-  final BiometricEnrollment photo;
-  final VoidCallback onExpired;
-
-  const _PhotoTile({required this.photo, required this.onExpired});
-
-  @override
-  Widget build(BuildContext context) {
-    final heroTag = 'enrollment-${photo.id}';
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Material(
-            color: const Color(0xFFF0F0F0),
-            child: InkWell(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => PhotoPreviewScreen(
-                    imageUrl: photo.imageUrl,
-                    heroTag: heroTag,
-                  ),
-                ),
-              ),
-              child: Hero(
-                tag: heroTag,
-                child: Image.network(
-                  photo.imageUrl,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (_, child, progress) => progress == null
-                      ? child
-                      : const Center(
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                  errorBuilder: (_, _, _) => InkWell(
-                    onTap: onExpired,
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.refresh, color: inkTertiary),
-                          SizedBox(height: 4),
-                          Text(
-                            'Tap to reload',
-                            style: TextStyle(fontSize: 12, color: inkTertiary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          // A flagged photo matched someone else's face and waits on a supervisor.
-          if (photo.status == 'flagged')
-            Positioned(
-              left: 8,
-              bottom: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: dangerTint,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Text(
-                  'Under review',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: dangerRed,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 }
