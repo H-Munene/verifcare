@@ -300,31 +300,35 @@ export function OverviewPage() {
         </section>
 
         <section className="overview__panel overview__trend" aria-labelledby="overview-trend">
-          <div className="overview__panel-head">
+          <div className="overview__section-head">
             <h2 id="overview-trend" className="overview__panel-title">
-              Visit outcomes, last 14 days
+              Visit outcomes
             </h2>
           </div>
-          <OutcomeTrendChart days={overview.trend} selectedDate={date} onSelectDate={showDate} />
+          <div className="overview__panel-body">
+            <OutcomeTrendChart days={overview.trend} selectedDate={date} onSelectDate={showDate} />
+          </div>
         </section>
 
         <section
           className="overview__panel overview__attention"
           aria-labelledby="overview-attention"
         >
-          <div className="overview__panel-head">
+          <div className="overview__section-head">
             <h2 id="overview-attention" className="overview__panel-title">
               Needs your attention
             </h2>
           </div>
-          <AttentionList
-            attention={attention}
-            timeZone={overview.timeZone}
-            acknowledging={acknowledge.isPending ? acknowledge.variables : undefined}
-            acknowledgeFailed={acknowledge.isError}
-            linksEnabled={!overview.sample}
-            onAcknowledge={(id) => acknowledge.mutate(id)}
-          />
+          <div className="overview__panel-body">
+            <AttentionList
+              attention={attention}
+              timeZone={overview.timeZone}
+              acknowledging={acknowledge.isPending ? acknowledge.variables : undefined}
+              acknowledgeFailed={acknowledge.isError}
+              linksEnabled={!overview.sample}
+              onAcknowledge={(id) => acknowledge.mutate(id)}
+            />
+          </div>
         </section>
       </div>
     </div>

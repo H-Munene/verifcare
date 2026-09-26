@@ -159,9 +159,9 @@
   padding-bottom: 20px;
 }
 
-/* The map's title row and the visit list's header: the same height, each with an edge-to-edge
-   line under it, so the two lines meet across the grid as one continuous line (user request,
-   2026-09-26). 48px plus the 1px line. */
+/* Every panel's title row (Map, All visits, Visit outcomes, Needs your attention): one height,
+   with an edge-to-edge line under it, so the lines of panels side by side meet across the grid as
+   one continuous line (user request, 2026-09-26). 48px plus the 1px line. */
 .overview__section-head {
   display: flex;
   flex: none;
@@ -180,8 +180,12 @@
 }
 
 .overview__panel {
-  padding: 16px 20px 20px;
   min-width: 0;
+}
+
+/* Every panel opens with an .overview__section-head (its line edge to edge), then this. */
+.overview__panel-body {
+  padding: 16px 20px 20px;
 }
 
 .overview__visits {
@@ -189,12 +193,6 @@
   display: flex;
   flex-direction: column;
   height: 460px;
-}
-
-/* Edge to edge, so the header line and each row's line run from the grid line beside the map to
-   the panel's outer edge. */
-.overview__panel.overview__visits {
-  padding: 0;
 }
 
 .overview__visits .overview__empty {
@@ -207,13 +205,6 @@
 
 .overview__attention {
   grid-area: attention;
-}
-
-.overview__panel-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 12px;
 }
 
 .overview__panel-title {
@@ -442,7 +433,7 @@
     height: 320px;
   }
 
-  .overview__panel {
+  .overview__panel-body {
     padding: 14px 16px 16px;
   }
 }
