@@ -10,6 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../api/api_client.dart';
 import '../api/checkin_api.dart';
+import '../api/directions_api.dart';
 import '../api/visit_schedules_api.dart';
 import 'photo_verification_screen.dart';
 
@@ -66,6 +67,12 @@ class _CheckInScreenState extends State<CheckInScreen> {
   StreamSubscription<Position>? _positionSubscription;
   Position? _currentPosition;
   String? _locationErrorMessage;
+
+  // The route to the dependant's home (2026-09-26, user request), when a Directions key is set.
+  final _directions = DirectionsApi();
+  DirectionsRoute? _route;
+  LatLng? _routeOrigin;
+  bool _routeLoading = false;
 
   Problem? _lastFailureProblem;
   GeofenceCheckinResult? _result;
@@ -149,12 +156,54 @@ class _CheckInScreenState extends State<CheckInScreen> {
         ).listen((position) {
           if (!mounted) return;
           setState(() => _currentPosition = position);
+          unawaited(_refreshRoute(position));
           _mapController?.animateCamera(
             CameraUpdate.newLatLng(
               LatLng(position.latitude, position.longitude),
             ),
           );
         });
+  }
+
+  // Fetched when the position first arrives and again after moving more than 150 m, rather than
+  // on every GPS update (each call is a billed Directions request). Not fetched once inside the
+  // home's check-in circle, where there's nowhere left to go.
+  Future<void> _refreshRoute(Position position) async {
+    final ctx = _context;
+    if (!DirectionsApi.enabled || ctx == null || _routeLoading) return;
+    final here = LatLng(position.latitude, position.longitude);
+    final origin = _routeOrigin;
+    if (origin != null &&
+        Geolocator.distanceBetween(
+              origin.latitude,
+              origin.longitude,
+              here.latitude,
+              here.longitude,
+            ) <
+            150) {
+      return;
+    }
+    final distance = _liveDistanceMeters;
+    if (distance != null && distance <= ctx.geofenceRadiusMeters) {
+      if (_route != null) setState(() => _route = null);
+      return;
+    }
+    _routeLoading = true;
+    try {
+      final route = await _directions.route(
+        here,
+        LatLng(ctx.geofenceLat, ctx.geofenceLng),
+      );
+      if (!mounted) return;
+      setState(() {
+        _route = route;
+        _routeOrigin = here;
+      });
+    } catch (_) {
+      // No route is fine - the map and check-in work without it.
+    } finally {
+      _routeLoading = false;
+    }
   }
 
   double? get _liveDistanceMeters {
@@ -296,6 +345,15 @@ class _CheckInScreenState extends State<CheckInScreen> {
           initialCameraPosition: CameraPosition(target: center, zoom: 16),
           onMapCreated: (controller) => _mapController = controller,
           markers: markers,
+          polylines: {
+            if (_route case final route?)
+              Polyline(
+                polylineId: const PolylineId('route-home'),
+                points: route.points,
+                color: _primaryBlue,
+                width: 5,
+              ),
+          },
           circles: {
             Circle(
               circleId: const CircleId('geofence'),
@@ -313,6 +371,36 @@ class _CheckInScreenState extends State<CheckInScreen> {
           left: 16,
           child: _RoundIconButton(icon: Icons.arrow_back, onTap: widget.onBack),
         ),
+        if (_route case final route?)
+          Positioned(
+            top: 20,
+            left: 72,
+            right: 72,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x22000000), blurRadius: 6),
+                  ],
+                ),
+                child: Text(
+                  route.summary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ),
         Positioned(
           top: 16,
           right: 16,

@@ -1,7 +1,10 @@
 import 'package:amazon_cognito_identity_dart_2/cognito.dart';
 import 'package:flutter/material.dart';
 
+import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
+import '../widgets/password_field.dart';
+import 'forgot_password_screen.dart';
 
 /// The only entry point into this app - a caregiver never self-registers, so unlike
 /// frontend/mobile/family_member/lib/screens/login_screen.dart (which this is trimmed from),
@@ -9,6 +12,8 @@ import '../auth/cognito_auth_service.dart';
 /// caregiver's identity, including its role, always already exists by the time this screen runs.
 /// Handles NEW_PASSWORD_REQUIRED as the normal first-sign-in case, not an edge case - every
 /// caregiver identity is created via AdminCreateUser, which always issues a temporary password.
+/// "Forgot password?" and an account an administrator reset both continue in
+/// [ForgotPasswordScreen].
 class LoginScreen extends StatefulWidget {
   final CognitoAuthService authService;
   final void Function(IdentityClaims identity) onAuthenticated;
@@ -74,14 +79,37 @@ class _LoginScreenState extends State<LoginScreen> {
           await _finish(session);
         case SignInNewPasswordRequired(challenge: final challenge):
           setState(() => _challenge = challenge);
+        case SignInPasswordResetRequired():
+          await _openPasswordReset(codeAlreadySent: true);
       }
     } catch (err) {
-      setState(() => _error = 'Sign in failed: $err');
+      setState(() => _error = signInErrorText(err));
     } finally {
       if (mounted) {
         setState(() => _submitting = false);
       }
     }
+  }
+
+  Future<void> _openPasswordReset({bool codeAlreadySent = false}) async {
+    final email = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordScreen(
+          authService: widget.authService,
+          initialEmail: _emailController.text.trim(),
+          codeAlreadySent: codeAlreadySent,
+        ),
+      ),
+    );
+    if (email == null || !mounted) return;
+    _emailController.text = email;
+    _passwordController.clear();
+    setState(() => _error = null);
+    showSnack(
+      context,
+      'Password changed. Sign in with your new password.',
+      error: false,
+    );
   }
 
   @override
@@ -98,12 +126,25 @@ class _LoginScreenState extends State<LoginScreen> {
                 submitting: _submitting,
                 error: _error,
                 onSubmit: _submitSignIn,
+                onForgotPassword: _openPasswordReset,
               )
             : _NewPasswordForm(challenge: _challenge!, onCompleted: _finish),
       ),
     );
   }
 }
+
+/// Cognito's own sign-in messages are already readable ("Incorrect username or password.",
+/// "Password attempts exceeded", "User is disabled."), unlike the exception's raw toString. With
+/// user-existence errors prevented on this app client, an unknown email arrives as the same
+/// NotAuthorizedException as a wrong password.
+String signInErrorText(Object error) => switch (error) {
+  CognitoClientException(code: 'NotAuthorizedException', :final message?) =>
+    message,
+  CognitoClientException(code: 'NetworkError') =>
+    'Could not reach the server. Check your connection and try again.',
+  _ => 'Sign in failed: $error',
+};
 
 class _SignInForm extends StatelessWidget {
   final GlobalKey<FormState> formKey;
@@ -112,6 +153,7 @@ class _SignInForm extends StatelessWidget {
   final bool submitting;
   final String? error;
   final VoidCallback onSubmit;
+  final VoidCallback onForgotPassword;
 
   const _SignInForm({
     required this.formKey,
@@ -120,6 +162,7 @@ class _SignInForm extends StatelessWidget {
     required this.submitting,
     required this.error,
     required this.onSubmit,
+    required this.onForgotPassword,
   });
 
   @override
@@ -135,21 +178,31 @@ class _SignInForm extends StatelessWidget {
             keyboardType: TextInputType.emailAddress,
             autofillHints: const [AutofillHints.username],
             decoration: const InputDecoration(labelText: 'Email'),
-            validator: (value) =>
-                (value == null || value.trim().isEmpty) ? 'Email is required.' : null,
+            validator: (value) => (value == null || value.trim().isEmpty)
+                ? 'Email is required.'
+                : null,
           ),
           const SizedBox(height: 12),
-          TextFormField(
+          PasswordField(
             controller: passwordController,
-            obscureText: true,
-            autofillHints: const [AutofillHints.password],
-            decoration: const InputDecoration(labelText: 'Password'),
-            validator: (value) =>
-                (value == null || value.isEmpty) ? 'Password is required.' : null,
+            labelText: 'Password',
+            validator: (value) => (value == null || value.isEmpty)
+                ? 'Password is required.'
+                : null,
           ),
-          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: submitting ? null : onForgotPassword,
+              child: const Text('Forgot password?'),
+            ),
+          ),
+          const SizedBox(height: 8),
           if (error != null) ...[
-            Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            Text(
+              error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
             const SizedBox(height: 12),
           ],
           FilledButton(
@@ -210,7 +263,13 @@ class _NewPasswordFormState extends State<_NewPasswordForm> {
       );
       await widget.onCompleted(session);
     } catch (err) {
-      setState(() => _error = 'Could not set new password: $err');
+      setState(
+        () => _error =
+            err is CognitoClientException &&
+                err.code == 'InvalidPasswordException'
+            ? passwordResetErrorText(err)
+            : 'Could not set new password: $err',
+      );
     } finally {
       if (mounted) {
         setState(() => _submitting = false);
@@ -232,31 +291,36 @@ class _NewPasswordFormState extends State<_NewPasswordForm> {
             TextFormField(
               controller: _fullNameController,
               decoration: const InputDecoration(labelText: 'Full name'),
-              validator: (value) =>
-                  (value == null || value.trim().isEmpty) ? 'Full name is required.' : null,
+              validator: (value) => (value == null || value.trim().isEmpty)
+                  ? 'Full name is required.'
+                  : null,
             ),
             const SizedBox(height: 12),
           ],
-          TextFormField(
+          PasswordField(
             controller: _newPasswordController,
-            obscureText: true,
+            labelText: 'New password',
+            helperText: passwordPolicyHint,
             autofillHints: const [AutofillHints.newPassword],
-            decoration: const InputDecoration(labelText: 'New password'),
-            validator: (value) =>
-                (value == null || value.isEmpty) ? 'New password is required.' : null,
+            validator: (value) => (value == null || value.isEmpty)
+                ? 'New password is required.'
+                : null,
           ),
           const SizedBox(height: 12),
-          TextFormField(
+          PasswordField(
             controller: _confirmPasswordController,
-            obscureText: true,
+            labelText: 'Confirm new password',
             autofillHints: const [AutofillHints.newPassword],
-            decoration: const InputDecoration(labelText: 'Confirm new password'),
-            validator: (value) =>
-                (value == null || value.isEmpty) ? 'Please confirm the new password.' : null,
+            validator: (value) => (value == null || value.isEmpty)
+                ? 'Please confirm the new password.'
+                : null,
           ),
           const SizedBox(height: 20),
           if (_error != null) ...[
-            Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
             const SizedBox(height: 12),
           ],
           FilledButton(

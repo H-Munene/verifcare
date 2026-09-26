@@ -27,6 +27,8 @@ const allTableNames = [
   'verification_attempts',
   'audio_records',
   'consent_records',
+  'terms_acceptances',
+  'family_link_requests',
   'notification_log',
   'audit_log',
 ] as const;

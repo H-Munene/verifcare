@@ -1,17 +1,3 @@
-.visit-detail-page__back {
-  background: none;
-  border: none;
-  color: var(--color-accent);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-  margin-bottom: 16px;
-}
-
-.visit-detail-page__back:hover {
-  color: var(--color-accent-hover);
-}
-
 .visit-detail-page__header {
   display: flex;
   align-items: flex-start;

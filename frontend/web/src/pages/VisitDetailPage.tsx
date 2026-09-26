@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import type { VerificationAttemptType } from '../api/visitSchedules';
 import { Badge } from '../design-system/Badge';
@@ -58,7 +58,6 @@ function statusLabel(status: string): string {
 export function VisitDetailPage() {
   const { visitId } = useParams<{ visitId: string }>();
   const { visitSchedules } = useApi();
-  const navigate = useNavigate();
 
   const visitQuery = useQuery({
     queryKey: ['visit-schedule', visitId],
@@ -94,10 +93,6 @@ export function VisitDetailPage() {
 
   return (
     <div className="visit-detail-page">
-      <button type="button" className="visit-detail-page__back" onClick={() => void navigate(-1)}>
-        ‹ Back
-      </button>
-
       <div className="visit-detail-page__header">
         <div>
           <h1 className="visit-detail-page__title">
@@ -113,11 +108,7 @@ export function VisitDetailPage() {
 
       <Card className="visit-detail-page__timeline-card">
         <div className="visit-detail-page__section-title">Visit Timeline</div>
-        {verificationQuery.isLoading ? (
-          <p>Loading...</p>
-        ) : (
-          <Timeline steps={steps} />
-        )}
+        {verificationQuery.isLoading ? <p>Loading...</p> : <Timeline steps={steps} />}
       </Card>
     </div>
   );

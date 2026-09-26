@@ -39,6 +39,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -575,6 +576,97 @@ export const consentRecords = pgTable(
     index('idx_consent_records_dependant').on(table.dependantId),
     index('idx_consent_records_type').on(table.consentType),
     index('idx_consent_records_granted_by').on(table.grantedBy),
+  ],
+);
+
+// ============================================================================
+// terms_acceptances (append-only) - a user accepting the app's terms of use and privacy notice
+// (2026-09-26, the mobile apps' consent screen). Not consent_records: that table is consent given
+// *about a subject* (a caregiver's or dependant's biometrics/audio), often by someone else on
+// their behalf; this is the signed-in user agreeing to the terms for themselves. One row per
+// document version accepted, so publishing a new version (src/terms.ts) asks everyone again while
+// the record of what each person agreed to, and when, is kept.
+// ============================================================================
+
+export const termsAcceptances = pgTable(
+  'terms_acceptances',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id),
+    // Which document: the caregiver and family-member apps have different terms.
+    document: text().notNull(),
+    version: text().notNull(),
+    acceptedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_terms_acceptances_document',
+      sql`${table.document} IN ('caregiver', 'family_member')`,
+    ),
+    unique('uq_terms_acceptances_user_document_version').on(
+      table.userId,
+      table.document,
+      table.version,
+    ),
+    // `trg_terms_acceptances_append_only` (rejects UPDATE/DELETE) is added by migration 0012.
+  ],
+);
+
+// ============================================================================
+// family_link_requests (2026-09-26) - a family member asking a dependant's primary contact to
+// link them. The requester names the primary contact by exact email or phone and never learns
+// whether that matched anyone (the request is stored and shown to them as pending either way);
+// primaryContactUserId is only set when the contact belonged to a primary contact at the time, and
+// only those requests reach anyone. The primary contact chooses which of their dependants to link
+// when approving, so the requester never sees dependants' names before being linked.
+// ============================================================================
+
+export const familyLinkRequests = pgTable(
+  'family_link_requests',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    requesterUserId: uuid()
+      .notNull()
+      .references(() => users.id),
+    // The email (lower-cased) or E.164 phone number the requester typed, shown back to them.
+    targetContact: text().notNull(),
+    primaryContactUserId: uuid().references(() => users.id),
+    relationship: text(),
+    status: text().notNull().default('pending'),
+    // The dependants the primary contact linked the requester to, when approved.
+    linkedDependantIds: uuid().array(),
+    decidedAt: timestamp({ withTimezone: true }),
+    // When the requester saw the outcome in the app - until then it counts as an unread
+    // notification for them.
+    requesterSeenAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_family_link_requests_status',
+      sql`${table.status} IN ('pending', 'approved', 'rejected')`,
+    ),
+    check(
+      'chk_family_link_requests_decision',
+      sql`(${table.status} = 'pending' AND ${table.decidedAt} IS NULL) OR
+          (${table.status} = 'rejected' AND ${table.decidedAt} IS NOT NULL) OR
+          (${table.status} = 'approved' AND ${table.decidedAt} IS NOT NULL AND ${table.linkedDependantIds} IS NOT NULL)`,
+    ),
+    // One open request per requester and contact - asking again doesn't pile up duplicates.
+    uniqueIndex('uq_family_link_requests_pending')
+      .on(table.requesterUserId, table.targetContact)
+      .where(sql`${table.status} = 'pending'`),
+    index('idx_family_link_requests_requester').on(table.requesterUserId),
+    index('idx_family_link_requests_primary_pending')
+      .on(table.primaryContactUserId)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 

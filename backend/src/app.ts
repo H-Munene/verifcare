@@ -16,6 +16,8 @@ import { createCheckinRouter } from './routes/checkin.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
 import { createDependantsRouter } from './routes/dependants.js';
 import { createNotificationsRouter } from './routes/notifications.js';
+import { createTermsRouter } from './routes/terms.js';
+import { createFamilyLinkRequestsRouter } from './routes/familyLinkRequests.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
@@ -203,6 +205,8 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     app.use('/consent-records', createConsentRecordsRouter({ requireAuth }));
     // HEZ-41's notification list/acknowledge endpoints - only needs requireAuth too.
     app.use('/notifications', createNotificationsRouter({ requireAuth }));
+    app.use('/terms', createTermsRouter({ requireAuth }));
+    app.use('/family-link-requests', createFamilyLinkRequestsRouter({ requireAuth }));
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.

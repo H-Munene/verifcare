@@ -28,9 +28,7 @@ export function Timeline({ steps }: { steps: TimelineStep[] }) {
           <div className="ds-timeline__step" key={step.label}>
             <div className="ds-timeline__rail">
               <div
-                className={
-                  'ds-timeline__dot' + (isComplete ? ' ds-timeline__dot--complete' : '')
-                }
+                className={'ds-timeline__dot' + (isComplete ? ' ds-timeline__dot--complete' : '')}
               />
               {index < steps.length - 1 ? (
                 <div

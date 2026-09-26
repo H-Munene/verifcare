@@ -37,8 +37,10 @@ interface DependantBody {
   id: string;
   fullName: string;
   geofenceLat: number;
+  geofenceRadiusMeters: number;
   status: string;
   registeredBy: string;
+  checkinPhotoStatus: 'ready' | 'awaiting_review' | 'missing';
 }
 interface DependantPageBody {
   items: DependantBody[];
@@ -47,8 +49,14 @@ interface DependantPageBody {
 interface FamilyMemberBody {
   dependantId: string;
   familyMemberUserId: string;
+  fullName: string;
   isPrimaryContact: boolean;
   relationship: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  addedByName?: string | null;
+  idType?: string | null;
+  idNumber?: string | null;
 }
 // supertest types response.body as `any` (it's just parsed JSON) - a single cast point per
 // response, rather than scattering `as` assertions across every property access below.
@@ -724,6 +732,49 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('GET /dependants/{dependantId}', () => {
+      it('reports checkinPhotoStatus as missing, awaiting review, then ready, on single and list reads', async () => {
+        const supervisor = await createTestUser('sup-photo', 'supervisor', '+254700000044');
+        const dependant = await createTestDependant(supervisor.id);
+        const read = async () => {
+          const one = dependantBody(
+            await request(app)
+              .get(`/dependants/${dependant.id}`)
+              .set('x-test-auth', testAuthHeader('sup-photo', 'supervisor')),
+          );
+          const list = dependantPageBody(
+            await request(app)
+              .get('/dependants')
+              .set('x-test-auth', testAuthHeader('sup-photo', 'supervisor')),
+          );
+          const listed = list.items.find((item) => item.id === dependant.id);
+          expect(listed?.checkinPhotoStatus).toBe(one.checkinPhotoStatus);
+          return one.checkinPhotoStatus;
+        };
+        const enroll = (status: 'active' | 'flagged') =>
+          getDb()
+            .insert(schema.biometricEnrollments)
+            .values({
+              subjectType: 'dependant',
+              dependantId: dependant.id,
+              s3Key: `test/${dependant.id}/${status}.jpg`,
+              imageOrder: 1,
+              status,
+              ...(status === 'flagged' && {
+                matchedSubjectType: 'dependant' as const,
+                matchedSubjectId: dependant.id,
+                matchedSimilarity: 99,
+              }),
+              enrolledBy: supervisor.id,
+            });
+
+        expect(await read()).toBe('missing');
+        // Waiting for a supervisor's review - check-in can't use it yet.
+        await enroll('flagged');
+        expect(await read()).toBe('awaiting_review');
+        await enroll('active');
+        expect(await read()).toBe('ready');
+      });
+
       it('returns 404 for a nonexistent dependant', async () => {
         await createTestUser('sup-get-404', 'supervisor', '+254700000040');
         const response = await request(app)
@@ -868,7 +919,23 @@ describe.skipIf(!hasTestDb)(
         expect(row?.status).toBe('deleted');
       });
 
-      it('lets the primary-contact family member update non-status fields', async () => {
+      it('lets the primary-contact family member move the location', async () => {
+        const { dependant, primarySub } = await registerDependant();
+
+        const response = await request(app)
+          .patch(`/dependants/${dependant.id}`)
+          .set('x-test-auth', testAuthHeader(primarySub, 'family_member'))
+          .send({ geofenceLat: -1.3, geofenceLng: 36.9, ward: 'HOSPITAL' });
+
+        expect(response.status).toBe(200);
+        expect(dependantBody(response)).toMatchObject({
+          geofenceLat: -1.3,
+          geofenceLng: 36.9,
+          ward: 'HOSPITAL',
+        });
+      });
+
+      it('forbids the primary-contact family member from changing the geofence radius', async () => {
         const { dependant, primarySub } = await registerDependant();
 
         const response = await request(app)
@@ -876,8 +943,13 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader(primarySub, 'family_member'))
           .send({ geofenceRadiusMeters: 250 });
 
-        expect(response.status).toBe(200);
-        expect(dependantBody(response)).toMatchObject({ geofenceRadiusMeters: 250 });
+        expect(response.status).toBe(403);
+        const db = getDb();
+        const [row] = await db
+          .select()
+          .from(schema.dependants)
+          .where(eq(schema.dependants.id, dependant.id));
+        expect(row?.geofenceRadiusMeters).toBe(dependant.geofenceRadiusMeters);
       });
 
       it('forbids the primary-contact family member from changing status', async () => {
@@ -906,7 +978,7 @@ describe.skipIf(!hasTestDb)(
         const response = await request(app)
           .patch(`/dependants/${dependant.id}`)
           .set('x-test-auth', testAuthHeader('fm-nonprimary', 'family_member'))
-          .send({ geofenceRadiusMeters: 300 });
+          .send({ homeAddressText: 'Moved house' });
 
         expect(response.status).toBe(403);
       });
@@ -989,6 +1061,55 @@ describe.skipIf(!hasTestDb)(
         );
       });
 
+      it('forbids a non-primary family member from adding someone as the primary contact', async () => {
+        const { dependant, supervisorSub } = await registerDependant();
+        await createTestUser('fm-add-nonprimary', 'family_member', '+254700000067');
+        await request(app)
+          .post(`/dependants/${dependant.id}/family-members`)
+          .set('x-test-auth', testAuthHeader(supervisorSub, 'supervisor'))
+          .send({ cognitoSub: 'fm-add-nonprimary', phoneNumber: '+254700000067', fullName: 'NP' });
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/family-members`)
+          .set('x-test-auth', testAuthHeader('fm-add-nonprimary', 'family_member'))
+          .send({
+            cognitoSub: 'new-usurper-sub',
+            phoneNumber: '+254700000068',
+            fullName: 'Usurper',
+            isPrimaryContact: true,
+          });
+
+        expect(response.status).toBe(403);
+        const db = getDb();
+        const primaryLinks = (
+          await db
+            .select()
+            .from(schema.dependantFamilyMembers)
+            .where(eq(schema.dependantFamilyMembers.dependantId, dependant.id))
+        ).filter((l) => l.isPrimaryContact);
+        expect(primaryLinks).toHaveLength(1);
+      });
+
+      it('lets the current primary contact hand the role to a new member', async () => {
+        const { dependant } = await registerDependant();
+
+        const response = await request(app)
+          .post(`/dependants/${dependant.id}/family-members`)
+          .set('x-test-auth', testAuthHeader('fm-add-primary', 'family_member'))
+          .send({
+            cognitoSub: 'fm-successor',
+            phoneNumber: '+254700000069',
+            fullName: 'Successor',
+            isPrimaryContact: true,
+          });
+
+        expect(response.status).toBe(201);
+        expect(familyMemberBody(response)).toMatchObject({
+          isPrimaryContact: true,
+          fullName: 'Successor',
+        });
+      });
+
       it('returns 409 for a duplicate (dependantId, familyMemberUserId) link', async () => {
         const { dependant, supervisorSub } = await registerDependant();
 
@@ -1006,6 +1127,59 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('GET /dependants/{dependantId}/family-members', () => {
+      it('includes registration details, with the ID document for supervisors only', async () => {
+        const supervisor = await createTestUser(
+          'sup-details',
+          'supervisor',
+          '+254700000072',
+          'Supervisor Wambui',
+        );
+        const member = await createTestUser(
+          'fm-details',
+          'family_member',
+          '+254700000073',
+          'Achieng Otieno',
+          'achieng@example.com',
+        );
+        await getDb()
+          .update(schema.users)
+          .set({ idType: 'national_id', idNumber: '12345678' })
+          .where(eq(schema.users.id, member.id));
+        const dependant = await createTestDependant(supervisor.id);
+        await getDb().insert(schema.dependantFamilyMembers).values({
+          dependantId: dependant.id,
+          familyMemberUserId: member.id,
+          relationship: 'Daughter',
+          isPrimaryContact: true,
+          addedBy: supervisor.id,
+        });
+        const list = async (sub: string, role: UserRole) =>
+          familyMemberListBody(
+            await request(app)
+              .get(`/dependants/${dependant.id}/family-members`)
+              .set('x-test-auth', testAuthHeader(sub, role)),
+          )[0];
+
+        expect(await list('sup-details', 'supervisor')).toMatchObject({
+          fullName: 'Achieng Otieno',
+          email: 'achieng@example.com',
+          phoneNumber: '+254700000073',
+          addedByName: 'Supervisor Wambui',
+          idType: 'national_id',
+          idNumber: '12345678',
+        });
+
+        const seenByFamily = await list('fm-details', 'family_member');
+        expect(seenByFamily).toMatchObject({
+          email: 'achieng@example.com',
+          phoneNumber: '+254700000073',
+          addedByName: 'Supervisor Wambui',
+        });
+        // Not just empty - absent from the response altogether.
+        expect(seenByFamily).not.toHaveProperty('idType');
+        expect(seenByFamily).not.toHaveProperty('idNumber');
+      });
+
       it('lets a linked family member list the dependant’s family members', async () => {
         await createTestUser('sup-list-fm', 'supervisor', '+254700000070');
         await createTestUser('fm-list-fm', 'family_member', '+254700000071');
@@ -1030,6 +1204,9 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(familyMemberListBody(response)).toHaveLength(1);
+        // The name is what lets a family member see who the other members are - they can't
+        // resolve other users through GET /users/{id}.
+        expect(familyMemberListBody(response)[0]?.fullName).toBe('User fm-list-fm');
       });
 
       it('forbids an unlinked family member', async () => {

@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'api/api_client.dart';
 import 'api/checkin_api.dart';
+import 'api/terms_api.dart';
 import 'api/visit_schedules_api.dart';
 import 'app_ui.dart';
 import 'auth/cognito_auth_service.dart';
 import 'screens/checkin_screen.dart';
+import 'screens/consent_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/schedule_calendar_screen.dart';
@@ -55,6 +57,8 @@ class _RootScreen extends StatefulWidget {
 class _RootScreenState extends State<_RootScreen> {
   bool _loading = true;
   IdentityClaims? _identity;
+  // Lives here rather than in the shell, since the consent screen comes before the shell exists.
+  late final _termsApi = TermsApi(ApiClient(widget.authService.getIdToken));
 
   @override
   void initState() {
@@ -80,10 +84,16 @@ class _RootScreenState extends State<_RootScreen> {
     }
     final identity = _identity;
     if (identity != null) {
-      return _AuthenticatedShell(
-        authService: widget.authService,
-        identity: identity,
-        onSignedOut: () => setState(() => _identity = null),
+      // The whole signed-in app sits behind the consent screen (2026-09-26): nothing loads, and
+      // no notification opens a visit, until the current terms are accepted.
+      return ConsentGate(
+        termsApi: _termsApi,
+        sub: identity.sub,
+        child: _AuthenticatedShell(
+          authService: widget.authService,
+          identity: identity,
+          onSignedOut: () => setState(() => _identity = null),
+        ),
       );
     }
     return LoginScreen(

@@ -95,11 +95,7 @@ export function DependantDetailPage() {
         </div>
       </div>
 
-      <Tabs
-        tabs={TABS}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as DetailTab)}
-      />
+      <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 
       <div className="dependant-detail__tab-panel">
         {activeTab === 'family' ? (
@@ -144,10 +140,13 @@ export function DependantDetailPage() {
   );
 }
 
-// The family-members endpoint only returns familyMemberUserId (an internal UUID), not a display
-// name (matches backend/openapi.yaml's DependantFamilyMember schema exactly) - resolved here via
-// GET /users/{id} (supervisor-only, which matches this app's exclusive supervisor use case)
-// instead of showing the raw UUID.
+const ID_TYPE_LABELS: Record<'national_id' | 'passport', string> = {
+  national_id: 'National ID',
+  passport: 'Passport',
+};
+
+// One linked family member. The name comes with the list itself (it used to be a GET /users/{id}
+// per row). The row expands to the member's registration details (2026-09-26, user request).
 function FamilyMemberRow({
   dependantId,
   member,
@@ -155,13 +154,11 @@ function FamilyMemberRow({
   dependantId: string;
   member: DependantFamilyMember;
 }) {
-  const { users, dependants } = useApi();
+  const { dependants } = useApi();
   const { identity } = useAuth();
   const queryClient = useQueryClient();
-  const userQuery = useQuery({
-    queryKey: ['user', member.familyMemberUserId],
-    queryFn: () => users.getUser(member.familyMemberUserId),
-  });
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = `family-member-details-${member.familyMemberUserId}`;
 
   // PATCH .../family-members/{userId} is supervisor-only (HEZ-30) - matches this app's exclusive
   // supervisor use case, but still gated on the caller's actual role rather than assumed, the same
@@ -178,24 +175,70 @@ function FamilyMemberRow({
     },
   });
 
+  const identityDocument =
+    member.idType && member.idNumber
+      ? `${ID_TYPE_LABELS[member.idType]} · ${member.idNumber}`
+      : 'Not recorded';
+  const details: [string, string][] = [
+    ['Email', member.email ?? 'Not recorded'],
+    ['Phone', member.phoneNumber ?? 'Not recorded'],
+    ['ID document', identityDocument],
+    ['Relationship', member.relationship ?? 'Not set'],
+    ['Primary contact', member.isPrimaryContact ? 'Yes' : 'No'],
+    ['Added by', member.addedByName ?? 'Unknown'],
+    [
+      'Linked on',
+      new Date(member.createdAt).toLocaleDateString('en-KE', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }),
+    ],
+  ];
+
   return (
-    <div className="ds-row-store">
-      <div>
-        <div className="ds-row-store__title">
-          {userQuery.data?.fullName ??
-            (userQuery.isLoading ? 'Loading...' : member.familyMemberUserId)}
-        </div>
-        <div className="ds-row-store__caption">{member.relationship ?? 'Relationship not set'}</div>
-      </div>
-      {member.isPrimaryContact ? (
-        <Tag>Primary contact</Tag>
-      ) : identity?.role === 'supervisor' ? (
-        <Button
-          onClick={() => makePrimaryMutation.mutate()}
-          disabled={makePrimaryMutation.isPending}
+    <div className="dependant-detail__member">
+      <div className="ds-row-store">
+        <button
+          type="button"
+          className="dependant-detail__member-toggle"
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          onClick={() => setExpanded((open) => !open)}
         >
-          Make primary
-        </Button>
+          <span
+            className={`dependant-detail__member-chevron${expanded ? ' dependant-detail__member-chevron--open' : ''}`}
+            aria-hidden="true"
+          >
+            ›
+          </span>
+          <span>
+            <span className="ds-row-store__title">{member.fullName}</span>
+            <span className="ds-row-store__caption">
+              {member.relationship ?? 'Relationship not set'}
+            </span>
+          </span>
+        </button>
+        {member.isPrimaryContact ? (
+          <Tag>Primary contact</Tag>
+        ) : identity?.role === 'supervisor' ? (
+          <Button
+            onClick={() => makePrimaryMutation.mutate()}
+            disabled={makePrimaryMutation.isPending}
+          >
+            Make primary
+          </Button>
+        ) : null}
+      </div>
+      {expanded ? (
+        <dl id={detailsId} className="dependant-detail__member-details">
+          {details.map(([label, value]) => (
+            <div key={label} className="dependant-detail__member-detail">
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
       ) : null}
     </div>
   );

@@ -43,9 +43,14 @@ class NewPasswordRequiredChallenge {
 
   NewPasswordRequiredChallenge(this._user, this.requiredAttributes);
 
-  Future<CognitoUserSession> complete(String newPassword, {String? fullName}) async {
+  Future<CognitoUserSession> complete(
+    String newPassword, {
+    String? fullName,
+  }) async {
     final attributes = <String, String>{};
-    if (requiredAttributes.contains('name') && fullName != null && fullName.isNotEmpty) {
+    if (requiredAttributes.contains('name') &&
+        fullName != null &&
+        fullName.isNotEmpty) {
       attributes['name'] = fullName;
     }
     final session = await _user.sendNewPasswordRequiredAnswer(
@@ -71,6 +76,11 @@ class SignInNewPasswordRequired extends SignInResult {
   SignInNewPasswordRequired(this.challenge);
 }
 
+/// The account's password was reset by an administrator (AdminResetUserPassword, e.g. from the
+/// Cognito console): Cognito refuses the old password and has already emailed a reset code, so
+/// sign-in continues in the forgot-password screen's code step rather than failing outright.
+class SignInPasswordResetRequired extends SignInResult {}
+
 class CognitoAuthService {
   final CognitoUserPool _pool = CognitoUserPool(
     AppConfig.userPoolId,
@@ -80,7 +90,10 @@ class CognitoAuthService {
 
   Future<SignInResult> signIn(String email, String password) async {
     final user = CognitoUser(email, _pool);
-    final authDetails = AuthenticationDetails(username: email, password: password);
+    final authDetails = AuthenticationDetails(
+      username: email,
+      password: password,
+    );
     try {
       final session = await user.authenticateUser(authDetails);
       if (session == null) {
@@ -95,11 +108,45 @@ class CognitoAuthService {
       const prefix = 'userAttributes.';
       final required = (e.requiredAttributes ?? const [])
           .map((attribute) => attribute.toString())
-          .map((attribute) =>
-              attribute.startsWith(prefix) ? attribute.substring(prefix.length) : attribute)
+          .map(
+            (attribute) => attribute.startsWith(prefix)
+                ? attribute.substring(prefix.length)
+                : attribute,
+          )
           .toList();
-      return SignInNewPasswordRequired(NewPasswordRequiredChallenge(user, required));
+      return SignInNewPasswordRequired(
+        NewPasswordRequiredChallenge(user, required),
+      );
+    } on CognitoClientException catch (e) {
+      if (e.code == 'PasswordResetRequiredException') {
+        return SignInPasswordResetRequired();
+      }
+      rethrow;
     }
+  }
+
+  /// Starts self-service password reset: Cognito emails a code to the account's verified email
+  /// (the pool's account recovery is email-only, see infra/lib/auth.ts). With user-existence
+  /// errors prevented on this app client, an unknown email also completes normally without
+  /// sending anything, so the screen must not claim a code was definitely sent.
+  /// UserNotFoundException is treated the same way in case the client ever answers the legacy
+  /// way, so the screen never reveals whether an email is registered.
+  Future<void> requestPasswordReset(String email) async {
+    try {
+      await CognitoUser(email, _pool).forgotPassword();
+    } on CognitoClientException catch (e) {
+      if (e.code != 'UserNotFoundException') rethrow;
+    }
+  }
+
+  /// Sets the new password using the emailed code (ConfirmForgotPassword). The user signs in
+  /// with it afterwards - this call returns no session.
+  Future<void> confirmPasswordReset({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    await CognitoUser(email, _pool).confirmPassword(code, newPassword);
   }
 
   /// Resolves a previously cached, still-valid session (transparently refreshed via the package's
