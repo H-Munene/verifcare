@@ -17,7 +17,7 @@
              without it, the registration map just won't render tiles. -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="YOUR_ANDROID_GOOGLE_MAPS_API_KEY" />
+            android:value="AIzaSyDiu92F2OBGJH63kcoaZYRH28_qPSqhX1k" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
