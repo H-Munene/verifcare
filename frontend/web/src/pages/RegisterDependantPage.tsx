@@ -8,6 +8,7 @@ import type { Dependant, DependantGender, DependantStatus } from '../api/dependa
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
 import { ExactLocationMap } from '../components/ExactLocationMap';
+import { isPointInFeature } from '../geo/adminBoundaries';
 import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
@@ -213,13 +214,21 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   // removed for UX reasons (confirmed with the user); the pin is the only way to set them now.
   const [geofenceLat, setGeofenceLat] = useState<number | null>(initial?.geofenceLat ?? null);
   const [geofenceLng, setGeofenceLng] = useState<number | null>(initial?.geofenceLng ?? null);
-  const [exactLocationValid, setExactLocationValid] = useState(false);
 
-  function handleExactLocationChange(lat: number, lng: number, isInsideWard: boolean): void {
+  function handleExactLocationChange(lat: number, lng: number): void {
     setGeofenceLat(lat);
     setGeofenceLng(lng);
-    setExactLocationValid(isInsideWard);
   }
+
+  // Whether the pin is inside the selected ward, worked out from the pin and the ward's boundary on
+  // every render rather than remembered from the last tap (2026-09-26, user report: Next and Save
+  // must be disabled while the pin is outside the ward). Deriving it also catches a ward changed
+  // after the pin was placed, and an edit's saved pin, which the old tap-time flag missed. null
+  // when there's nothing to check yet (no pin, or the ward's boundary isn't loaded).
+  const pinInsideWard =
+    wardFeature && geofenceLat !== null && geofenceLng !== null
+      ? isPointInFeature(geofenceLat, geofenceLng, wardFeature)
+      : null;
 
   // 20m default - confirmed with the user 2026-09-14 (originally proposed at 10m, revised up after
   // flagging that typical smartphone GPS accuracy, ~5m under open sky and substantially worse
@@ -318,20 +327,23 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   // can proceed (confirmed with the user) - editing an existing dependant is not blocked on either,
   // since the backend only requires them at creation, not on every update.
   const locationSelectorValid = county !== '' && constituency !== '' && ward !== '';
-  const exactLocationStepValid =
-    geofenceLat !== null &&
-    geofenceLng !== null &&
-    exactLocationValid &&
-    geofenceRadiusMeters !== '';
+  const exactLocationStepValid = pinInsideWard === true && geofenceRadiusMeters !== '';
   const primaryContactValid = Boolean(primarySelection);
+  // Editing isn't blocked on location in general (see above), but never on a pin known to be
+  // outside the ward.
+  const editPinValid = pinInsideWard !== false;
   const stepValidityByIndex = isEdit
-    ? [detailsValid, true, true]
+    ? [detailsValid, true, editPinValid]
     : [detailsValid, locationSelectorValid, exactLocationStepValid, primaryContactValid];
   const currentStepValid = stepValidityByIndex[step] ?? true;
   // Surfaces *why* Next/Save is disabled, rather than leaving a disabled button as the only signal
   // - the underlying gate above is what actually enforces this; this is purely to make it visible.
   const stepHints = isEdit
-    ? ['Enter first name, last name, and date of birth to continue.']
+    ? [
+        'Enter first name, last name, and date of birth to continue.',
+        null,
+        'Move the pin inside the ward boundary to continue.',
+      ]
     : [
         'Enter first name, last name, and date of birth to continue.',
         'Select a county, constituency, and ward to continue.',
@@ -416,6 +428,9 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       });
       void queryClient.invalidateQueries({ queryKey: ['dependants'] });
       void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
+      // Back to the dependant's page once saved (2026-09-26, user report: Save used to leave the
+      // supervisor on the edit form with no sign it had worked).
+      void navigate(`/dependants/${dependantId}`);
     } catch {
       // updateMutation's own `error` state (surfaced via mutationError below) already reports this
       // - nothing further to do here.
@@ -484,7 +499,8 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           <Button
             type="button"
             variant="primary"
-            disabled={updateMutation.isPending || !detailsValid}
+            disabled={updateMutation.isPending || !detailsValid || !editPinValid}
+            title={editPinValid ? undefined : 'Move the pin inside the ward boundary to save.'}
             onClick={() => void saveEdit()}
           >
             {updateMutation.isPending ? 'Saving...' : 'Save'}
@@ -492,6 +508,12 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         ) : null}
       </div>
       <Stepper steps={steps} currentStepIndex={step} />
+      {isEdit && !editPinValid && step !== exactLocationStepIndex ? (
+        <p className="register-dependant-page__step-hint">
+          The pin is outside the selected ward - move it inside the boundary on the Exact Location
+          step to save.
+        </p>
+      ) : null}
       <form
         onSubmit={handleSubmit}
         onKeyDown={preventEnterSubmit}
