@@ -43,6 +43,8 @@ export interface DashboardOverview {
   generatedAt: string;
   visits: OverviewVisit[];
   trend: TrendDay[];
+  /** Completed and missed visits in the 14 days before the trend, to compare rates with. */
+  previousPeriod: { completed: number; missed: number };
   attention: {
     missedVisitAlerts: { total: number; items: MissedVisitAlert[] };
     flaggedPhotos: number;

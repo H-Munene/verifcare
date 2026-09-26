@@ -186,6 +186,14 @@ export function sampleOverview(date: string): DashboardOverview {
     sample: true,
     visits,
     trend: sampleTrend(date, visits),
+    previousPeriod: (() => {
+      // The 14 days before, generated the same way as the trend's past days.
+      const earlier = sampleTrend(shiftDate(date, -14), []).slice(0, 13);
+      return {
+        completed: earlier.reduce((n, d) => n + d.completed, 0),
+        missed: earlier.reduce((n, d) => n + d.missed, 0) + 3,
+      };
+    })(),
     attention: {
       missedVisitAlerts: { total: alerts.length, items: alerts.slice(0, 5) },
       flaggedPhotos: 2,

@@ -1,0 +1,201 @@
+.outcome-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* The inspiration's inner cards, with the Overview's sharp corners. */
+.outcome-summary__card,
+.outcome-summary__outcomes {
+  border: 1px solid var(--color-border-structural);
+  background: var(--color-page-background);
+}
+
+.outcome-summary__card {
+  padding: 14px 16px 16px;
+}
+
+.outcome-summary__label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.outcome-summary__headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* The page's one hero figure: same sans as everything else, proportional digits. */
+.outcome-summary__rate {
+  font-size: 40px;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -1.2px;
+  color: var(--color-ink-primary);
+}
+
+.outcome-summary__change {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: #e3f8ec;
+  font-size: 13px;
+  font-weight: 500;
+  color: #00794a;
+  white-space: nowrap;
+}
+
+.outcome-summary__change--down {
+  background: var(--color-danger-tint);
+  color: #b3261e;
+}
+
+.outcome-summary__ticks {
+  display: flex;
+  gap: 3px;
+  height: 22px;
+  margin-top: 14px;
+}
+
+.outcome-summary__tick {
+  flex: 1;
+  background: var(--color-border-structural);
+}
+
+.outcome-summary__tick--on {
+  background: var(--color-state-checked-in);
+}
+
+.outcome-summary__caption {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-ink-subtle);
+}
+
+.outcome-summary__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-divider);
+}
+
+.outcome-summary__stats div + div {
+  padding-left: 12px;
+}
+
+.outcome-summary__stats dt {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.outcome-summary__stats dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.outcome-summary__outcomes {
+  margin: 0;
+  padding: 0 16px;
+  list-style: none;
+}
+
+.outcome-summary__outcome {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 0;
+}
+
+.outcome-summary__outcome + .outcome-summary__outcome {
+  border-top: 1px solid var(--color-border-divider);
+}
+
+/* The chart's legend: the same colour as the outcome's part of each column. */
+.outcome-summary__swatch {
+  width: 4px;
+  align-self: stretch;
+  flex: none;
+}
+
+.outcome-summary__outcome-icon {
+  flex: none;
+  color: var(--color-ink-subtle);
+}
+
+.outcome-summary__outcome-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.outcome-summary__outcome-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.outcome-summary__outcome-explanation {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.outcome-summary__count {
+  min-width: 32px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--color-ink-default);
+  font-variant-numeric: tabular-nums;
+}
+
+.outcome-summary__count--completed {
+  background: #e3f8ec;
+  color: #00794a;
+}
+
+.outcome-summary__count--missed {
+  background: var(--color-danger-tint);
+  color: #b3261e;
+}
+
+.outcome-summary__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.outcome-summary__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-ink-primary);
+  font-weight: 500;
+}
+
+.outcome-summary__link:hover {
+  color: var(--color-accent);
+}
+
+.outcome-summary__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

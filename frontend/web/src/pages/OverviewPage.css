@@ -207,6 +207,24 @@
   grid-area: attention;
 }
 
+.overview__outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.overview__outcomes-summary {
+  flex: 0 1 320px;
+  min-width: 0;
+}
+
+.overview__outcomes-chart {
+  flex: 1 1 320px;
+  min-width: 0;
+  /* Room above for a column's summary, which opens upward. */
+  padding-top: 4px;
+}
+
 .overview__panel-title {
   margin: 0;
   font-size: 14px;

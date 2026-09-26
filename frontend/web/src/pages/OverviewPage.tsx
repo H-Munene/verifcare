@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { DashboardOverview, OverviewVisit, VisitState } from '../api/dashboard';
 import { useApi } from '../api/useApi';
+import { OutcomeSummary } from '../components/OutcomeSummary';
 import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
 import { STATE_META, VISIT_STATES, formatTime } from '../components/visitStates';
@@ -305,8 +306,19 @@ export function OverviewPage() {
               Visit outcomes
             </h2>
           </div>
-          <div className="overview__panel-body">
-            <OutcomeTrendChart days={overview.trend} selectedDate={date} onSelectDate={showDate} />
+          {/* The summary card (rate, meter, the outcomes explained, which is also the chart's
+              legend) beside the 14-day chart; they stack when the panel is narrow. */}
+          <div className="overview__panel-body overview__outcomes">
+            <div className="overview__outcomes-summary">
+              <OutcomeSummary overview={overview} />
+            </div>
+            <div className="overview__outcomes-chart">
+              <OutcomeTrendChart
+                days={overview.trend}
+                selectedDate={date}
+                onSelectDate={showDate}
+              />
+            </div>
           </div>
         </section>
 
