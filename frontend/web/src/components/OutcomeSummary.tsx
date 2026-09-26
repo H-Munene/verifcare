@@ -1,8 +1,8 @@
 // The Overview's visit-outcomes card, styled on the user's inspiration
 // (temp_images/visit_outcomes_inpiration_ui.png, 2026-09-26): the completion rate as a big number
 // with its change against the previous 14 days, the same percentage as a row of thin bars, three
-// supporting numbers, then each outcome with what it means and its count - which is also the
-// chart's legend - and when it was updated.
+// supporting numbers, and when it was updated. (The per-outcome list below it was removed at the
+// user's request, 2026-09-26; the chart carries its own legend instead.)
 //
 // The completion rate is completed / (completed + missed): open and cancelled visits haven't had
 // the chance to succeed or fail, so they don't count either way.
@@ -103,28 +103,6 @@ export function OutcomeSummary({ overview }: { overview: DashboardOverview }) {
           </div>
         </dl>
       </div>
-
-      <ul className="outcome-summary__outcomes">
-        {OUTCOME_SERIES.map((s) => (
-          <li key={s.key} className="outcome-summary__outcome">
-            <span className="outcome-summary__swatch" style={{ background: s.color }} aria-hidden />
-            <HugeiconsIcon
-              icon={s.icon}
-              size={16}
-              strokeWidth={1.6}
-              className="outcome-summary__outcome-icon"
-              aria-hidden
-            />
-            <span className="outcome-summary__outcome-text">
-              <span className="outcome-summary__outcome-label">{s.label}</span>
-              <span className="outcome-summary__outcome-explanation">{s.explanation}</span>
-            </span>
-            <span className={`outcome-summary__count outcome-summary__count--${s.key}`}>
-              {totals[s.key]}
-            </span>
-          </li>
-        ))}
-      </ul>
 
       <div className="outcome-summary__footer">
         <span>Updated {formatTime(overview.generatedAt, overview.timeZone)}</span>

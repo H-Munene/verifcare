@@ -6,8 +6,7 @@
 // summary. Completed sits on the baseline, missed directly on it, where a bad day stands out.
 //
 // Every column is a button with a hover/focus summary that moves the page to that day; the same
-// numbers are also in a table for screen readers. The legend is the outcome list beside the chart
-// (OutcomeSummary).
+// numbers are also in a table for screen readers.
 
 import { useState } from 'react';
 import type { TrendDay } from '../api/dashboard';
@@ -42,6 +41,14 @@ export function OutcomeTrendChart({ days, selectedDate, onSelectDate }: OutcomeT
 
   return (
     <div className="trend">
+      <ul className="trend__legend">
+        {OUTCOME_SERIES.map((s) => (
+          <li key={s.key}>
+            <span className="trend__swatch" style={{ background: s.color }} aria-hidden />
+            {s.label}
+          </li>
+        ))}
+      </ul>
       <div className="trend__labels">
         <span className="trend__focus-date">{shortDate(hovered ?? selectedDate)}</span>
         <span>100%</span>
