@@ -5,14 +5,16 @@ import '../api/dependants_api.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 import '../widgets/visit_widgets.dart';
+import 'dependant_wizard_screen.dart';
 import 'photo_preview_screen.dart';
 import 'upcoming_visit_screen.dart';
 import 'visit_timeline_screen.dart';
 
 /// One dependant: a header with their details, then three tabs - Visits (in progress, upcoming,
 /// history), Family (every linked member) and Photos (enrolled images). Each tab loads and fails
-/// on its own, so a slow photo list never holds up the visits.
-class DependantDetailScreen extends StatelessWidget {
+/// on its own, so a slow photo list never holds up the visits. The primary contact also gets an
+/// Edit action.
+class DependantDetailScreen extends StatefulWidget {
   final Dependant dependant;
   final String? myUserId;
   final DependantsApi dependantsApi;
@@ -29,7 +31,59 @@ class DependantDetailScreen extends StatelessWidget {
   });
 
   @override
+  State<DependantDetailScreen> createState() => _DependantDetailScreenState();
+}
+
+class _DependantDetailScreenState extends State<DependantDetailScreen> {
+  late Dependant _dependant = widget.dependant;
+  bool _isPrimaryContact = false;
+  // Bumped after an edit, so every tab rebuilds and reloads (e.g. a replaced photo).
+  int _version = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPrimaryContact();
+  }
+
+  // Only the primary contact may edit (the backend enforces it too) - so the Edit action is
+  // shown only once the caller's own link is confirmed as primary. Any failure leaves it hidden.
+  Future<void> _checkPrimaryContact() async {
+    final myUserId = widget.myUserId;
+    if (myUserId == null) return;
+    try {
+      final members = await widget.dependantsApi.listFamilyMembers(
+        _dependant.id,
+      );
+      final isPrimary = members.any(
+        (m) => m.userId == myUserId && m.isPrimaryContact,
+      );
+      if (mounted) setState(() => _isPrimaryContact = isPrimary);
+    } catch (_) {}
+  }
+
+  Future<void> _edit() async {
+    final updated = await Navigator.of(context).push<Dependant>(
+      MaterialPageRoute(
+        builder: (_) => DependantWizardScreen.edit(
+          dependantsApi: widget.dependantsApi,
+          enrollmentsApi: widget.enrollmentsApi,
+          existing: _dependant,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    // A photo may have been replaced even when the details weren't saved, so reload either way.
+    setState(() {
+      _dependant = updated ?? _dependant;
+      _version++;
+    });
+    if (updated != null) showSnack(context, 'Details saved.', error: false);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final dependant = _dependant;
     return DefaultTabController(
       length: 3,
       child: Scaffold(
@@ -38,6 +92,13 @@ class DependantDetailScreen extends StatelessWidget {
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.white,
           title: Text(dependant.fullName, style: const TextStyle(fontSize: 16)),
+          actions: [
+            if (_isPrimaryContact)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton(onPressed: _edit, child: const Text('Edit')),
+              ),
+          ],
         ),
         body: NestedScrollView(
           headerSliverBuilder: (context, _) => [
@@ -50,18 +111,21 @@ class DependantDetailScreen extends StatelessWidget {
           body: TabBarView(
             children: [
               _VisitsTab(
+                key: ValueKey('visits-$_version'),
                 dependant: dependant,
-                dependantsApi: dependantsApi,
-                visitSchedulesApi: visitSchedulesApi,
+                dependantsApi: widget.dependantsApi,
+                visitSchedulesApi: widget.visitSchedulesApi,
               ),
               _FamilyTab(
+                key: ValueKey('family-$_version'),
                 dependantId: dependant.id,
-                myUserId: myUserId,
-                dependantsApi: dependantsApi,
+                myUserId: widget.myUserId,
+                dependantsApi: widget.dependantsApi,
               ),
               _PhotosTab(
+                key: ValueKey('photos-$_version'),
                 dependantId: dependant.id,
-                enrollmentsApi: enrollmentsApi,
+                enrollmentsApi: widget.enrollmentsApi,
               ),
             ],
           ),
@@ -218,6 +282,7 @@ class _VisitsTab extends StatefulWidget {
   final VisitSchedulesApi visitSchedulesApi;
 
   const _VisitsTab({
+    super.key,
     required this.dependant,
     required this.dependantsApi,
     required this.visitSchedulesApi,
@@ -378,6 +443,7 @@ class _FamilyTab extends StatefulWidget {
   final DependantsApi dependantsApi;
 
   const _FamilyTab({
+    super.key,
     required this.dependantId,
     required this.myUserId,
     required this.dependantsApi,
@@ -482,7 +548,11 @@ class _PhotosTab extends StatefulWidget {
   final String dependantId;
   final BiometricEnrollmentsApi enrollmentsApi;
 
-  const _PhotosTab({required this.dependantId, required this.enrollmentsApi});
+  const _PhotosTab({
+    super.key,
+    required this.dependantId,
+    required this.enrollmentsApi,
+  });
 
   @override
   State<_PhotosTab> createState() => _PhotosTabState();

@@ -81,4 +81,13 @@ class KenyaAreas {
   }
 
   static int _byName(Area a, Area b) => a.name.compareTo(b.name);
+
+  /// Finds an area by its stored name, ignoring case - the API keeps names, not codes, so this
+  /// is how an existing dependant's saved location is matched back to a list entry.
+  static Area? byName(List<Area> areas, String? name) {
+    final wanted = name?.toLowerCase();
+    return wanted == null
+        ? null
+        : areas.where((area) => area.name.toLowerCase() == wanted).firstOrNull;
+  }
 }

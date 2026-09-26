@@ -11,6 +11,9 @@ class Dependant {
   final String? county;
   final String? constituency;
   final String? ward;
+  final double geofenceLat;
+  final double geofenceLng;
+  final bool cognitiveMonitoringEnabled;
   final bool active;
 
   Dependant({
@@ -23,6 +26,9 @@ class Dependant {
     this.county,
     this.constituency,
     this.ward,
+    required this.geofenceLat,
+    required this.geofenceLng,
+    required this.cognitiveMonitoringEnabled,
     required this.active,
   });
 
@@ -31,6 +37,9 @@ class Dependant {
       'id': String id,
       'fullName': String fullName,
       'dob': String dob,
+      'geofenceLat': num geofenceLat,
+      'geofenceLng': num geofenceLng,
+      'cognitiveMonitoringEnabled': bool cognitiveMonitoringEnabled,
       'status': String status,
     } =>
       Dependant(
@@ -43,6 +52,9 @@ class Dependant {
         county: json['county'] as String?,
         constituency: json['constituency'] as String?,
         ward: json['ward'] as String?,
+        geofenceLat: geofenceLat.toDouble(),
+        geofenceLng: geofenceLng.toDouble(),
+        cognitiveMonitoringEnabled: cognitiveMonitoringEnabled,
         active: status == 'active',
       ),
     _ => throw FormatException('Unexpected dependant: $json'),
@@ -196,6 +208,37 @@ class DependantsApi {
     });
     return Dependant.fromJson(json);
   }
+
+  /// PATCH /dependants/{id} as the primary contact. Only fields a family member may change:
+  /// never status or geofenceRadiusMeters (supervisor-only - the backend answers 403), and never
+  /// dob (nobody can edit it). The backend has no way to clear an optional text field, so a
+  /// null here means "leave unchanged", not "clear".
+  Future<Dependant> updateDependant(
+    String dependantId, {
+    required String fullName,
+    required String county,
+    required String constituency,
+    required String ward,
+    required double geofenceLat,
+    required double geofenceLng,
+    required bool cognitiveMonitoringEnabled,
+    String? gender,
+    String? homeAddressText,
+    String? primaryConditionSummary,
+  }) async => Dependant.fromJson(
+    await _client.patch('/dependants/$dependantId', {
+      'fullName': fullName,
+      'gender': ?gender,
+      'homeAddressText': ?homeAddressText,
+      'primaryConditionSummary': ?primaryConditionSummary,
+      'county': county,
+      'constituency': constituency,
+      'ward': ward,
+      'geofenceLat': geofenceLat,
+      'geofenceLng': geofenceLng,
+      'cognitiveMonitoringEnabled': cognitiveMonitoringEnabled,
+    }),
+  );
 
   static String _isoDate(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';

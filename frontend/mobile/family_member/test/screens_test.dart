@@ -43,10 +43,17 @@ final _dependant = {
   'county': 'NAIROBI',
   'constituency': 'DAGORETTI NORTH',
   'ward': 'KILELESHWA',
+  'geofenceLat': -1.2833,
+  'geofenceLng': 36.7833,
+  'geofenceRadiusMeters': 20,
+  'cognitiveMonitoringEnabled': false,
   'status': 'active',
 };
 
-MockClient _backend() => MockClient((request) async {
+/// [callerIsPrimary]: whether the signed-in user (u1) is the dependant's primary contact.
+MockClient _backend({bool callerIsPrimary = true}) => MockClient((
+  request,
+) async {
   final path = request.url.path.replaceFirst('/prod', '');
   final query = request.url.queryParameters;
   final Object body = switch (path) {
@@ -74,13 +81,13 @@ MockClient _backend() => MockClient((request) async {
         'familyMemberUserId': 'u2',
         'fullName': 'Brian Kamau',
         'relationship': 'Grandson',
-        'isPrimaryContact': false,
+        'isPrimaryContact': !callerIsPrimary,
       },
       {
         'familyMemberUserId': 'u1',
         'fullName': 'Achieng Otieno',
         'relationship': 'Daughter',
-        'isPrimaryContact': true,
+        'isPrimaryContact': callerIsPrimary,
       },
     ],
     '/biometric-enrollments' => [],
@@ -173,6 +180,9 @@ void main() {
         await tester.tap(find.text('Wanjiku Kamau'));
         await tester.pumpAndSettle();
 
+        // The caller is the primary contact here, so they get the Edit action.
+        expect(find.widgetWithText(TextButton, 'Edit'), findsOneWidget);
+
         // Visits tab: in progress, upcoming and history, each visit labelled by status.
         // Scrolled to one by one, top to bottom, since a phone-height list only builds what's
         // near the screen.
@@ -248,6 +258,19 @@ void main() {
         );
         expect(find.text('Give morning medication'), findsOneWidget);
       }, _backend);
+    },
+  );
+
+  testWidgets(
+    'a family member who is not the primary contact gets no Edit action',
+    (tester) async {
+      await http.runWithClient(() async {
+        await _pumpHome(tester, const Size(360, 780));
+        await tester.tap(find.text('Wanjiku Kamau'));
+        await tester.pumpAndSettle();
+        expect(find.text('Visits'), findsOneWidget);
+        expect(find.widgetWithText(TextButton, 'Edit'), findsNothing);
+      }, () => _backend(callerIsPrimary: false));
     },
   );
 }

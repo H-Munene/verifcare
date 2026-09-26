@@ -13,44 +13,62 @@ import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
 import '../geo/kenya_areas.dart';
 
-/// Dependant registration in the same step order as the admin web wizard
-/// (RegisterDependantPage.tsx): Details, Location, Exact location, Photo.
+/// Registering or editing a dependant, in the same step order as the admin web wizard
+/// (RegisterDependantPage.tsx): Details, Location, Pin, Photo.
 ///
 /// Differences from the web wizard, all decided with the user (docs/family-app-plan.md):
 /// - Location is three plain dropdowns with no boundary map.
-/// - The exact-location pin starts at the phone's current position and isn't checked against the
-///   ward's boundary (that would need the 34.6 MB ward shapes).
-/// - The radius isn't shown: every family registration gets the standard 20 m.
+/// - The pin starts at the phone's current position and isn't checked against the ward's
+///   boundary (that would need the 34.6 MB ward shapes).
+/// - The radius is never shown: registration always uses the standard 20 m, and only a supervisor
+///   may change it afterwards.
 /// - The caller is always the primary contact, so the contact steps reduce to a relationship field.
 ///
-/// The dependant is created when leaving Exact location; the Photo step then enrolls against the
-/// new id, and there is no way back to earlier steps so it can never be created twice.
-class RegisterDependantScreen extends StatefulWidget {
+/// Registering creates the dependant when leaving the Pin step; the Photo step then enrolls
+/// against the new id, and there is no way back to earlier steps so it can never be created twice.
+///
+/// Editing (primary contact only) is the same steps pre-filled, with Save available from any
+/// step, as on the web. Date of birth can't be changed (the backend doesn't allow it), and the
+/// relationship field is left out because changing a family link is supervisor-only. The screen
+/// pops with the updated Dependant on save.
+class DependantWizardScreen extends StatefulWidget {
   final DependantsApi dependantsApi;
   final BiometricEnrollmentsApi enrollmentsApi;
-  final UsersApi usersApi;
-  final IdentityClaims identity;
-  final VoidCallback onDone;
+  final Dependant? existing;
+  // Registration only.
+  final UsersApi? usersApi;
+  final IdentityClaims? identity;
+  final VoidCallback? onDone;
 
-  const RegisterDependantScreen({
+  const DependantWizardScreen.register({
     super.key,
     required this.dependantsApi,
     required this.enrollmentsApi,
-    required this.usersApi,
-    required this.identity,
-    required this.onDone,
-  });
+    required UsersApi this.usersApi,
+    required IdentityClaims this.identity,
+    required VoidCallback this.onDone,
+  }) : existing = null;
+
+  const DependantWizardScreen.edit({
+    super.key,
+    required this.dependantsApi,
+    required this.enrollmentsApi,
+    required Dependant this.existing,
+  }) : usersApi = null,
+       identity = null,
+       onDone = null;
 
   @override
-  State<RegisterDependantScreen> createState() =>
-      _RegisterDependantScreenState();
+  State<DependantWizardScreen> createState() => _DependantWizardScreenState();
 }
 
 const _stepLabels = ['Details', 'Location', 'Pin', 'Photo'];
 const _kenyaCentre = LatLng(0.0236, 37.9062);
 
-class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
+class _DependantWizardScreenState extends State<DependantWizardScreen> {
   int _step = 0;
+
+  bool get _editing => widget.existing != null;
 
   // Details
   final _firstName = TextEditingController();
@@ -78,16 +96,69 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
   Dependant? _created;
   Uint8List? _photo;
   String? _photoResult; // 'active' | 'flagged' once enrolled
+  List<BiometricEnrollment>? _currentPhotos; // editing: what's enrolled already
 
   @override
   void initState() {
     super.initState();
-    for (final controller in [_firstName, _lastName]) {
+    if (widget.existing case final existing?) _prefill(existing);
+    for (final controller in [
+      _firstName,
+      _lastName,
+      _homeAddress,
+      _condition,
+    ]) {
       controller.addListener(() => setState(() {}));
     }
     KenyaAreas.load().then((areas) {
-      if (mounted) setState(() => _areas = areas);
+      if (!mounted) return;
+      setState(() {
+        _areas = areas;
+        // The API stores plain names, so a saved location is matched back to the lists by name.
+        // Anything that no longer matches (e.g. renamed data) is simply left for re-selection.
+        if (widget.existing case final existing?) {
+          _county = KenyaAreas.byName(areas.counties, existing.county);
+          _constituency = _county == null
+              ? null
+              : KenyaAreas.byName(
+                  areas.constituenciesOf(_county!),
+                  existing.constituency,
+                );
+          _ward = _constituency == null
+              ? null
+              : KenyaAreas.byName(areas.wardsOf(_constituency!), existing.ward);
+        }
+      });
     });
+  }
+
+  void _prefill(Dependant existing) {
+    // Split at the first space, the same rule as the web wizard's splitFullName.
+    final name = existing.fullName.trim();
+    final space = name.indexOf(' ');
+    _firstName.text = space == -1 ? name : name.substring(0, space);
+    _lastName.text = space == -1 ? '' : name.substring(space + 1);
+    _homeAddress.text = existing.homeAddressText ?? '';
+    _condition.text = existing.primaryConditionSummary ?? '';
+    _dob = existing.dob;
+    _gender = existing.gender;
+    _cognitiveMonitoring = existing.cognitiveMonitoringEnabled;
+    _pin = LatLng(existing.geofenceLat, existing.geofenceLng);
+    _initialCamera = CameraPosition(target: _pin!, zoom: 18);
+    _loadCurrentPhotos();
+  }
+
+  Future<void> _loadCurrentPhotos() async {
+    try {
+      final photos = await widget.enrollmentsApi.listCurrentForDependant(
+        widget.existing!.id,
+      );
+      photos.sort((a, b) => a.imageOrder.compareTo(b.imageOrder));
+      if (mounted) setState(() => _currentPhotos = photos);
+    } catch (_) {
+      // Only a preview of the current photo - replacing one still works without it.
+      if (mounted) setState(() => _currentPhotos = const []);
+    }
   }
 
   @override
@@ -115,23 +186,70 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
 
   /// Why Next is disabled on the current step, or null when it can proceed.
   String? get _blocker => switch (_step) {
-    0 when _text(_firstName) == null || _text(_lastName) == null =>
-      "Enter the dependant's first and last name.",
-    0 when _dob == null => 'Choose a date of birth.',
+    0 => _detailsBlocker,
     1 when _ward == null => 'Choose the county, constituency and ward.',
     2 when _pin == null => 'Tap the map to place the pin on the home.',
     _ => null,
   };
+
+  String? get _detailsBlocker {
+    if (_text(_firstName) == null || _text(_lastName) == null) {
+      return "Enter the dependant's first and last name.";
+    }
+    if (_dob == null) return 'Choose a date of birth.';
+    // The API can't clear an optional text field once set, so saving an emptied one would
+    // silently keep the old value - say so up front instead.
+    final existing = widget.existing;
+    if (existing?.homeAddressText != null && _text(_homeAddress) == null) {
+      return 'Home address details can be changed, but not removed.';
+    }
+    if (existing?.primaryConditionSummary != null &&
+        _text(_condition) == null) {
+      return 'Primary condition can be changed, but not removed.';
+    }
+    return null;
+  }
+
+  /// Why Save is disabled when editing - every step's requirement at once, since Save works from
+  /// any step.
+  String? get _saveBlocker =>
+      _detailsBlocker ??
+      (_ward == null ? 'Choose the county, constituency and ward.' : null);
 
   Future<void> _next() async {
     switch (_step) {
       case 1:
         setState(() => _step = 2);
         unawaited(_locateInitialCamera());
-      case 2:
+      case 2 when !_editing:
         await _register();
       default:
         setState(() => _step++);
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _submitting = true);
+    try {
+      final updated = await widget.dependantsApi.updateDependant(
+        widget.existing!.id,
+        fullName: '${_text(_firstName)} ${_text(_lastName)}',
+        gender: _gender,
+        homeAddressText: _text(_homeAddress),
+        primaryConditionSummary: _text(_condition),
+        county: _county!.name,
+        constituency: _constituency!.name,
+        ward: _ward!.name,
+        geofenceLat: _pin!.latitude,
+        geofenceLng: _pin!.longitude,
+        cognitiveMonitoringEnabled:
+            _cognitiveMonitoringAllowed && _cognitiveMonitoring,
+      );
+      if (mounted) Navigator.of(context).pop(updated);
+    } catch (e) {
+      if (mounted) showSnack(context, errorText(e));
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -204,7 +322,7 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
     try {
       // POST /dependants needs the caller's phone number and name; the users row (created at
       // sign-up) is the reliable source, not the token's optional claims.
-      final me = await widget.usersApi.getMe();
+      final me = await widget.usersApi!.getMe();
       final dependant = await widget.dependantsApi.registerDependant(
         fullName: '${_text(_firstName)} ${_text(_lastName)}',
         dob: _dob!,
@@ -218,8 +336,8 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
         geofenceLng: _pin!.longitude,
         cognitiveMonitoringEnabled:
             _cognitiveMonitoringAllowed && _cognitiveMonitoring,
-        selfCognitoSub: widget.identity.sub,
-        selfPhoneNumber: me.phoneNumber ?? widget.identity.phoneNumber ?? '',
+        selfCognitoSub: widget.identity!.sub,
+        selfPhoneNumber: me.phoneNumber ?? widget.identity!.phoneNumber ?? '',
         selfFullName: me.fullName,
         relationship: _text(_relationship),
       );
@@ -254,10 +372,12 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
     setState(() => _submitting = true);
     try {
       final status = await widget.enrollmentsApi.enrollDependantPhoto(
-        dependantId: _created!.id,
+        dependantId: (_created ?? widget.existing)!.id,
         jpegBytes: _photo!,
       );
       if (mounted) setState(() => _photoResult = status);
+      // Editing: the new photo supersedes the old one in the same slot, so refresh the preview.
+      if (_editing) unawaited(_loadCurrentPhotos());
     } catch (e) {
       // e.g. a 422 for a photo with no face or several faces - the server's detail says which.
       if (mounted) showSnack(context, errorText(e));
@@ -273,7 +393,7 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       // Once the dependant exists, leaving means finishing - never stepping back into a form
-      // that would register them a second time.
+      // that would register them a second time. Otherwise back steps back through the wizard.
       canPop: _step == 0 || _created != null,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
@@ -284,10 +404,22 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
         appBar: AppBar(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.white,
-          title: const Text(
-            'Register a dependant',
-            style: TextStyle(fontSize: 16),
+          title: Text(
+            _editing ? 'Edit details' : 'Register a dependant',
+            style: const TextStyle(fontSize: 16),
           ),
+          actions: [
+            if (_editing)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton(
+                  onPressed: _saveBlocker == null && !_submitting
+                      ? _save
+                      : null,
+                  child: const Text('Save'),
+                ),
+              ),
+          ],
           leading: _created != null
               ? IconButton(
                   icon: const Icon(Icons.close),
@@ -315,10 +447,36 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
   }
 
   Widget _buildActions() {
-    final blocker = _blocker;
+    final blocker = _editing && _step == 3 ? _saveBlocker : _blocker;
     final Widget primary;
     final Widget? secondary;
-    if (_step == 3) {
+    final back = OutlinedButton(
+      onPressed: _submitting ? null : _back,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: inkDefault,
+        minimumSize: const Size.fromHeight(44),
+        side: const BorderSide(color: borderColor),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      ),
+      child: const Text('Back'),
+    );
+    if (_editing && _step == 3) {
+      primary = ElevatedButton(
+        onPressed: blocker == null && !_submitting ? _save : null,
+        style: pillButtonStyle,
+        child: _submitting
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Text('Save'),
+      );
+      secondary = back;
+    } else if (_step == 3) {
       primary = ElevatedButton(
         onPressed: _submitting ? null : widget.onDone,
         style: pillButtonStyle,
@@ -338,22 +496,9 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
                   color: Colors.white,
                 ),
               )
-            : Text(_step == 2 ? 'Register' : 'Next'),
+            : Text(_step == 2 && !_editing ? 'Register' : 'Next'),
       );
-      secondary = _step == 0
-          ? null
-          : OutlinedButton(
-              onPressed: _submitting ? null : _back,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: inkDefault,
-                minimumSize: const Size.fromHeight(44),
-                side: const BorderSide(color: borderColor),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              child: const Text('Back'),
-            );
+      secondary = _step == 0 ? null : back;
     }
     return Material(
       color: Colors.white,
@@ -364,7 +509,7 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (blocker != null && _step < 3)
+                if (blocker != null && (_step < 3 || _editing))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
@@ -427,23 +572,31 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
         },
       ),
       InkWell(
-        onTap: () async {
-          final now = DateTime.now();
-          final picked = await showDatePicker(
-            context: context,
-            initialDate: _dob ?? DateTime(now.year - 70),
-            firstDate: DateTime(1900),
-            lastDate: now,
-            initialEntryMode: DatePickerEntryMode.input,
-          );
-          if (picked != null) setState(() => _dob = picked);
-        },
+        // Date of birth can't be changed after registration - the backend doesn't accept it.
+        onTap: _editing
+            ? null
+            : () async {
+                final now = DateTime.now();
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _dob ?? DateTime(now.year - 70),
+                  firstDate: DateTime(1900),
+                  lastDate: now,
+                  initialEntryMode: DatePickerEntryMode.input,
+                );
+                if (picked != null) setState(() => _dob = picked);
+              },
         child: InputDecorator(
           isEmpty: _dob == null,
           decoration: InputDecoration(
             labelText: 'Date of birth',
+            enabled: !_editing,
             suffixIcon: const Icon(Icons.calendar_today_outlined),
-            helperText: age == null ? null : '$age years old',
+            helperText: switch ((age, _editing)) {
+              (null, _) => null,
+              (final age, true) => "$age years old · can't be changed",
+              (final age, false) => '$age years old',
+            },
           ),
           child: Text(
             _dob == null
@@ -455,21 +608,25 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
       DropdownButtonFormField<String?>(
         initialValue: _gender,
         decoration: const InputDecoration(labelText: 'Gender'),
-        items: const [
-          DropdownMenuItem(value: 'female', child: Text('Female')),
-          DropdownMenuItem(value: 'male', child: Text('Male')),
-          DropdownMenuItem(value: null, child: Text('Not specified')),
+        items: [
+          const DropdownMenuItem(value: 'female', child: Text('Female')),
+          const DropdownMenuItem(value: 'male', child: Text('Male')),
+          // A gender, once saved, can be changed but not cleared (the API has no way to).
+          if (widget.existing?.gender == null)
+            const DropdownMenuItem(value: null, child: Text('Not specified')),
         ],
         onChanged: (value) => setState(() => _gender = value),
       ),
-      TextField(
-        controller: _relationship,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          labelText: 'Your relationship to them (optional)',
-          hintText: 'e.g. Daughter',
+      // Changing an existing family link is supervisor-only, so only asked when registering.
+      if (!_editing)
+        TextField(
+          controller: _relationship,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Your relationship to them (optional)',
+            hintText: 'e.g. Daughter',
+          ),
         ),
-      ),
       TextField(
         controller: _homeAddress,
         minLines: 2,
@@ -648,12 +805,41 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
   Widget _buildPhoto() {
     final photo = _photo;
     final name = _created?.fullName ?? 'the dependant';
+    final current = _currentPhotos?.firstOrNull;
     return _formList([
       Text(
-        '$name is registered. Add a clear photo of their face - caregivers '
-        'confirm who they are visiting against it at every check-in.',
+        _editing
+            ? 'Caregivers confirm who they are visiting against this photo at '
+                  'every check-in. Replace it if it no longer looks like them.'
+            : '$name is registered. Add a clear photo of their face - caregivers '
+                  'confirm who they are visiting against it at every check-in.',
         style: const TextStyle(fontSize: 14, color: inkSecondary),
       ),
+      // Editing, before a replacement is picked: the photo enrolled today.
+      if (_editing && photo == null)
+        switch ((_currentPhotos, current)) {
+          (null, _) => const Center(child: CircularProgressIndicator()),
+          (_, null) => const Text(
+            'No photo enrolled yet.',
+            style: TextStyle(color: inkTertiary),
+          ),
+          (_, final current?) => ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: Image.network(
+                current.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const Center(
+                  child: Text(
+                    'Could not load the current photo.',
+                    style: TextStyle(color: inkTertiary),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        },
       if (photo != null)
         ClipRRect(
           borderRadius: BorderRadius.circular(12),

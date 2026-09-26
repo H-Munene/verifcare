@@ -10,7 +10,7 @@ import 'auth/registration.dart';
 import 'screens/dependant_choice_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/register_dependant_screen.dart';
+import 'screens/dependant_wizard_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/welcome_screen.dart';
 
@@ -140,7 +140,7 @@ class _RootScreenState extends State<_RootScreen> {
           onRegisterNow: () {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
-                builder: (_) => RegisterDependantScreen(
+                builder: (_) => DependantWizardScreen.register(
                   dependantsApi: widget.dependantsApi,
                   enrollmentsApi: widget.enrollmentsApi,
                   usersApi: widget.usersApi,

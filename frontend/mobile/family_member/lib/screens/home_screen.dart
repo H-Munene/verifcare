@@ -8,7 +8,7 @@ import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
 import '../widgets/visit_widgets.dart';
 import 'dependant_detail_screen.dart';
-import 'register_dependant_screen.dart';
+import 'dependant_wizard_screen.dart';
 
 /// The family member's dependants, each marked "In progress" while a caregiver is with them.
 /// The "Register a dependant" action keeps the post-sign-up "skip for now" choice reachable later.
@@ -95,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _registerDependant() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => RegisterDependantScreen(
+        builder: (_) => DependantWizardScreen.register(
           dependantsApi: widget.dependantsApi,
           enrollmentsApi: widget.enrollmentsApi,
           usersApi: widget.usersApi,

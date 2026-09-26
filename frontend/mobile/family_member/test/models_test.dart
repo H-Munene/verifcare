@@ -13,6 +13,10 @@ Map<String, dynamic> _dependantJson({String dob = '1950-06-15'}) => {
   'county': 'NAIROBI',
   'constituency': null,
   'ward': 'KILELESHWA',
+  'geofenceLat': -1.2833,
+  'geofenceLng': 36.7833,
+  'geofenceRadiusMeters': 20,
+  'cognitiveMonitoringEnabled': false,
   'status': 'active',
 };
 

@@ -6,7 +6,7 @@ import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/users_api.dart';
 import 'package:family_member/auth/cognito_auth_service.dart';
 import 'package:family_member/geo/kenya_areas.dart';
-import 'package:family_member/screens/register_dependant_screen.dart';
+import 'package:family_member/screens/dependant_wizard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -101,7 +101,7 @@ void main() {
     final client = ApiClient(() async => null);
     await tester.pumpWidget(
       MaterialApp(
-        home: RegisterDependantScreen(
+        home: DependantWizardScreen.register(
           dependantsApi: DependantsApi(client),
           enrollmentsApi: BiometricEnrollmentsApi(client),
           usersApi: UsersApi(client),
@@ -191,4 +191,136 @@ void main() {
     await choose('County', 'MOMBASA');
     expect(next().onPressed, isNull);
   });
+
+  testWidgets(
+    'editing pre-fills the saved details and saves only what a family member may change',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      late Map<String, dynamic> patched;
+      final existing = Dependant.fromJson({
+        'id': 'd1',
+        'fullName': 'Wanjiku Wairimu Kamau',
+        'dob': '1950-06-15',
+        'gender': 'female',
+        'homeAddressText': 'House 12, Mugo Road',
+        'primaryConditionSummary': null,
+        'county': 'NAIROBI',
+        'constituency': 'DAGORETTI NORTH',
+        'ward': 'KILELESHWA',
+        'geofenceLat': -1.2833,
+        'geofenceLng': 36.7833,
+        'cognitiveMonitoringEnabled': true,
+        'status': 'active',
+      });
+      final backend = MockClient((request) async {
+        if (request.method == 'PATCH') {
+          patched = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(
+            jsonEncode({
+              ...patched,
+              'id': 'd1',
+              'dob': '1950-06-15',
+              'status': 'active',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response(
+          '[]',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      await http.runWithClient(() async {
+        final client = ApiClient(() async => null);
+        Dependant? saved;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async =>
+                    saved = await Navigator.of(context).push<Dependant>(
+                      MaterialPageRoute(
+                        builder: (_) => DependantWizardScreen.edit(
+                          dependantsApi: DependantsApi(client),
+                          enrollmentsApi: BiometricEnrollmentsApi(client),
+                          existing: existing,
+                        ),
+                      ),
+                    ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        // Same real-time tick as the registration test, once the screen has asked for the areas.
+        await tester.runAsync(() async {
+          await KenyaAreas.load();
+          await Future<void>.delayed(Duration.zero);
+        });
+        await tester.pumpAndSettle();
+
+        // Name split at the first space, as on the web; date of birth locked; no relationship field.
+        expect(find.widgetWithText(TextField, 'Wanjiku'), findsOneWidget);
+        expect(find.widgetWithText(TextField, 'Wairimu Kamau'), findsOneWidget);
+        expect(find.textContaining("can't be changed"), findsOneWidget);
+        expect(
+          find.widgetWithText(
+            TextField,
+            'Your relationship to them (optional)',
+          ),
+          findsNothing,
+        );
+
+        // A saved address can be changed but not cleared - the API has no way to clear it.
+        final address = find.widgetWithText(
+          TextField,
+          'Home address details (optional)',
+        );
+        await tester.enterText(address, '');
+        await tester.pump();
+        expect(
+          find.text('Home address details can be changed, but not removed.'),
+          findsOneWidget,
+        );
+        TextButton save() =>
+            tester.widget<TextButton>(find.widgetWithText(TextButton, 'Save'));
+        expect(save().onPressed, isNull);
+        await tester.enterText(address, 'House 14, Mugo Road');
+        await tester.pump();
+        expect(save().onPressed, isNotNull);
+
+        // The saved location is matched back to the dropdowns by name.
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Next'));
+        await tester.pumpAndSettle();
+        expect(find.widgetWithText(TextField, 'KILELESHWA'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(TextButton, 'Save'));
+        await tester.pumpAndSettle();
+        expect(saved?.id, 'd1');
+      }, () => backend);
+
+      expect(patched, {
+        'fullName': 'Wanjiku Wairimu Kamau',
+        'gender': 'female',
+        'homeAddressText': 'House 14, Mugo Road',
+        'county': 'NAIROBI',
+        'constituency': 'DAGORETTI NORTH',
+        'ward': 'KILELESHWA',
+        'geofenceLat': -1.2833,
+        'geofenceLng': 36.7833,
+        'cognitiveMonitoringEnabled': true,
+      });
+      // Never the radius (supervisor-only) or date of birth (not editable).
+      expect(patched.containsKey('geofenceRadiusMeters'), isFalse);
+      expect(patched.containsKey('dob'), isFalse);
+    },
+  );
 }
