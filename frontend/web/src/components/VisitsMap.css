@@ -34,72 +34,73 @@
 }
 
 .visits-map__tooltip {
-  width: 240px;
-  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  width: 260px;
   background: var(--color-page-background);
   border: 1px solid var(--color-border-structural);
-  border-radius: var(--radius-button);
+  /* Sharp corners, like the map's own frame and the Overview's grid (user request). */
+  border-radius: 0;
   box-shadow: 0 6px 20px rgb(41 41 41 / 14%);
   font-family: var(--font-body);
   pointer-events: none;
+}
+
+/* The vertical rule: the icon column's right edge, unbroken from top to bottom because the rows
+   have no gap between them. */
+.visits-map__icon-cell {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 0;
+  border-right: 1px solid var(--color-border-structural);
+}
+
+.visits-map__detail-cell {
+  min-width: 0;
+  padding: 10px 14px 0;
+}
+
+.visits-map__detail-cell:last-child,
+.visits-map__icon-cell:nth-last-child(2) {
+  padding-bottom: 12px;
+}
+
+/* The rule under the dependant's name runs across both columns, edge to edge. */
+.visits-map__head-cell {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border-structural);
 }
 
 .visits-map__dependant {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-ink-primary);
-  margin-bottom: 6px;
-}
-
-.visits-map__visit + .visits-map__visit {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border-divider);
-}
-
-.visits-map__visit-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.visits-map__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-}
-
-.visits-map__caregiver {
-  color: var(--color-ink-default);
-  font-weight: 500;
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.visits-map__state {
-  color: var(--color-ink-subtle);
+.visits-map__caregiver {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--color-ink-default);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .visits-map__times {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 10px;
-  margin: 6px 0 0 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 2px;
   font-size: 12px;
-}
-
-.visits-map__times dt {
-  color: var(--color-ink-muted);
-}
-
-.visits-map__times dd {
-  margin: 0;
   color: var(--color-ink-primary);
   font-variant-numeric: tabular-nums;
+}
+
+.visits-map__time-label {
+  color: var(--color-ink-muted);
 }

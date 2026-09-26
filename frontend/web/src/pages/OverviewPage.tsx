@@ -14,6 +14,8 @@ import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
 import { STATE_META, VISIT_STATES, formatTime } from '../components/visitStates';
 import { Button } from '../design-system/Button';
+import { ChevronLeftIcon } from '@/components/icons/chevron-left';
+import { ChevronRightIcon } from '@/components/icons/chevron-right';
 import './OverviewPage.css';
 
 const TIME_ZONE = 'Africa/Nairobi';
@@ -116,7 +118,7 @@ export function OverviewPage() {
           aria-label="Previous day"
           onClick={() => showDate(shiftDate(date, -1))}
         >
-          ‹
+          <ChevronLeftIcon size={16} aria-hidden />
         </Button>
         <input
           type="date"
@@ -130,7 +132,7 @@ export function OverviewPage() {
           }}
         />
         <Button type="button" aria-label="Next day" onClick={() => showDate(shiftDate(date, 1))}>
-          ›
+          <ChevronRightIcon size={16} aria-hidden />
         </Button>
         <Button type="button" disabled={isToday} onClick={() => showDate(todayDate)}>
           Today
@@ -214,18 +216,27 @@ export function OverviewPage() {
           })}
         </div>
 
-        <section className="overview__map" aria-label="Map of the day's visits">
-          <VisitsMap
-            apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
-            visits={shownVisits}
-            timeZone={overview.timeZone}
-            activeId={activeHome}
-            onActiveChange={setActiveHome}
-          />
+        <section className="overview__map" aria-labelledby="overview-map">
+          {/* Same height as the visit list's header, so the map's top border and the line under
+              "All visits" meet as one line (user request, 2026-09-26). */}
+          <div className="overview__section-head">
+            <h2 id="overview-map" className="overview__panel-title">
+              Map
+            </h2>
+          </div>
+          <div className="overview__map-frame">
+            <VisitsMap
+              apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+              visits={shownVisits}
+              timeZone={overview.timeZone}
+              activeId={activeHome}
+              onActiveChange={setActiveHome}
+            />
+          </div>
         </section>
 
         <section className="overview__panel overview__visits" aria-labelledby="overview-visits">
-          <div className="overview__panel-head">
+          <div className="overview__section-head overview__visits-head">
             <h2 id="overview-visits" className="overview__panel-title">
               {focusState ? STATE_META[focusState].label : 'All visits'}
             </h2>

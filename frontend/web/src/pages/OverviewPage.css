@@ -153,9 +153,26 @@
 
 .overview__map {
   grid-area: map;
+  display: flex;
+  flex-direction: column;
   height: 460px;
   /* The map sits inset in its cell, in its own frame, rather than bleeding to the grid lines. */
-  padding: 16px 20px 20px;
+  padding: 0 20px 20px;
+}
+
+/* The map's title row and the visit list's header share this height, so the map frame's top
+   border and the header's bottom line sit at the same height and read as one line. */
+.overview__section-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+}
+
+.overview__map-frame {
+  flex: 1;
+  min-height: 0;
 }
 
 .overview__panel {
@@ -168,6 +185,23 @@
   display: flex;
   flex-direction: column;
   height: 460px;
+}
+
+/* Edge to edge, so the header line and each row's line run from the grid line beside the map to
+   the panel's outer edge. */
+.overview__panel.overview__visits {
+  padding: 0;
+}
+
+.overview__visits-head {
+  /* 48px plus its 1px line, which lands level with the map frame's top border. */
+  height: 49px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-border-structural);
+}
+
+.overview__visits .overview__empty {
+  padding: 16px 20px;
 }
 
 .overview__trend {
@@ -222,7 +256,7 @@
 .overview__visit-list {
   flex: 1;
   min-height: 0;
-  margin: 0 -8px;
+  margin: 0;
   padding: 0;
   list-style: none;
   overflow-y: auto;
@@ -235,9 +269,11 @@
   gap: 10px;
   width: 100%;
   min-height: var(--row-height-row-store);
-  padding: 6px 8px;
+  padding: 8px 20px;
   border: 0;
-  border-radius: var(--radius-default);
+  /* A line under every visit, edge to edge like the header's. */
+  border-bottom: 1px solid var(--color-border-divider);
+  border-radius: 0;
   background: none;
   font: inherit;
   text-align: left;
@@ -389,7 +425,12 @@
   }
 
   .overview__map {
-    padding: 14px 16px 16px;
+    padding: 0 16px 16px;
+  }
+
+  .overview__visits-head,
+  .overview__visit {
+    padding-inline: 16px;
   }
 
   .overview__tile {

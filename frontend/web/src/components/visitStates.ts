@@ -20,10 +20,10 @@ export const STATE_META: Record<VisitState, { label: string; color: string }> = 
 // Google Maps symbols can't read CSS variables, so the map takes the literal values of the same
 // tokens (design-system/tokens.css).
 export const STATE_HEX: Record<VisitState, string> = {
-  upcoming: '#8a8a8a',
-  awaiting_checkin: '#f2b705',
-  checked_in: '#0b6e35',
-  no_checkin: '#ef6b57',
+  upcoming: '#a0a4ab',
+  awaiting_checkin: '#ffc107',
+  checked_in: '#00c16a',
+  no_checkin: '#e8262d',
 };
 
 // When one home has several visits that day, its dot shows the one most needing a supervisor.
