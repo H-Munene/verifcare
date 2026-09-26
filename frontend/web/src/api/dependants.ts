@@ -36,10 +36,18 @@ export interface DependantPage {
 export interface DependantFamilyMember {
   dependantId: string;
   familyMemberUserId: string;
+  fullName: string;
   relationship: string | null;
   isPrimaryContact: boolean;
   addedBy: string;
+  // When the link was made.
   createdAt: string;
+  email: string | null;
+  phoneNumber: string | null;
+  addedByName: string | null;
+  // Returned to supervisors only (see backend/openapi.yaml's DependantFamilyMember).
+  idType?: 'national_id' | 'passport' | null;
+  idNumber?: string | null;
 }
 
 // Exactly one of cognitoSub/email must be set - cognitoSub links an existing Cognito identity;

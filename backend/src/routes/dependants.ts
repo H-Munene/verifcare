@@ -44,7 +44,7 @@
 // transaction - this is what openapi.yaml's own description of the PATCH endpoint already implies
 // ("reassigning isPrimaryContact... enforced by a partial unique index").
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -175,43 +175,83 @@ function toCareTaskResponse(row: typeof schema.dependantCareTasks.$inferSelect):
 interface DependantFamilyMemberResponse {
   dependantId: string;
   familyMemberUserId: string;
-  // The linked member's own name, joined from users. Without it a family_member caller had no way
-  // to show who the other members are: GET /users/{id} is self-only for non-supervisors, and
-  // widening that would also expose other members' email and phone number.
   fullName: string;
   relationship: string | null;
   isPrimaryContact: boolean;
   addedBy: string;
   createdAt: string;
+  // The member's registration details (2026-09-26, user request: an expandable details section on
+  // web and mobile). Email and phone go to everyone who can see the list - other family members of
+  // the same dependant use them to coordinate care. The identity document goes to supervisors only
+  // (user decision): another family member has no need for it, and a national ID number is
+  // sensitive under the Kenya Data Protection Act, so it's left out of their response entirely
+  // rather than merely hidden by the app.
+  email: string | null;
+  phoneNumber: string | null;
+  addedByName: string | null;
+  idType?: string | null;
+  idNumber?: string | null;
 }
 
-function toFamilyMemberResponse(
-  row: typeof schema.dependantFamilyMembers.$inferSelect,
-  fullName: string,
-): DependantFamilyMemberResponse {
-  return {
-    dependantId: row.dependantId,
-    familyMemberUserId: row.familyMemberUserId,
-    fullName,
-    relationship: row.relationship,
-    isPrimaryContact: row.isPrimaryContact,
-    addedBy: row.addedBy,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-async function familyMemberResponseWithName(
+/**
+ * Builds family-member responses with each member's details and the name of whoever added them,
+ * in one users query however many links. [includeIdentity]: only for a supervisor caller.
+ */
+async function familyMemberResponses(
   db: Db,
-  row: typeof schema.dependantFamilyMembers.$inferSelect,
-): Promise<DependantFamilyMemberResponse> {
-  const [user] = await db
-    .select({ fullName: schema.users.fullName })
-    .from(schema.users)
-    .where(eq(schema.users.id, row.familyMemberUserId));
-  if (!user) {
-    throw new Error(`No users row for linked family member ${row.familyMemberUserId}.`);
+  links: (typeof schema.dependantFamilyMembers.$inferSelect)[],
+  includeIdentity: boolean,
+): Promise<DependantFamilyMemberResponse[]> {
+  if (links.length === 0) {
+    return [];
   }
-  return toFamilyMemberResponse(row, user.fullName);
+  const userIds = [...new Set(links.flatMap((link) => [link.familyMemberUserId, link.addedBy]))];
+  const people = new Map(
+    (
+      await db
+        .select({
+          id: schema.users.id,
+          fullName: schema.users.fullName,
+          email: schema.users.email,
+          phoneNumber: schema.users.phoneNumber,
+          idType: schema.users.idType,
+          idNumber: schema.users.idNumber,
+        })
+        .from(schema.users)
+        .where(inArray(schema.users.id, userIds))
+    ).map((person) => [person.id, person]),
+  );
+  return links.map((link) => {
+    const member = people.get(link.familyMemberUserId);
+    if (!member) {
+      throw new Error(`No users row for linked family member ${link.familyMemberUserId}.`);
+    }
+    return {
+      dependantId: link.dependantId,
+      familyMemberUserId: link.familyMemberUserId,
+      fullName: member.fullName,
+      relationship: link.relationship,
+      isPrimaryContact: link.isPrimaryContact,
+      addedBy: link.addedBy,
+      createdAt: link.createdAt.toISOString(),
+      email: member.email,
+      phoneNumber: member.phoneNumber,
+      addedByName: people.get(link.addedBy)?.fullName ?? null,
+      ...(includeIdentity && { idType: member.idType, idNumber: member.idNumber }),
+    };
+  });
+}
+
+async function familyMemberResponse(
+  db: Db,
+  link: typeof schema.dependantFamilyMembers.$inferSelect,
+  includeIdentity: boolean,
+): Promise<DependantFamilyMemberResponse> {
+  const [response] = await familyMemberResponses(db, [link], includeIdentity);
+  if (!response) {
+    throw new Error('familyMemberResponses returned nothing for one link.');
+  }
+  return response;
 }
 
 // Explicit column map (not a bare .select()) so a joined query (the family_member branch of
@@ -989,7 +1029,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return row;
       });
 
-      res.status(201).json(await familyMemberResponseWithName(db, link));
+      res.status(201).json(await familyMemberResponse(db, link, caller.role === 'supervisor'));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -1037,15 +1077,11 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         }
       }
 
-      const rows = await db
-        .select({ link: schema.dependantFamilyMembers, fullName: schema.users.fullName })
+      const links = await db
+        .select()
         .from(schema.dependantFamilyMembers)
-        .innerJoin(
-          schema.users,
-          eq(schema.users.id, schema.dependantFamilyMembers.familyMemberUserId),
-        )
         .where(eq(schema.dependantFamilyMembers.dependantId, dependantId));
-      res.status(200).json(rows.map((row) => toFamilyMemberResponse(row.link, row.fullName)));
+      res.status(200).json(await familyMemberResponses(db, links, caller.role === 'supervisor'));
     } catch (err) {
       next(err);
     }
@@ -1118,7 +1154,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         if (!updated) {
           throw new Error('Update to dependant_family_members returned no row.');
         }
-        res.status(200).json(await familyMemberResponseWithName(db, updated));
+        // Supervisor-only route (requireRole above).
+        res.status(200).json(await familyMemberResponse(db, updated, true));
       } catch (err) {
         next(err);
       }

@@ -52,6 +52,11 @@ interface FamilyMemberBody {
   fullName: string;
   isPrimaryContact: boolean;
   relationship: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  addedByName?: string | null;
+  idType?: string | null;
+  idNumber?: string | null;
 }
 // supertest types response.body as `any` (it's just parsed JSON) - a single cast point per
 // response, rather than scattering `as` assertions across every property access below.
@@ -1122,6 +1127,59 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('GET /dependants/{dependantId}/family-members', () => {
+      it('includes registration details, with the ID document for supervisors only', async () => {
+        const supervisor = await createTestUser(
+          'sup-details',
+          'supervisor',
+          '+254700000072',
+          'Supervisor Wambui',
+        );
+        const member = await createTestUser(
+          'fm-details',
+          'family_member',
+          '+254700000073',
+          'Achieng Otieno',
+          'achieng@example.com',
+        );
+        await getDb()
+          .update(schema.users)
+          .set({ idType: 'national_id', idNumber: '12345678' })
+          .where(eq(schema.users.id, member.id));
+        const dependant = await createTestDependant(supervisor.id);
+        await getDb().insert(schema.dependantFamilyMembers).values({
+          dependantId: dependant.id,
+          familyMemberUserId: member.id,
+          relationship: 'Daughter',
+          isPrimaryContact: true,
+          addedBy: supervisor.id,
+        });
+        const list = async (sub: string, role: UserRole) =>
+          familyMemberListBody(
+            await request(app)
+              .get(`/dependants/${dependant.id}/family-members`)
+              .set('x-test-auth', testAuthHeader(sub, role)),
+          )[0];
+
+        expect(await list('sup-details', 'supervisor')).toMatchObject({
+          fullName: 'Achieng Otieno',
+          email: 'achieng@example.com',
+          phoneNumber: '+254700000073',
+          addedByName: 'Supervisor Wambui',
+          idType: 'national_id',
+          idNumber: '12345678',
+        });
+
+        const seenByFamily = await list('fm-details', 'family_member');
+        expect(seenByFamily).toMatchObject({
+          email: 'achieng@example.com',
+          phoneNumber: '+254700000073',
+          addedByName: 'Supervisor Wambui',
+        });
+        // Not just empty - absent from the response altogether.
+        expect(seenByFamily).not.toHaveProperty('idType');
+        expect(seenByFamily).not.toHaveProperty('idNumber');
+      });
+
       it('lets a linked family member list the dependant’s family members', async () => {
         await createTestUser('sup-list-fm', 'supervisor', '+254700000070');
         await createTestUser('fm-list-fm', 'family_member', '+254700000071');

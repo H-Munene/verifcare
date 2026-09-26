@@ -1794,7 +1794,14 @@ components:
 
     DependantFamilyMember:
       type: object
-      required: [dependantId, familyMemberUserId, fullName, isPrimaryContact, addedBy, createdAt]
+      description: |
+        A family member's link to a dependant, with their registration details. Email and phone
+        are returned to anyone who can see the list (other family members of the same dependant
+        use them to coordinate care). `idType`/`idNumber` are returned to supervisors only and are
+        absent from a family member's response altogether, since a national ID number is
+        sensitive and another family member has no need for it.
+      required:
+        [dependantId, familyMemberUserId, fullName, isPrimaryContact, addedBy, createdAt, email, phoneNumber, addedByName]
       properties:
         dependantId:
           type: string
@@ -1815,6 +1822,21 @@ components:
         createdAt:
           type: string
           format: date-time
+          description: When the link was made.
+        email:
+          type: [string, 'null']
+        phoneNumber:
+          type: [string, 'null']
+        addedByName:
+          type: [string, 'null']
+          description: The name of the person who linked this member (a supervisor or the primary contact).
+        idType:
+          type: [string, 'null']
+          enum: [national_id, passport, null]
+          description: Supervisors only.
+        idNumber:
+          type: [string, 'null']
+          description: Supervisors only.
     AddFamilyMemberRequest:
       type: object
       description: |

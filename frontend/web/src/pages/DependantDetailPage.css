@@ -78,3 +78,72 @@
   border-radius: var(--radius-default);
   padding: 8px 10px;
 }
+
+/* An expandable family-member row: the row itself, then its registration details. */
+.dependant-detail__member {
+  border-bottom: 1px solid var(--color-border-divider);
+}
+
+.dependant-detail__member:last-child {
+  border-bottom: none;
+}
+
+.dependant-detail__member .ds-row-store {
+  border-bottom: none;
+}
+
+.dependant-detail__member-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dependant-detail__member-toggle .ds-row-store__title,
+.dependant-detail__member-toggle .ds-row-store__caption {
+  display: block;
+}
+
+.dependant-detail__member-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-default);
+}
+
+.dependant-detail__member-chevron {
+  display: inline-block;
+  width: 12px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-ink-subtle);
+  transition: transform 120ms ease;
+}
+
+.dependant-detail__member-chevron--open {
+  transform: rotate(90deg);
+}
+
+.dependant-detail__member-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 24px;
+  margin: 0;
+  padding: 2px 12px 14px 34px;
+}
+
+.dependant-detail__member-detail dt {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.dependant-detail__member-detail dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--color-ink-primary);
+  overflow-wrap: anywhere;
+}

@@ -86,6 +86,10 @@ MockClient _backend({
         'fullName': 'Brian Kamau',
         'relationship': 'Grandson',
         'isPrimaryContact': !callerIsPrimary,
+        'email': 'brian@example.com',
+        'phoneNumber': '+254700000002',
+        'addedByName': 'Achieng Otieno',
+        'createdAt': '2026-09-10T08:00:00Z',
       },
       {
         'familyMemberUserId': 'u1',
@@ -210,7 +214,21 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Achieng Otieno (You)'), findsOneWidget);
         expect(find.text('Brian Kamau'), findsOneWidget);
-        expect(find.text('Primary contact'), findsOneWidget);
+        expect(
+          find.textContaining('Primary contact', findRichText: true),
+          findsOneWidget,
+        );
+
+        // A member expands to their registration details - never an ID document, which the
+        // backend doesn't send to family members.
+        expect(find.text('brian@example.com'), findsNothing);
+        await tester.tap(find.text('Brian Kamau'));
+        await tester.pumpAndSettle();
+        expect(find.text('brian@example.com'), findsOneWidget);
+        expect(find.text('+254700000002'), findsOneWidget);
+        expect(find.text('Added by'), findsOneWidget);
+        expect(find.text('Linked on'), findsOneWidget);
+        expect(find.textContaining('ID'), findsNothing);
 
         // No Photos tab any more - the photo is managed from Edit's Photo step.
         expect(find.text('Photos'), findsNothing);

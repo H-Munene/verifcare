@@ -115,12 +115,22 @@ class FamilyMemberLink {
   final String fullName;
   final String? relationship;
   final bool isPrimaryContact;
+  // Registration details (2026-09-26). The backend never sends another member's ID document to a
+  // family member, so there is none here.
+  final String? email;
+  final String? phoneNumber;
+  final String? addedByName;
+  final DateTime? linkedAt;
 
   FamilyMemberLink({
     required this.userId,
     required this.fullName,
     this.relationship,
     required this.isPrimaryContact,
+    this.email,
+    this.phoneNumber,
+    this.addedByName,
+    this.linkedAt,
   });
 
   factory FamilyMemberLink.fromJson(Map<String, dynamic> json) =>
@@ -135,6 +145,13 @@ class FamilyMemberLink {
             fullName: fullName,
             relationship: json['relationship'] as String?,
             isPrimaryContact: isPrimaryContact,
+            email: json['email'] as String?,
+            phoneNumber: json['phoneNumber'] as String?,
+            addedByName: json['addedByName'] as String?,
+            linkedAt: switch (json['createdAt']) {
+              final String at => DateTime.parse(at).toLocal(),
+              _ => null,
+            },
           ),
         _ => throw FormatException('Unexpected family member: $json'),
       };

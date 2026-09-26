@@ -597,32 +597,9 @@ class _FamilyTabState extends State<_FamilyTab>
             children: [
               for (final (i, member) in members.indexed) ...[
                 if (i > 0) const Divider(height: 1, color: borderColor),
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: const Color(0xFFE6F1FC),
-                    foregroundColor: primaryBlue,
-                    child: Text(_initials(member.fullName)),
-                  ),
-                  title: Text(
-                    member.userId == widget.myUserId
-                        ? '${member.fullName} (You)'
-                        : member.fullName,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    member.relationship ?? 'Relationship not set',
-                    style: const TextStyle(fontSize: 12, color: inkTertiary),
-                  ),
-                  trailing: member.isPrimaryContact
-                      ? const Text(
-                          'Primary contact',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: primaryBlue,
-                          ),
-                        )
-                      : null,
+                _FamilyMemberTile(
+                  member: member,
+                  isMe: member.userId == widget.myUserId,
                 ),
               ],
             ],
@@ -631,11 +608,97 @@ class _FamilyTabState extends State<_FamilyTab>
       ],
     );
   }
+}
 
-  static String _initials(String name) => name
-      .split(RegExp(r'\s+'))
-      .where((part) => part.isNotEmpty)
-      .take(2)
-      .map((part) => part[0].toUpperCase())
-      .join();
+String _initials(String name) => name
+    .split(RegExp(r'\s+'))
+    .where((part) => part.isNotEmpty)
+    .take(2)
+    .map((part) => part[0].toUpperCase())
+    .join();
+
+/// One linked family member, expanding to their registration details (2026-09-26, user request).
+/// Phone and email are selectable so they can be copied to call or write to another member.
+class _FamilyMemberTile extends StatelessWidget {
+  final FamilyMemberLink member;
+  final bool isMe;
+
+  const _FamilyMemberTile({required this.member, required this.isMe});
+
+  @override
+  Widget build(BuildContext context) {
+    final linkedAt = member.linkedAt;
+    final details = [
+      ('Email', member.email ?? 'Not recorded'),
+      ('Phone', member.phoneNumber ?? 'Not recorded'),
+      ('Relationship', member.relationship ?? 'Not set'),
+      ('Added by', member.addedByName ?? 'Unknown'),
+      if (linkedAt != null)
+        (
+          'Linked on',
+          MaterialLocalizations.of(context).formatMediumDate(linkedAt),
+        ),
+    ];
+    // Its own transparent Material, so the tap ripple isn't hidden behind the card's background.
+    return Material(
+      type: MaterialType.transparency,
+      child: Theme(
+        // ExpansionTile draws dividers above and below itself when open; the card's own dividers
+        // already separate the rows.
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: CircleAvatar(
+            backgroundColor: const Color(0xFFE6F1FC),
+            foregroundColor: primaryBlue,
+            child: Text(_initials(member.fullName)),
+          ),
+          title: Text(
+            isMe ? '${member.fullName} (You)' : member.fullName,
+            style: const TextStyle(fontSize: 14),
+          ),
+          // One wrapping text rather than a Row, so a long relationship plus "Primary contact"
+          // wraps on a narrow phone instead of overflowing.
+          subtitle: Text.rich(
+            TextSpan(
+              style: const TextStyle(fontSize: 12, color: inkTertiary),
+              children: [
+                TextSpan(text: member.relationship ?? 'Relationship not set'),
+                if (member.isPrimaryContact) ...[
+                  const TextSpan(text: ' · '),
+                  const TextSpan(
+                    text: 'Primary contact',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: primaryBlue,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(72, 0, 16, 12),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (label, value) in details)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(fontSize: 12, color: inkTertiary),
+                    ),
+                    SelectableText(
+                      value,
+                      style: const TextStyle(fontSize: 13, color: inkDefault),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
