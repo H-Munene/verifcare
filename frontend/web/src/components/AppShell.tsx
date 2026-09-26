@@ -6,12 +6,11 @@ import { Breadcrumbs } from './Breadcrumbs';
 import './AppShell.css';
 
 // Matches the wireframe's global chrome (temp_images's design prompt): left sidebar nav with all
-// 7 sections, top bar with the signed-in user's identity and sign-out. "Dependants" and
-// "Caregivers" are real routes (see docs/project-state.md's HEZ-52/53/54/55/56 entry) - every
-// other section renders present-but-disabled, so the shell matches the design without claiming
-// functionality that doesn't exist yet.
+// sections, top bar with the signed-in user's identity and sign-out. Overview, Caregivers,
+// Dependants and Visits are real routes - every other section renders present-but-disabled, so the
+// shell matches the design without claiming functionality that doesn't exist yet.
 const NAV_SECTIONS = [
-  { label: 'Overview', path: undefined },
+  { label: 'Overview', path: '/overview' },
   { label: 'Caregivers', path: '/caregivers' },
   { label: 'Dependants', path: '/dependants' },
   { label: 'Visits', path: '/visits' },
@@ -32,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Console (confirmed with the user, not widened to a read-only view for other roles) - every
   // main page here stays supervisor-only, Visits included.
   const isSupervisor = identity?.role === 'supervisor';
-  const supervisorOnlySections = new Set(['Caregivers', 'Visits']);
+  const supervisorOnlySections = new Set(['Overview', 'Caregivers', 'Visits']);
   const navSections = NAV_SECTIONS.map((section) =>
     supervisorOnlySections.has(section.label) && !isSupervisor
       ? { ...section, path: undefined }

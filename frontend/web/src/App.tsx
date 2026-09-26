@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { useAuth } from './auth/AuthContext';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppShell } from './components/AppShell';
 import { CarePlanPage } from './pages/CarePlanPage';
@@ -8,10 +9,18 @@ import { DependantDetailPage } from './pages/DependantDetailPage';
 import { DependantsListPage } from './pages/DependantsListPage';
 import { FlaggedEnrollmentsPage } from './pages/FlaggedEnrollmentsPage';
 import { LoginPage } from './pages/LoginPage';
+import { OverviewPage } from './pages/OverviewPage';
 import { RegisterCaregiverPage } from './pages/RegisterCaregiverPage';
 import { RegisterDependantPage } from './pages/RegisterDependantPage';
 import { VisitDetailPage } from './pages/VisitDetailPage';
 import { VisitsPage } from './pages/VisitsPage';
+
+// The Overview is the supervisor console's landing page (as in the admin wireframes), and its data
+// is supervisor-only, so anyone else lands on Dependants instead.
+function SupervisorOverview() {
+  const { identity } = useAuth();
+  return identity?.role === 'supervisor' ? <OverviewPage /> : <Navigate to="/dependants" replace />;
+}
 
 export function App() {
   return (
@@ -23,7 +32,8 @@ export function App() {
           <RequireAuth>
             <AppShell>
               <Routes>
-                <Route path="/" element={<Navigate to="/dependants" replace />} />
+                <Route path="/" element={<Navigate to="/overview" replace />} />
+                <Route path="/overview" element={<SupervisorOverview />} />
                 <Route path="/dependants" element={<DependantsListPage />} />
                 <Route path="/dependants/new" element={<RegisterDependantPage />} />
                 <Route path="/dependants/:dependantId" element={<DependantDetailPage />} />

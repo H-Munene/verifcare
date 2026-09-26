@@ -1,0 +1,403 @@
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.overview__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.overview__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.overview__subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.overview__date-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview__date-input {
+  height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-default);
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-primary);
+  background: var(--color-page-background);
+}
+
+.overview__date-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.overview__message {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-border-structural);
+}
+
+/* One hairline grid: panels share 1px borders (the gap shows the border colour through) instead
+   of floating as separate cards. Square corners so the shared lines meet cleanly. */
+.overview__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);
+  grid-template-areas:
+    'tiles tiles'
+    'map visits'
+    'trend attention';
+  gap: 1px;
+  background: var(--color-border-structural);
+  border: 1px solid var(--color-border-structural);
+}
+
+.overview__grid > * {
+  background: var(--color-page-background);
+}
+
+.overview__tiles {
+  grid-area: tiles;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--color-border-structural);
+}
+
+.overview__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px 18px;
+  border: 0;
+  background: var(--color-page-background);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.overview__tile:hover {
+  background: #fafafa;
+}
+
+.overview__tile:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.overview__tile--pressed,
+.overview__tile--pressed:hover {
+  background: var(--color-accent-tint-bg);
+}
+
+.overview__tile--dimmed .overview__tile-count,
+.overview__tile--dimmed .overview__tile-label {
+  color: var(--color-ink-muted);
+}
+
+.overview__tile-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-default);
+}
+
+.overview__state-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.overview__tile-count {
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -1px;
+  color: var(--color-ink-primary);
+}
+
+.overview__tile-detail {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.overview__map {
+  grid-area: map;
+  height: 460px;
+  /* The map sits inset in its cell, in its own frame, rather than bleeding to the grid lines. */
+  padding: 16px 20px 20px;
+}
+
+.overview__panel {
+  padding: 16px 20px 20px;
+  min-width: 0;
+}
+
+.overview__visits {
+  grid-area: visits;
+  display: flex;
+  flex-direction: column;
+  height: 460px;
+}
+
+.overview__trend {
+  grid-area: trend;
+}
+
+.overview__attention {
+  grid-area: attention;
+}
+
+.overview__panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.overview__panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.overview__panel-count {
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview__text-button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.overview__text-button:hover {
+  color: var(--color-accent-hover);
+}
+
+.overview__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}
+
+.overview__visit-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.overview__visit {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--row-height-row-store);
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-default);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.overview__visit:hover,
+.overview__visit--active {
+  background: var(--color-surface);
+}
+
+.overview__visit:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.overview__visit-time {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview__visit-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.overview__visit-dependant,
+.overview__visit-caregiver {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview__visit-dependant {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.overview__visit-caregiver {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.overview__visit-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-ink-default);
+  white-space: nowrap;
+}
+
+.overview__visit-state .overview__state-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.overview__attention-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overview__attention-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.overview__attention-item + .overview__attention-item {
+  border-top: 1px solid var(--color-border-divider);
+}
+
+.overview__attention-item:first-child {
+  padding-top: 0;
+}
+
+.overview__attention-item > .overview__state-dot {
+  margin-top: 4px;
+}
+
+.overview__attention-body {
+  min-width: 0;
+}
+
+.overview__attention-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.overview__attention-meta {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-subtle);
+}
+
+.overview__attention-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.overview__attention-more {
+  padding: 8px 0 12px 22px;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.overview__attention-error {
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--color-danger-text);
+}
+
+@media (max-width: 1100px) {
+  .overview__grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'tiles'
+      'map'
+      'visits'
+      'trend'
+      'attention';
+  }
+
+  .overview__map {
+    height: 380px;
+  }
+
+  .overview__visits {
+    height: auto;
+    max-height: 420px;
+  }
+}
+
+@media (max-width: 640px) {
+  .overview__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview__map {
+    padding: 14px 16px 16px;
+  }
+
+  .overview__tile {
+    padding: 14px 16px;
+  }
+
+  .overview__map {
+    height: 320px;
+  }
+
+  .overview__panel {
+    padding: 14px 16px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview__tile {
+    transition: none;
+  }
+}

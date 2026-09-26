@@ -1,0 +1,212 @@
+/* Positioned so the visually hidden table below is contained here. Without it the table is
+   positioned against the whole document, escapes the shell's scroll area and makes the window
+   itself scroll: the second scrollbar the user saw. */
+.trend {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.trend__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+/* The page's one hero figure: same sans as everything else, proportional digits. */
+.trend__rate {
+  font-size: 48px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -1.5px;
+  color: var(--color-ink-primary);
+}
+
+.trend__rate-caption,
+.trend__rate-empty {
+  margin: 0;
+  max-width: 36ch;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink-subtle);
+}
+
+.trend__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--color-ink-default);
+}
+
+.trend__legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.trend__plot {
+  position: relative;
+  height: 180px;
+  margin-left: 24px;
+}
+
+.trend__grid {
+  position: absolute;
+  inset: 0;
+}
+
+.trend__gridline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--color-border-divider);
+}
+
+.trend__tick {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: -7px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend__columns {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+}
+
+/* The whole slot is the hit target, far bigger than the bar. */
+.trend__slot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-tag);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.trend__slot--hovered {
+  background: rgb(0 0 0 / 3%);
+}
+
+.trend__slot--selected {
+  background: var(--color-accent-tint-bg);
+}
+
+.trend__slot:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Segments stack from the baseline up, 2px of surface between them, rounded only at the top. */
+.trend__bar {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: min(24px, 60%);
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+  background: var(--color-page-background);
+}
+
+.trend__segment {
+  flex-basis: 0;
+  min-height: 2px;
+}
+
+.trend__axis {
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+  margin-left: 24px;
+  margin-top: -8px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend__weekday {
+  display: block;
+  color: var(--color-ink-muted);
+}
+
+.trend__axis-label--selected {
+  color: var(--color-accent-tint-text);
+  font-weight: 500;
+}
+
+.trend__axis-label--selected .trend__weekday {
+  color: inherit;
+}
+
+.trend__tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+  padding: 8px 10px;
+  transform: translateX(-50%);
+  background: var(--color-page-background);
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-button);
+  box-shadow: 0 6px 20px rgb(41 41 41 / 14%);
+  text-align: left;
+  pointer-events: none;
+}
+
+.trend__tooltip-date {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+  white-space: nowrap;
+}
+
+.trend__tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-ink-default);
+}
+
+.trend__tooltip-label {
+  flex: 1;
+}
+
+.trend__tooltip-value {
+  color: var(--color-ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend__table {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

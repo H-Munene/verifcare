@@ -1,0 +1,58 @@
+// Typed shapes and calls for GET /dashboard/overview (backend/src/routes/dashboard.ts) and the
+// alert acknowledgement the Overview page offers inline (routes/notifications.ts).
+
+import type { ApiClient } from './client';
+
+/** The Overview map's colour for a visit - see backend/src/routes/dashboard.ts's visitState. */
+export type VisitState = 'upcoming' | 'awaiting_checkin' | 'checked_in' | 'no_checkin';
+
+export interface OverviewVisit {
+  id: string;
+  state: VisitState;
+  status: string;
+  scheduledStart: string;
+  scheduledEnd: string;
+  checkinAt: string | null;
+  checkoutAt: string | null;
+  caregiver: { id: string; fullName: string; phoneNumber: string };
+  dependant: { id: string; fullName: string; lat: number; lng: number };
+}
+
+export interface TrendDay {
+  date: string;
+  completed: number;
+  missed: number;
+  cancelled: number;
+  open: number;
+}
+
+export interface MissedVisitAlert {
+  id: string;
+  sentAt: string | null;
+  visitScheduleId: string;
+  scheduledStart: string;
+  dependantName: string;
+  caregiverName: string;
+}
+
+export interface DashboardOverview {
+  date: string;
+  timeZone: string;
+  generatedAt: string;
+  visits: OverviewVisit[];
+  trend: TrendDay[];
+  attention: {
+    missedVisitAlerts: { total: number; items: MissedVisitAlert[] };
+    flaggedPhotos: number;
+    dependantsWithoutPhoto: { total: number; items: { id: string; fullName: string }[] };
+  };
+}
+
+export function createDashboardApi(client: ApiClient) {
+  return {
+    getOverview: (date: string) =>
+      client.get<DashboardOverview>(`/dashboard/overview?date=${encodeURIComponent(date)}`),
+    acknowledgeAlert: (notificationId: string) =>
+      client.post<unknown>(`/notifications/${notificationId}/acknowledge`),
+  };
+}

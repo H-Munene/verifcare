@@ -1,0 +1,105 @@
+.visits-map {
+  position: relative;
+  height: 100%;
+  /* Its own sharp frame, square corners like the Overview's grid. */
+  border: 1px solid var(--color-border-structural);
+}
+
+.visits-map--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-ink-muted);
+  font-size: 13px;
+  background: var(--color-surface);
+}
+
+.visits-map__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.visits-map__empty {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--color-page-background);
+  border: 1px solid var(--color-border-structural);
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+}
+
+.visits-map__tooltip {
+  width: 240px;
+  padding: 10px 12px;
+  background: var(--color-page-background);
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-button);
+  box-shadow: 0 6px 20px rgb(41 41 41 / 14%);
+  font-family: var(--font-body);
+  pointer-events: none;
+}
+
+.visits-map__dependant {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+  margin-bottom: 6px;
+}
+
+.visits-map__visit + .visits-map__visit {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-divider);
+}
+
+.visits-map__visit-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.visits-map__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.visits-map__caregiver {
+  color: var(--color-ink-default);
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visits-map__state {
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+}
+
+.visits-map__times {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 6px 0 0 14px;
+  font-size: 12px;
+}
+
+.visits-map__times dt {
+  color: var(--color-ink-muted);
+}
+
+.visits-map__times dd {
+  margin: 0;
+  color: var(--color-ink-primary);
+  font-variant-numeric: tabular-nums;
+}

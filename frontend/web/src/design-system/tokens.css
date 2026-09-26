@@ -34,6 +34,18 @@
   --color-accent-tint-bg: #e3f1fd;
   --color-accent-tint-text: #0068c9;
 
+  /* Visit states, shared by the Overview map's dots, its status tiles and the 14-day outcome
+     chart (2026-09-26): grey upcoming, amber awaiting check-in, green checked in, coral no
+     check-in. Validated as a set with the dataviz palette checker: every pair clears the
+     normal-vision floor; the worst colour-blind pair (coral/grey, protan) sits in the 6-8 band,
+     which is legal because every state is also named in text wherever it's shown. The green and
+     coral replace the badge success/danger here because those two collapse for protan readers. */
+  --color-state-upcoming: #8a8a8a;
+  --color-state-awaiting: #f2b705;
+  --color-state-checked-in: #0b6e35;
+  --color-state-no-checkin: #ef6b57;
+  --color-state-cancelled: #d4d4d4;
+
   /* Radius ladder */
   --radius-checkbox: 4px;
   --radius-tag: 6px;
