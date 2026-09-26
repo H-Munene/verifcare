@@ -21,9 +21,6 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* "@/" imports, which shadcn-registry components (the lucide-animated icons) use */
-    "paths": { "@/*": ["./src/*"] },
-
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,

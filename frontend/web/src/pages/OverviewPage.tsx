@@ -5,6 +5,8 @@
 // the backend's own day, and today's view refreshes every minute because visit states move with
 // the clock.
 
+import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -14,8 +16,6 @@ import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
 import { STATE_META, VISIT_STATES, formatTime } from '../components/visitStates';
 import { Button } from '../design-system/Button';
-import { ChevronLeftIcon } from '@/components/icons/chevron-left';
-import { ChevronRightIcon } from '@/components/icons/chevron-right';
 import './OverviewPage.css';
 
 const TIME_ZONE = 'Africa/Nairobi';
@@ -118,7 +118,7 @@ export function OverviewPage() {
           aria-label="Previous day"
           onClick={() => showDate(shiftDate(date, -1))}
         >
-          <ChevronLeftIcon size={16} aria-hidden />
+          <HugeiconsIcon icon={ArrowLeft01Icon} size={16} strokeWidth={1.5} aria-hidden />
         </Button>
         <input
           type="date"
@@ -132,7 +132,7 @@ export function OverviewPage() {
           }}
         />
         <Button type="button" aria-label="Next day" onClick={() => showDate(shiftDate(date, 1))}>
-          <ChevronRightIcon size={16} aria-hidden />
+          <HugeiconsIcon icon={ArrowRight01Icon} size={16} strokeWidth={1.5} aria-hidden />
         </Button>
         <Button type="button" disabled={isToday} onClick={() => showDate(todayDate)}>
           Today

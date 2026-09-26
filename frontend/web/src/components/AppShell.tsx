@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { BellIcon } from '@/components/icons/bell';
-import { CalendarCheckIcon } from '@/components/icons/calendar-check';
-import { HandHeartIcon } from '@/components/icons/hand-heart';
-import { LayoutGridIcon } from '@/components/icons/layout-grid';
-import { ShieldCheckIcon } from '@/components/icons/shield-check';
-import { UsersIcon } from '@/components/icons/users';
+import {
+  CalendarCheckIn01Icon,
+  DashboardSquare01Icon,
+  HandHeartIcon,
+  Notification03Icon,
+  SecurityCheckIcon,
+  UserGroupIcon,
+} from '@hugeicons/core-free-icons';
 import { NavItem } from '../design-system/NavItem';
 import { Breadcrumbs } from './Breadcrumbs';
 import './AppShell.css';
@@ -15,15 +17,15 @@ import './AppShell.css';
 // sections, top bar with the signed-in user's identity and sign-out. Overview, Caregivers,
 // Dependants and Visits are real routes - every other section renders present-but-disabled, so the
 // shell matches the design without claiming functionality that doesn't exist yet.
-// Icons are lucide-animated (2026-09-26): caregivers are the staff (users), dependants the people
-// cared for (a hand holding a heart).
+// Icons are Hugeicons, stroke style (2026-09-26): caregivers are the staff (a group), dependants
+// the people cared for (a hand holding a heart).
 const NAV_SECTIONS = [
-  { label: 'Overview', path: '/overview', icon: LayoutGridIcon },
-  { label: 'Caregivers', path: '/caregivers', icon: UsersIcon },
+  { label: 'Overview', path: '/overview', icon: DashboardSquare01Icon },
+  { label: 'Caregivers', path: '/caregivers', icon: UserGroupIcon },
   { label: 'Dependants', path: '/dependants', icon: HandHeartIcon },
-  { label: 'Visits', path: '/visits', icon: CalendarCheckIcon },
-  { label: 'Alerts', path: undefined, icon: BellIcon },
-  { label: 'Compliance', path: undefined, icon: ShieldCheckIcon },
+  { label: 'Visits', path: '/visits', icon: CalendarCheckIn01Icon },
+  { label: 'Alerts', path: undefined, icon: Notification03Icon },
+  { label: 'Compliance', path: undefined, icon: SecurityCheckIcon },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
