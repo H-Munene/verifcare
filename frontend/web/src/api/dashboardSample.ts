@@ -195,7 +195,7 @@ export function sampleOverview(date: string): DashboardOverview {
       };
     })(),
     attention: {
-      missedVisitAlerts: { total: alerts.length, items: alerts.slice(0, 5) },
+      missedVisitAlerts: { total: alerts.length, items: alerts },
       flaggedPhotos: 2,
       dependantsWithoutPhoto: {
         total: 3,

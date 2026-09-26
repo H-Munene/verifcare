@@ -363,8 +363,33 @@
   height: 8px;
 }
 
-.overview__attention-panel {
+/* The panel is a column: title row, then the segments and a scrolling list filling the rest. */
+.overview__attention {
+  display: flex;
+  flex-direction: column;
+}
+
+.overview__attention-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Takes the space left under the segments; the list inside is taken out of the flow, so however
+   long it is it scrolls here instead of making the row taller. */
+.overview__attention-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
   margin-top: 14px;
+}
+
+.overview__attention-panel {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .overview__attention-intro {
@@ -460,6 +485,16 @@
   .overview__visits {
     height: auto;
     max-height: 420px;
+  }
+
+  /* Stacked, nothing beside it sets the height, so the list gets a height of its own. */
+  .overview__attention-viewport {
+    min-height: 0;
+  }
+
+  .overview__attention-panel {
+    position: static;
+    max-height: 360px;
   }
 }
 

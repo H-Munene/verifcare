@@ -354,7 +354,7 @@ export function OverviewPage() {
               Needs your attention
             </h2>
           </div>
-          <div className="overview__panel-body">
+          <div className="overview__panel-body overview__attention-body">
             <AttentionList
               attention={attention}
               timeZone={overview.timeZone}
@@ -371,8 +371,6 @@ export function OverviewPage() {
 }
 
 type AttentionCategory = 'missed' | 'photos' | 'noPhoto';
-
-const ATTENTION_SHOWN = 3;
 
 // "Needs your attention", one category at a time behind segmented buttons (user request,
 // 2026-09-26): missed visits to acknowledge, photos flagged for review, and dependants who can't
@@ -393,10 +391,10 @@ function AttentionList({
   onAcknowledge: (notificationId: string) => void;
 }) {
   const { missedVisitAlerts, flaggedPhotos, dependantsWithoutPhoto } = attention;
-  // At most three entries per category (user request, 2026-09-26); the server sends five, so the
-  // next one moves up as soon as one is acknowledged.
-  const alerts = missedVisitAlerts.items.slice(0, ATTENTION_SHOWN);
-  const withoutPhoto = dependantsWithoutPhoto.items.slice(0, ATTENTION_SHOWN);
+  // Every entry, in a list that scrolls within the panel (user request, 2026-09-26). The server
+  // caps each list at 100, so "N more" only appears past that.
+  const alerts = missedVisitAlerts.items;
+  const withoutPhoto = dependantsWithoutPhoto.items;
   const segments: { id: AttentionCategory; label: string; count: number }[] = [
     { id: 'missed', label: 'Missed visits', count: missedVisitAlerts.total },
     { id: 'photos', label: 'Photo review', count: flaggedPhotos },
@@ -422,129 +420,133 @@ function AttentionList({
         label="What needs your attention"
         idPrefix="attention"
       />
-      <div
-        id={`attention-${category}`}
-        role="tabpanel"
-        aria-labelledby={`attention-tab-${category}`}
-        className="overview__attention-panel"
-      >
-        {category === 'missed' ? (
-          missedVisitAlerts.total === 0 ? (
-            <p className="overview__empty">No missed visits to acknowledge.</p>
-          ) : (
-            <ul className="overview__attention-list">
-              {alerts.map((alert) => (
-                <li key={alert.id} className="overview__attention-item">
-                  <span
-                    className="overview__state-dot"
-                    style={{ background: STATE_META.no_checkin.color }}
-                    aria-hidden
-                  />
-                  <div className="overview__attention-body">
-                    <p className="overview__attention-title">
-                      Missed visit to {alert.dependantName}
-                    </p>
-                    <p className="overview__attention-meta">
-                      {alert.caregiverName}, due {due(alert.scheduledStart)}
-                    </p>
-                    {linksEnabled ? (
-                      <div className="overview__attention-actions">
-                        <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
-                      </div>
-                    ) : null}
-                  </div>
-                  <Button
-                    type="button"
-                    className="overview__attention-button"
-                    disabled={acknowledging === alert.id}
-                    onClick={() => onAcknowledge(alert.id)}
-                  >
-                    {acknowledging === alert.id ? 'Acknowledging...' : 'Acknowledge'}
-                  </Button>
-                </li>
-              ))}
-              {missedVisitAlerts.total > alerts.length ? (
-                <li className="overview__attention-more">
-                  {plural(
-                    missedVisitAlerts.total - alerts.length,
-                    'more missed visit',
-                    'more missed visits',
-                  )}{' '}
-                  to acknowledge.
-                </li>
-              ) : null}
-              {acknowledgeFailed ? (
-                <li className="overview__attention-error" role="alert">
-                  That alert couldn't be acknowledged. Try again.
-                </li>
-              ) : null}
-            </ul>
-          )
-        ) : null}
-
-        {category === 'photos' ? (
-          flaggedPhotos === 0 ? (
-            <p className="overview__empty">No photos waiting for review.</p>
-          ) : (
-            <div className="overview__attention-item">
-              <span
-                className="overview__state-dot"
-                style={{ background: STATE_META.awaiting_checkin.color }}
-                aria-hidden
-              />
-              <div className="overview__attention-body">
-                <p className="overview__attention-title">
-                  {plural(flaggedPhotos, 'photo looks', 'photos look')} like someone already
-                  registered
-                </p>
-                <p className="overview__attention-meta">
-                  Check-in can't use {flaggedPhotos === 1 ? 'it' : 'them'} until you review{' '}
-                  {flaggedPhotos === 1 ? 'it' : 'them'}.
-                </p>
-                <div className="overview__attention-actions">
-                  <Link to="/flagged-enrollments">Review photos</Link>
-                </div>
-              </div>
-            </div>
-          )
-        ) : null}
-
-        {category === 'noPhoto' ? (
-          dependantsWithoutPhoto.total === 0 ? (
-            <p className="overview__empty">Every active dependant has a photo.</p>
-          ) : (
-            <>
-              <p className="overview__attention-meta overview__attention-intro">
-                Visits can't be scheduled for these dependants until a photo is added.
-              </p>
+      {/* Scrolls within the space under the segments, without growing the panel: the Visit
+          outcomes panel beside it sets the row's height, so the bottom stays level. */}
+      <div className="overview__attention-viewport">
+        <div
+          id={`attention-${category}`}
+          role="tabpanel"
+          aria-labelledby={`attention-tab-${category}`}
+          className="overview__attention-panel"
+        >
+          {category === 'missed' ? (
+            missedVisitAlerts.total === 0 ? (
+              <p className="overview__empty">No missed visits to acknowledge.</p>
+            ) : (
               <ul className="overview__attention-list">
-                {withoutPhoto.map((d) => (
-                  <li key={d.id} className="overview__attention-item">
+                {alerts.map((alert) => (
+                  <li key={alert.id} className="overview__attention-item">
                     <span
                       className="overview__state-dot"
-                      style={{ background: STATE_META.upcoming.color }}
+                      style={{ background: STATE_META.no_checkin.color }}
                       aria-hidden
                     />
                     <div className="overview__attention-body">
                       <p className="overview__attention-title">
-                        {linksEnabled ? (
-                          <Link to={`/dependants/${d.id}`}>{d.fullName}</Link>
-                        ) : (
-                          d.fullName
-                        )}
+                        Missed visit to {alert.dependantName}
                       </p>
+                      <p className="overview__attention-meta">
+                        {alert.caregiverName}, due {due(alert.scheduledStart)}
+                      </p>
+                      {linksEnabled ? (
+                        <div className="overview__attention-actions">
+                          <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
+                        </div>
+                      ) : null}
                     </div>
+                    <Button
+                      type="button"
+                      className="overview__attention-button"
+                      disabled={acknowledging === alert.id}
+                      onClick={() => onAcknowledge(alert.id)}
+                    >
+                      {acknowledging === alert.id ? 'Acknowledging...' : 'Acknowledge'}
+                    </Button>
                   </li>
                 ))}
-                {dependantsWithoutPhoto.total > withoutPhoto.length ? (
+                {missedVisitAlerts.total > alerts.length ? (
                   <li className="overview__attention-more">
-                    And {dependantsWithoutPhoto.total - withoutPhoto.length} more.
+                    {plural(
+                      missedVisitAlerts.total - alerts.length,
+                      'more missed visit',
+                      'more missed visits',
+                    )}{' '}
+                    to acknowledge.
+                  </li>
+                ) : null}
+                {acknowledgeFailed ? (
+                  <li className="overview__attention-error" role="alert">
+                    That alert couldn't be acknowledged. Try again.
                   </li>
                 ) : null}
               </ul>
-            </>
-          )
-        ) : null}
+            )
+          ) : null}
+
+          {category === 'photos' ? (
+            flaggedPhotos === 0 ? (
+              <p className="overview__empty">No photos waiting for review.</p>
+            ) : (
+              <div className="overview__attention-item">
+                <span
+                  className="overview__state-dot"
+                  style={{ background: STATE_META.awaiting_checkin.color }}
+                  aria-hidden
+                />
+                <div className="overview__attention-body">
+                  <p className="overview__attention-title">
+                    {plural(flaggedPhotos, 'photo looks', 'photos look')} like someone already
+                    registered
+                  </p>
+                  <p className="overview__attention-meta">
+                    Check-in can't use {flaggedPhotos === 1 ? 'it' : 'them'} until you review{' '}
+                    {flaggedPhotos === 1 ? 'it' : 'them'}.
+                  </p>
+                  <div className="overview__attention-actions">
+                    <Link to="/flagged-enrollments">Review photos</Link>
+                  </div>
+                </div>
+              </div>
+            )
+          ) : null}
+
+          {category === 'noPhoto' ? (
+            dependantsWithoutPhoto.total === 0 ? (
+              <p className="overview__empty">Every active dependant has a photo.</p>
+            ) : (
+              <>
+                <p className="overview__attention-meta overview__attention-intro">
+                  Visits can't be scheduled for these dependants until a photo is added.
+                </p>
+                <ul className="overview__attention-list">
+                  {withoutPhoto.map((d) => (
+                    <li key={d.id} className="overview__attention-item">
+                      <span
+                        className="overview__state-dot"
+                        style={{ background: STATE_META.upcoming.color }}
+                        aria-hidden
+                      />
+                      <div className="overview__attention-body">
+                        <p className="overview__attention-title">
+                          {linksEnabled ? (
+                            <Link to={`/dependants/${d.id}`}>{d.fullName}</Link>
+                          ) : (
+                            d.fullName
+                          )}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                  {dependantsWithoutPhoto.total > withoutPhoto.length ? (
+                    <li className="overview__attention-more">
+                      And {dependantsWithoutPhoto.total - withoutPhoto.length} more.
+                    </li>
+                  ) : null}
+                </ul>
+              </>
+            )
+          ) : null}
+        </div>
       </div>
     </>
   );
