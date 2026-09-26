@@ -44,7 +44,7 @@
 // transaction - this is what openapi.yaml's own description of the PATCH endpoint already implies
 // ("reassigning isPrimaryContact... enforced by a partial unique index").
 
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -370,6 +370,11 @@ const updateDependantRequestSchema = z.object({
   geofenceRadiusMeters: z.number().int().min(1).optional(),
   cognitiveMonitoringEnabled: z.boolean().optional(),
   status: z.enum(['active', 'deactivated']).optional(),
+});
+
+const linkExistingMemberRequestSchema = z.object({
+  email: z.string().trim().email(),
+  relationship: z.string().trim().min(1).max(100).optional(),
 });
 
 const updateFamilyMemberRequestSchema = z.object({
@@ -1041,6 +1046,88 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         });
         return;
       }
+      next(err);
+    }
+  });
+
+  // POST /dependants/{id}/family-members/link (2026-09-26): the primary contact links someone who
+  // already has a Mzazi Care account, found by their exact email, straight away - no request or
+  // approval, since the primary contact is the one who would approve it. Someone without an
+  // account is told to sign up and send a link request instead (routes/familyLinkRequests.ts).
+  // Unlike POST .../family-members above, this never creates an account or a Cognito identity -
+  // that path is the supervisor's "New user" flow. Answering "no account uses that email" does
+  // reveal whether an email is registered, but only to a dependant's primary contact, and it is
+  // what linking by email needs.
+  router.post('/:dependantId/family-members/link', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const body = parseOrSendProblem(linkExistingMemberRequestSchema, req.body, res);
+    if (!body) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+    try {
+      const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+      if (!found?.link.isPrimaryContact) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Forbidden',
+          status: 403,
+          detail: "Only the dependant's primary contact can link family members.",
+        });
+        return;
+      }
+      const [member] = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(sql`lower(${schema.users.email})`, body.email.toLowerCase()),
+            eq(schema.users.role, 'family_member'),
+          ),
+        );
+      if (!member) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail:
+            'No Mzazi Care account uses that email. They can create an account in the app and ask you to link them.',
+        });
+        return;
+      }
+      const [link] = await db
+        .insert(schema.dependantFamilyMembers)
+        .values({
+          dependantId,
+          familyMemberUserId: member.id,
+          relationship: body.relationship ?? null,
+          isPrimaryContact: false,
+          addedBy: found.callerRow.id,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!link) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'That person is already linked to this dependant.',
+        });
+        return;
+      }
+      res.status(201).json(await familyMemberResponse(db, link, false));
+    } catch (err) {
       next(err);
     }
   });

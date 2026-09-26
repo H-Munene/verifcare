@@ -34,6 +34,8 @@ security:
   - bearerAuth: []
 
 tags:
+  - name: Family Link Requests
+    description: A family member asking a dependant's primary contact to link them, and the primary contact's answer.
   - name: Terms
     description: The terms of use and privacy notice each mobile app's users must accept (the consent screen).
   - name: Users
@@ -1234,6 +1236,201 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /dependants/{dependantId}/family-members/link:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    post:
+      tags: [Dependants]
+      summary: Link an existing account by email (primary contact)
+      description: |
+        The dependant's primary contact links someone who already has a family-member account,
+        found by their exact email, with no request or approval. Never creates an account; someone
+        without one is told to sign up and send a link request instead. Only a primary contact can
+        learn from the 404 whether an email is registered.
+      operationId: linkExistingFamilyMember
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                relationship:
+                  type: string
+      responses:
+        '201':
+          description: Linked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependantFamilyMember'
+        '403':
+          description: The caller isn't the dependant's primary contact.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: No family-member account uses that email.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Already linked to this dependant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /family-link-requests:
+    post:
+      tags: [Family Link Requests]
+      summary: Ask a primary contact to link you
+      description: |
+        Family members only. `contact` is the primary contact's exact email or E.164 phone number.
+        The answer is always the same `202`, whoever the contact is: the request is stored and
+        listed back to the requester as pending either way, and it only reaches anyone if the
+        contact belonged to a dependant's primary contact at the time. So this can't be used to
+        find out who is registered. Asking again while a request to the same contact is open
+        doesn't create another.
+      operationId: createFamilyLinkRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contact]
+              properties:
+                contact:
+                  type: string
+                  description: Email address or E.164 phone number.
+                relationship:
+                  type: string
+                  description: The requester's relationship to the dependant(s), e.g. Grandson.
+      responses:
+        '202':
+          description: Accepted (the same answer whether or not the contact matched anyone).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      tags: [Family Link Requests]
+      summary: Requests to you, and your own requests
+      description: |
+        `incoming`: open requests addressed to the caller as a primary contact, with who is asking
+        and which of the caller's active dependants they could be linked to (`alreadyLinked` marks
+        ones they already are). `outgoing`: every request the caller has made; a decided one the
+        caller hasn't seen yet has `unread: true` (the app's in-app notification).
+      operationId: listFamilyLinkRequests
+      responses:
+        '200':
+          description: Incoming and outgoing requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyLinkRequests'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /family-link-requests/{requestId}/approve:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Family Link Requests]
+      summary: Approve a request, linking the requester to chosen dependants
+      description: Only the primary contact the request was sent to, and only for dependants they are still the primary contact of. Links are made with the requester's stated relationship, not as primary contact.
+      operationId: approveFamilyLinkRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dependantIds]
+              properties:
+                dependantIds:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Approved and linked.
+        '403':
+          description: A chosen dependant isn't one the caller is the primary contact of.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already answered.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /family-link-requests/{requestId}/reject:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Family Link Requests]
+      summary: Reject a request
+      operationId: rejectFamilyLinkRequest
+      responses:
+        '200':
+          description: Rejected.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already answered.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /family-link-requests/outcomes/seen:
+    post:
+      tags: [Family Link Requests]
+      summary: Mark your decided requests as seen
+      description: Clears `unread` on the caller's approved and rejected requests (the app calls this when its notifications sheet is opened).
+      operationId: markFamilyLinkOutcomesSeen
+      responses:
+        '204':
+          description: Marked as seen.
+        default:
+          $ref: '#/components/responses/Problem'
+
   /terms/current:
     get:
       tags: [Terms]
@@ -1469,6 +1666,53 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
+    FamilyLinkRequests:
+      type: object
+      required: [incoming, outgoing]
+      properties:
+        incoming:
+          type: array
+          items:
+            type: object
+            required: [id, requester, relationship, createdAt, dependants]
+            properties:
+              id: {type: string, format: uuid}
+              requester:
+                type: object
+                properties:
+                  fullName: {type: string}
+                  email: {type: [string, 'null']}
+                  phoneNumber: {type: [string, 'null']}
+              relationship: {type: [string, 'null']}
+              createdAt: {type: string, format: date-time}
+              dependants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string, format: uuid}
+                    fullName: {type: string}
+                    alreadyLinked: {type: boolean}
+        outgoing:
+          type: array
+          items:
+            type: object
+            required: [id, targetContact, status, createdAt, decidedAt, unread, linkedDependants]
+            properties:
+              id: {type: string, format: uuid}
+              targetContact: {type: string}
+              relationship: {type: [string, 'null']}
+              status: {type: string, enum: [pending, approved, rejected]}
+              createdAt: {type: string, format: date-time}
+              decidedAt: {type: [string, 'null'], format: date-time}
+              unread: {type: boolean}
+              linkedDependants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string, format: uuid}
+                    fullName: {type: string}
     CurrentTerms:
       type: object
       required: [document, version, title, effectiveDate, sections, acceptedAt]
