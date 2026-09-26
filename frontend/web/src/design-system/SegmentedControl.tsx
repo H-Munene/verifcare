@@ -1,3 +1,4 @@
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
 import { useRef, type KeyboardEvent } from 'react';
 import './components.css';
 
@@ -11,6 +12,9 @@ export interface Segment {
   label: string;
   /** Shown after the label, e.g. how many items the segment holds. */
   count?: number;
+  /** Shown before the label, in [iconColor] (else the text colour). */
+  icon?: IconSvgElement;
+  iconColor?: string;
 }
 
 export interface SegmentedControlProps {
@@ -75,6 +79,15 @@ export function SegmentedControl({
               .join(' ')}
             onClick={() => onChange(segment.id)}
           >
+            {segment.icon ? (
+              <HugeiconsIcon
+                icon={segment.icon}
+                size={16}
+                strokeWidth={1.7}
+                color={segment.iconColor ?? 'currentColor'}
+                aria-hidden
+              />
+            ) : null}
             {segment.label}
             {segment.count !== undefined ? (
               <span className="ds-segmented__count">{segment.count}</span>

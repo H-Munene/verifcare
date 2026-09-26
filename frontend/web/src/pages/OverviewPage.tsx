@@ -26,7 +26,7 @@ import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
 import { STATE_META, VISIT_STATES, formatTime } from '../components/visitStates';
 import { Button } from '../design-system/Button';
-import { SegmentedControl } from '../design-system/SegmentedControl';
+import { SegmentedControl, type Segment } from '../design-system/SegmentedControl';
 import './OverviewPage.css';
 
 const TIME_ZONE = 'Africa/Nairobi';
@@ -403,13 +403,34 @@ function AttentionList({
   // caps each list at 100, so "N more" only appears past that.
   const alerts = missedVisitAlerts.items;
   const withoutPhoto = dependantsWithoutPhoto.items;
-  const segments: { id: AttentionCategory; label: string; count: number }[] = [
-    { id: 'missed', label: 'Missed visits', count: missedVisitAlerts.total },
-    { id: 'photos', label: 'Photo review', count: flaggedPhotos },
-    { id: 'noPhoto', label: 'No photo', count: dependantsWithoutPhoto.total },
+  // Each category's icon is on its segment, not repeated on every entry (user request).
+  const segments: Segment[] = [
+    {
+      id: 'missed',
+      label: 'Missed',
+      count: missedVisitAlerts.total,
+      icon: CalendarRemove02Icon,
+      iconColor: 'var(--color-state-no-checkin-icon)',
+    },
+    {
+      id: 'photos',
+      label: 'Photos',
+      count: flaggedPhotos,
+      icon: UserSearch01Icon,
+      iconColor: 'var(--color-state-awaiting-icon)',
+    },
+    {
+      id: 'noPhoto',
+      label: 'No photo',
+      count: dependantsWithoutPhoto.total,
+      icon: CameraOff02Icon,
+      iconColor: 'var(--color-state-upcoming-icon)',
+    },
   ];
   const [chosen, setChosen] = useState<AttentionCategory | null>(null);
-  const category = chosen ?? segments.find((s) => s.count > 0)?.id ?? 'missed';
+  const category = (chosen ??
+    segments.find((s) => (s.count ?? 0) > 0)?.id ??
+    'missed') as AttentionCategory;
   const due = (iso: string) =>
     new Date(iso).toLocaleString(undefined, {
       day: 'numeric',
@@ -444,14 +465,6 @@ function AttentionList({
               <ul className="overview__attention-list">
                 {alerts.map((alert) => (
                   <li key={alert.id} className="overview__attention-item">
-                    <HugeiconsIcon
-                      icon={CalendarRemove02Icon}
-                      size={18}
-                      strokeWidth={1.6}
-                      className="overview__attention-icon"
-                      color="var(--color-state-no-checkin-icon)"
-                      aria-hidden
-                    />
                     <div className="overview__attention-body">
                       <p className="overview__attention-title">
                         Missed visit to {alert.dependantName}
@@ -511,14 +524,6 @@ function AttentionList({
               <p className="overview__empty">No photos waiting for review.</p>
             ) : (
               <div className="overview__attention-item">
-                <HugeiconsIcon
-                  icon={UserSearch01Icon}
-                  size={18}
-                  strokeWidth={1.6}
-                  className="overview__attention-icon"
-                  color="var(--color-state-awaiting-icon)"
-                  aria-hidden
-                />
                 <div className="overview__attention-body">
                   <p className="overview__attention-title">
                     {plural(flaggedPhotos, 'photo looks', 'photos look')} like someone already
@@ -544,26 +549,25 @@ function AttentionList({
                 <p className="overview__attention-meta overview__attention-intro">
                   Visits can't be scheduled for these dependants until a photo is added.
                 </p>
-                <ul className="overview__attention-list">
+                <ul className="overview__attention-list overview__attention-rows">
                   {withoutPhoto.map((d) => (
-                    <li key={d.id} className="overview__attention-item">
-                      <HugeiconsIcon
-                        icon={CameraOff02Icon}
-                        size={18}
-                        strokeWidth={1.6}
-                        className="overview__attention-icon"
-                        color="var(--color-state-upcoming-icon)"
-                        aria-hidden
-                      />
-                      <div className="overview__attention-body">
-                        <p className="overview__attention-title">
-                          {linksEnabled ? (
-                            <Link to={`/dependants/${d.id}`}>{d.fullName}</Link>
-                          ) : (
-                            d.fullName
-                          )}
-                        </p>
-                      </div>
+                    <li key={d.id}>
+                      {linksEnabled ? (
+                        <Link to={`/dependants/${d.id}`} className="overview__attention-row">
+                          <span className="overview__attention-title">{d.fullName}</span>
+                          <HugeiconsIcon
+                            icon={ArrowRight01Icon}
+                            size={16}
+                            strokeWidth={1.8}
+                            className="overview__attention-chevron"
+                            aria-hidden
+                          />
+                        </Link>
+                      ) : (
+                        <span className="overview__attention-row">
+                          <span className="overview__attention-title">{d.fullName}</span>
+                        </span>
+                      )}
                     </li>
                   ))}
                   {dependantsWithoutPhoto.total > withoutPhoto.length ? (
