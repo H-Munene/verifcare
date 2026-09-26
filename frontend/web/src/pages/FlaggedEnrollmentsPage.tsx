@@ -1,3 +1,10 @@
+import {
+  Image01Icon,
+  PercentCircleIcon,
+  UserIcon,
+  UserMultipleIcon,
+} from '@hugeicons/core-free-icons';
+import { TableFrame, Th } from '../design-system/Table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useApi } from '../api/useApi';
@@ -53,67 +60,69 @@ export function FlaggedEnrollmentsPage() {
 
       {query.data ? (
         <>
-          <table className="ds-table ds-table--table-cell">
-            <thead>
-              <tr>
-                <th>Subject</th>
-                <th>Image</th>
-                <th>Matched subject</th>
-                <th>Similarity</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {query.data.items.map((enrollment) => (
-                <tr key={enrollment.id}>
-                  <td>
-                    <SubjectLabel
-                      subjectType={enrollment.subjectType}
-                      subjectId={enrollment.caregiverId ?? enrollment.dependantId ?? ''}
-                    />
-                  </td>
-                  <td>{enrollment.imageOrder}</td>
-                  <td>
-                    {enrollment.matchedSubjectType && enrollment.matchedSubjectId ? (
-                      <SubjectLabel
-                        subjectType={enrollment.matchedSubjectType}
-                        subjectId={enrollment.matchedSubjectId}
-                      />
-                    ) : (
-                      '-'
-                    )}
-                  </td>
-                  <td>
-                    <Badge tone="danger">
-                      {enrollment.matchedSimilarity?.toFixed(1) ?? 'n/a'}%
-                    </Badge>
-                  </td>
-                  <td className="flagged-enrollments-page__actions">
-                    <Button
-                      variant="primary"
-                      disabled={approve.isPending || reject.isPending}
-                      onClick={() => approve.mutate(enrollment.id)}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      disabled={approve.isPending || reject.isPending}
-                      onClick={() => reject.mutate(enrollment.id)}
-                    >
-                      Reject
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {query.data.items.length === 0 ? (
+          <TableFrame>
+            <table className="ds-table ds-table--table-cell">
+              <thead>
                 <tr>
-                  <td colSpan={5} className="flagged-enrollments-page__empty">
-                    Nothing flagged right now.
-                  </td>
+                  <Th icon={UserIcon}>Subject</Th>
+                  <Th icon={Image01Icon}>Image</Th>
+                  <Th icon={UserMultipleIcon}>Matched subject</Th>
+                  <Th icon={PercentCircleIcon}>Similarity</Th>
+                  <Th>Actions</Th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {query.data.items.map((enrollment) => (
+                  <tr key={enrollment.id}>
+                    <td>
+                      <SubjectLabel
+                        subjectType={enrollment.subjectType}
+                        subjectId={enrollment.caregiverId ?? enrollment.dependantId ?? ''}
+                      />
+                    </td>
+                    <td>{enrollment.imageOrder}</td>
+                    <td>
+                      {enrollment.matchedSubjectType && enrollment.matchedSubjectId ? (
+                        <SubjectLabel
+                          subjectType={enrollment.matchedSubjectType}
+                          subjectId={enrollment.matchedSubjectId}
+                        />
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                    <td>
+                      <Badge tone="danger">
+                        {enrollment.matchedSimilarity?.toFixed(1) ?? 'n/a'}%
+                      </Badge>
+                    </td>
+                    <td className="flagged-enrollments-page__actions">
+                      <Button
+                        variant="primary"
+                        disabled={approve.isPending || reject.isPending}
+                        onClick={() => approve.mutate(enrollment.id)}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        disabled={approve.isPending || reject.isPending}
+                        onClick={() => reject.mutate(enrollment.id)}
+                      >
+                        Reject
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {query.data.items.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="ds-table__empty">
+                      Nothing flagged right now.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </TableFrame>
 
           <div className="flagged-enrollments-page__pagination">
             <Button

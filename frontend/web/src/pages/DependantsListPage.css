@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .dependants-page__title {
@@ -16,20 +16,6 @@
 .dependants-page__toolbar-actions {
   display: flex;
   gap: 8px;
-}
-
-.dependants-page__row {
-  cursor: pointer;
-}
-
-.dependants-page__row:hover {
-  background: var(--color-border-divider);
-}
-
-.dependants-page__empty {
-  text-align: center;
-  color: var(--color-ink-muted);
-  height: 48px;
 }
 
 .dependants-page__pagination {

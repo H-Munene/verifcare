@@ -1,5 +1,12 @@
+import {
+  Calendar03Icon,
+  CheckmarkBadge01Icon,
+  HandHeartIcon,
+  UserIcon,
+} from '@hugeicons/core-free-icons';
+import { TableFrame, Th } from '../design-system/Table';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import type { VisitStatus } from '../api/visitSchedules';
 import type { BadgeTone } from '../design-system/Badge';
@@ -71,31 +78,41 @@ export function VisitHistoryList({ caregiverId, dependantId }: VisitHistoryListP
   }
 
   return (
-    <table className="ds-table ds-table--table-cell">
-      <thead>
-        <tr>
-          <th>Caregiver</th>
-          <th>Dependant</th>
-          <th>Scheduled window</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((visit) => (
-          <tr
-            key={visit.id}
-            className="visit-history-list__row"
-            onClick={() => void navigate(`/visits/${visit.id}`)}
-          >
-            <td>{visit.caregiverDisplayName}</td>
-            <td>{visit.dependantDisplayName}</td>
-            <td>{formatWindow(visit.scheduledStart, visit.scheduledEnd)}</td>
-            <td>
-              <Badge tone={statusTone(visit.status)}>{statusLabel(visit.status)}</Badge>
-            </td>
+    <TableFrame>
+      <table className="ds-table ds-table--table-cell">
+        <thead>
+          <tr>
+            <Th icon={UserIcon}>Caregiver</Th>
+            <Th icon={HandHeartIcon}>Dependant</Th>
+            <Th icon={Calendar03Icon}>Scheduled window</Th>
+            <Th icon={CheckmarkBadge01Icon}>Status</Th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((visit) => (
+            <tr
+              key={visit.id}
+              className="ds-table__row--link"
+              onClick={() => void navigate(`/visits/${visit.id}`)}
+            >
+              <td>
+                <Link
+                  to={`/visits/${visit.id}`}
+                  className="ds-table__link"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {visit.caregiverDisplayName}
+                </Link>
+              </td>
+              <td>{visit.dependantDisplayName}</td>
+              <td>{formatWindow(visit.scheduledStart, visit.scheduledEnd)}</td>
+              <td>
+                <Badge tone={statusTone(visit.status)}>{statusLabel(visit.status)}</Badge>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableFrame>
   );
 }

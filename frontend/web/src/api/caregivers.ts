@@ -62,6 +62,7 @@ export interface UpdateCaregiverRequest {
 
 export interface ListCaregiversParams {
   active?: boolean;
+  sort?: 'name' | '-name' | 'hireDate' | '-hireDate';
   cursor?: string;
   limit?: number;
 }

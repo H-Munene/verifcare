@@ -23,10 +23,15 @@ export interface Dependant {
   geofenceRadiusMeters: number;
   cognitiveMonitoringEnabled: boolean;
   status: DependantStatus;
+  // Where the check-in photo stands (backend db/checkinPhotos.ts): only 'ready' lets a visit be
+  // scheduled.
+  checkinPhotoStatus: CheckinPhotoStatus;
   registeredBy: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export type CheckinPhotoStatus = 'ready' | 'awaiting_review' | 'missing';
 
 export interface DependantPage {
   items: Dependant[];
@@ -136,6 +141,8 @@ export interface UpdateCareTaskRequest {
 
 export interface ListDependantsParams {
   status?: DependantStatus;
+  photo?: CheckinPhotoStatus;
+  sort?: 'name' | '-name' | 'dob' | '-dob';
   cursor?: string;
   limit?: number;
 }

@@ -75,6 +75,7 @@ export interface ListVisitSchedulesParams {
   dependantId?: string;
   scheduledStartFrom?: string;
   scheduledStartTo?: string;
+  sort?: 'scheduledStart' | '-scheduledStart';
   cursor?: string;
   limit?: number;
 }

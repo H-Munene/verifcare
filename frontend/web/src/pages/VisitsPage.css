@@ -13,24 +13,10 @@
   margin: 0;
 }
 
-.visits-page__row {
-  cursor: pointer;
-}
-
-.visits-page__row:hover {
-  background: var(--color-border-divider);
-}
-
 .visits-page__row-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-}
-
-.visits-page__empty {
-  text-align: center;
-  color: var(--color-ink-muted);
-  height: 48px;
 }
 
 .visits-page__pagination {
@@ -81,4 +67,13 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+.visits-page__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

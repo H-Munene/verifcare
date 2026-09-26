@@ -40,10 +40,13 @@
   gap: 8px;
 }
 
-.care-plan-page__empty {
-  text-align: center;
-  color: var(--color-ink-muted);
-  height: 48px;
+.care-plan-page__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .care-plan-page__error {

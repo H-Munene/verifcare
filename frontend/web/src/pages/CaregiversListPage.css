@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .caregivers-page__title {
@@ -11,20 +11,6 @@
   font-weight: 500;
   color: var(--color-ink-primary);
   margin: 0;
-}
-
-.caregivers-page__row {
-  cursor: pointer;
-}
-
-.caregivers-page__row:hover {
-  background: var(--color-border-divider);
-}
-
-.caregivers-page__empty {
-  text-align: center;
-  color: var(--color-ink-muted);
-  height: 48px;
 }
 
 .caregivers-page__pagination {

@@ -1,6 +1,12 @@
+import {
+  Calendar03Icon,
+  CheckmarkBadge01Icon,
+  HandHeartIcon,
+  UserIcon,
+} from '@hugeicons/core-free-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import type { Caregiver } from '../api/caregivers';
 import type { Dependant } from '../api/dependants';
@@ -11,7 +17,12 @@ import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Label } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
-import type { VisitSchedule, VisitStatus } from '../api/visitSchedules';
+import type { ListVisitSchedulesParams, VisitSchedule, VisitStatus } from '../api/visitSchedules';
+import { FilterBar, FilterMenu } from '../design-system/FilterMenu';
+import { sortState } from '../design-system/sortState';
+import { SortableTh, TableFrame, Th } from '../design-system/Table';
+import { useCursorPages } from '../hooks/useCursorPages';
+import { useListParams } from '../hooks/useListParams';
 import './VisitsPage.css';
 
 // Unifies the former Scheduling and Visits nav entries into one page (2026-09-23, user request):
@@ -58,6 +69,50 @@ function formatWindow(scheduledStart: string, scheduledEnd: string): string {
   return `${dateLabel}, ${start.toLocaleTimeString(undefined, timeOpts)} - ${end.toLocaleTimeString(undefined, timeOpts)}`;
 }
 
+type VisitSort = NonNullable<ListVisitSchedulesParams['sort']>;
+
+const SORTS: readonly VisitSort[] = ['-scheduledStart', 'scheduledStart'];
+
+const STATUS_OPTIONS: { value: VisitStatus; label: string }[] = [
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'in_progress', label: 'Checked In' },
+  { value: 'completed', label: 'Checked Out' },
+  { value: 'missed', label: 'Missed' },
+  { value: 'investigated', label: 'Investigated' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+// Date presets, as Nairobi days - the service's time zone, as on the Overview.
+const DATE_OPTIONS = [
+  { value: 'today', label: 'Today' },
+  { value: 'tomorrow', label: 'Tomorrow' },
+  { value: 'next7', label: 'Next 7 days' },
+  { value: 'past7', label: 'Past 7 days' },
+] as const;
+type DatePreset = (typeof DATE_OPTIONS)[number]['value'];
+
+function nairobiDay(offsetDays: number): Date {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi' }).format(new Date());
+  const start = new Date(`${today}T00:00:00+03:00`);
+  start.setUTCDate(start.getUTCDate() + offsetDays);
+  return start;
+}
+
+/** The preset's first and last instants, for scheduledStartFrom/To (both inclusive). */
+function dateRange(preset: DatePreset): { from: string; to: string } {
+  // [first day, as an offset from today; number of days]
+  const presets: Record<DatePreset, [number, number]> = {
+    today: [0, 1],
+    tomorrow: [1, 1],
+    next7: [0, 7],
+    past7: [-6, 7],
+  };
+  const [first, days] = presets[preset];
+  const from = nairobiDay(first);
+  const to = new Date(nairobiDay(first + days).getTime() - 1);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
 export function VisitsPage() {
   const { visitSchedules, caregivers, dependants } = useApi();
   const { identity } = useAuth();
@@ -67,25 +122,59 @@ export function VisitsPage() {
   // login screen says so), so every main page here is already gated the same way, confirmed with
   // the user rather than widened to a read-only view for other roles.
   const isSupervisor = identity?.role === 'supervisor';
-  const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([undefined]);
-  const currentCursor = cursorStack[cursorStack.length - 1];
+  // Filters and sort live in the URL and are applied by the server - see DependantsListPage.tsx.
+  const params = useListParams();
+  const status = params.oneOf('status', ['', ...STATUS_OPTIONS.map((o) => o.value)], '');
+  const caregiverId = params.get('caregiver');
+  const dependantId = params.get('dependant');
+  const date = params.oneOf('date', ['', ...DATE_OPTIONS.map((o) => o.value)], '');
+  const sort = params.oneOf('sort', SORTS, '-scheduledStart');
+  const pages = useCursorPages(`${status}|${caregiverId}|${dependantId}|${date}|${sort}`);
+  const { directionOf, toggled } = sortState<'scheduledStart'>(sort);
   const [modalState, setModalState] = useState<
     { mode: 'create' } | { mode: 'edit'; visit: VisitSchedule } | null
   >(null);
 
+  // Active ones only: the Schedule Visit form's choices.
   const caregiversQuery = useQuery({
     queryKey: ['caregivers', 'for-scheduling'],
-    queryFn: () => caregivers.listCaregivers({ active: true, limit: 100 }),
+    queryFn: () => caregivers.listCaregivers({ active: true, sort: 'name', limit: 100 }),
     enabled: isSupervisor,
   });
   const dependantsQuery = useQuery({
     queryKey: ['dependants', 'for-scheduling'],
-    queryFn: () => dependants.listDependants({ status: 'active', limit: 100 }),
+    queryFn: () => dependants.listDependants({ status: 'active', sort: 'name', limit: 100 }),
     enabled: isSupervisor,
   });
+  // Everyone, for the filters: past visits can belong to someone since deactivated.
+  // ponytail: the first 100 by name; a searchable server-side picker if either list outgrows it.
+  const allCaregiversQuery = useQuery({
+    queryKey: ['caregivers', 'for-filter'],
+    queryFn: () => caregivers.listCaregivers({ sort: 'name', limit: 100 }),
+    enabled: isSupervisor,
+  });
+  const allDependantsQuery = useQuery({
+    queryKey: ['dependants', 'for-filter'],
+    queryFn: () => dependants.listDependants({ sort: 'name', limit: 100 }),
+    enabled: isSupervisor,
+  });
+  const range = date ? dateRange(date) : undefined;
   const schedulesQuery = useQuery({
-    queryKey: ['visit-schedules', currentCursor],
-    queryFn: () => visitSchedules.listVisitSchedules({ cursor: currentCursor, limit: 20 }),
+    queryKey: [
+      'visit-schedules',
+      { status, caregiverId, dependantId, date, sort, cursor: pages.cursor },
+    ],
+    queryFn: () =>
+      visitSchedules.listVisitSchedules({
+        status: status || undefined,
+        caregiverId: caregiverId || undefined,
+        dependantId: dependantId || undefined,
+        scheduledStartFrom: range?.from,
+        scheduledStartTo: range?.to,
+        sort,
+        cursor: pages.cursor,
+        limit: 20,
+      }),
     enabled: isSupervisor,
   });
 
@@ -95,16 +184,13 @@ export function VisitsPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['visit-schedules'] }),
   });
 
-  // Display-only re-sort by start time within the fetched page - GET /visit-schedules orders by
-  // id (UUID v7, i.e. creation order) to keep cursor pagination correct, not by scheduledStart, so
-  // an "agenda" reading benefits from a client-side re-sort of just what's on screen.
-  const rows = [...(schedulesQuery.data?.items ?? [])].sort(
-    (a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime(),
-  );
-
   if (!isSupervisor) {
     return <p>Only supervisors can view or manage visits.</p>;
   }
+
+  const rows = schedulesQuery.data?.items ?? [];
+  const filterKeys = ['status', 'caregiver', 'dependant', 'date'];
+  const filtered = Boolean(status || caregiverId || dependantId || date);
 
   return (
     <div>
@@ -115,65 +201,126 @@ export function VisitsPage() {
         </Button>
       </div>
 
+      <FilterBar onClear={filtered ? () => params.clear(filterKeys) : undefined}>
+        <FilterMenu
+          label="Status"
+          icon={CheckmarkBadge01Icon}
+          value={status}
+          allLabel="All statuses"
+          options={STATUS_OPTIONS}
+          onChange={(value) => params.set('status', value)}
+        />
+        <FilterMenu
+          label="Caregiver"
+          icon={UserIcon}
+          value={caregiverId}
+          allLabel="All caregivers"
+          options={(allCaregiversQuery.data?.items ?? []).map((c) => ({
+            value: c.userId,
+            label: c.fullName,
+          }))}
+          searchPlaceholder="Search caregivers"
+          onChange={(value) => params.set('caregiver', value)}
+        />
+        <FilterMenu
+          label="Dependant"
+          icon={HandHeartIcon}
+          value={dependantId}
+          allLabel="All dependants"
+          options={(allDependantsQuery.data?.items ?? []).map((d) => ({
+            value: d.id,
+            label: d.fullName,
+          }))}
+          searchPlaceholder="Search dependants"
+          onChange={(value) => params.set('dependant', value)}
+        />
+        <FilterMenu
+          label="Date"
+          icon={Calendar03Icon}
+          value={date}
+          allLabel="Any date"
+          options={[...DATE_OPTIONS]}
+          onChange={(value) => params.set('date', value)}
+        />
+      </FilterBar>
+
       {schedulesQuery.isLoading ? <p>Loading...</p> : null}
       {schedulesQuery.isError ? <p>Failed to load visits.</p> : null}
 
       {schedulesQuery.data ? (
         <>
-          <table className="ds-table ds-table--table-cell">
-            <thead>
-              <tr>
-                <th>Caregiver</th>
-                <th>Dependant</th>
-                <th>Scheduled window</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((visit) => (
-                <tr
-                  key={visit.id}
-                  className="visits-page__row"
-                  onClick={() => void navigate(`/visits/${visit.id}`)}
-                >
-                  <td>{visit.caregiverDisplayName}</td>
-                  <td>{visit.dependantDisplayName}</td>
-                  <td>{formatWindow(visit.scheduledStart, visit.scheduledEnd)}</td>
-                  <td>
-                    <Badge tone={statusTone(visit.status)}>{statusLabel(visit.status)}</Badge>
-                  </td>
-                  <td className="visits-page__row-actions">
-                    <Button
-                      disabled={visit.status !== 'scheduled'}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setModalState({ mode: 'edit', visit });
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      disabled={visit.status !== 'scheduled' || cancelMutation.isPending}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        cancelMutation.mutate(visit.id);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 ? (
+          <TableFrame>
+            <table className="ds-table ds-table--table-cell">
+              <thead>
                 <tr>
-                  <td colSpan={5} className="visits-page__empty">
-                    No visits scheduled yet.
-                  </td>
+                  <Th icon={UserIcon}>Caregiver</Th>
+                  <Th icon={HandHeartIcon}>Dependant</Th>
+                  <SortableTh
+                    icon={Calendar03Icon}
+                    direction={directionOf('scheduledStart')}
+                    onSort={() => params.set('sort', toggled('scheduledStart'))}
+                  >
+                    Scheduled window
+                  </SortableTh>
+                  <Th icon={CheckmarkBadge01Icon}>Status</Th>
+                  <Th>
+                    <span className="visits-page__sr-only">Actions</span>
+                  </Th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((visit) => (
+                  <tr
+                    key={visit.id}
+                    className="ds-table__row--link"
+                    onClick={() => void navigate(`/visits/${visit.id}`)}
+                  >
+                    <td>
+                      <Link
+                        to={`/visits/${visit.id}`}
+                        className="ds-table__link"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {visit.caregiverDisplayName}
+                      </Link>
+                    </td>
+                    <td>{visit.dependantDisplayName}</td>
+                    <td>{formatWindow(visit.scheduledStart, visit.scheduledEnd)}</td>
+                    <td>
+                      <Badge tone={statusTone(visit.status)}>{statusLabel(visit.status)}</Badge>
+                    </td>
+                    <td className="visits-page__row-actions">
+                      <Button
+                        disabled={visit.status !== 'scheduled'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setModalState({ mode: 'edit', visit });
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        disabled={visit.status !== 'scheduled' || cancelMutation.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cancelMutation.mutate(visit.id);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="ds-table__empty">
+                      {filtered ? 'No visits match these filters.' : 'No visits scheduled yet.'}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </TableFrame>
 
           {cancelMutation.error ? (
             <div className="visits-page__error">
@@ -184,17 +331,16 @@ export function VisitsPage() {
           ) : null}
 
           <div className="visits-page__pagination">
-            <Button
-              disabled={cursorStack.length <= 1}
-              onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
-            >
+            <Button disabled={!pages.canGoBack} onClick={pages.back}>
               Previous
             </Button>
             <Button
               disabled={!schedulesQuery.data.nextCursor}
-              onClick={() =>
-                setCursorStack((stack) => [...stack, schedulesQuery.data?.nextCursor ?? undefined])
-              }
+              onClick={() => {
+                if (schedulesQuery.data.nextCursor) {
+                  pages.next(schedulesQuery.data.nextCursor);
+                }
+              }}
             >
               Next
             </Button>
