@@ -145,10 +145,7 @@ function DayTooltip({ day }: { day: TrendDay }) {
             <span key={s.key} className="trend__tooltip-row">
               <span className="trend__swatch" style={{ background: s.color }} />
               <span className="trend__tooltip-label">{s.label}</span>
-              <span className="trend__tooltip-value">
-                {day[s.key]}{' '}
-                <span className="trend__tooltip-share">{percent(day[s.key], total)}%</span>
-              </span>
+              <span className="trend__tooltip-value">{day[s.key]}</span>
             </span>
           ) : null,
         )

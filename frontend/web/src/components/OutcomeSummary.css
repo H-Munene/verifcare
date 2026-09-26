@@ -84,15 +84,27 @@
   padding-left: 12px;
 }
 
+/* As in the inspiration's figures row: a grey label, the value bold beneath it, and here its
+   share beneath that, smaller and grey. */
 .outcome-summary__stats dt {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-ink-subtle);
 }
 
 .outcome-summary__stats dd {
-  margin: 2px 0 0;
-  font-size: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  font-size: 18px;
   font-weight: 600;
+  line-height: 1.2;
   color: var(--color-ink-primary);
   font-variant-numeric: tabular-nums;
+}
+
+.outcome-summary__share {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-ink-subtle);
 }

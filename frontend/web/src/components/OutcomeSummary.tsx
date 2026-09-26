@@ -29,6 +29,9 @@ export function OutcomeSummary({ overview }: { overview: DashboardOverview }) {
   const allVisits = Object.values(totals).reduce((a, b) => a + b, 0);
   const perDay = allVisits / trend.length;
   const filled = rate === null ? 0 : Math.round((rate / 100) * TICKS);
+  const finished = totals.completed + totals.missed;
+  const shareOfFinished = (n: number) =>
+    finished === 0 ? '-' : `${Math.round((n / finished) * 100)}%`;
   const range = `${dayLabel(trend[0]!.date, { day: 'numeric', month: 'short' })} to ${dayLabel(
     trend.at(-1)!.date,
     { day: 'numeric', month: 'short' },
@@ -84,18 +87,30 @@ export function OutcomeSummary({ overview }: { overview: DashboardOverview }) {
             : `Of the visits that finished between ${range}, the share that were completed rather than missed.`}
         </p>
 
+        {/* Each figure with its share beneath it (user request, 2026-09-26). Completed and
+            missed are shares of the finished visits, so they add up to 100% and completed matches
+            the rate above; a day's average has no share, so it shows the 14-day total. */}
         <dl className="outcome-summary__stats">
           <div>
             <dt>Completed</dt>
-            <dd>{totals.completed}</dd>
+            <dd>
+              {totals.completed}
+              <span className="outcome-summary__share">{shareOfFinished(totals.completed)}</span>
+            </dd>
           </div>
           <div>
             <dt>Missed</dt>
-            <dd>{totals.missed}</dd>
+            <dd>
+              {totals.missed}
+              <span className="outcome-summary__share">{shareOfFinished(totals.missed)}</span>
+            </dd>
           </div>
           <div>
             <dt>Visits a day</dt>
-            <dd>{perDay.toFixed(perDay < 10 ? 1 : 0)}</dd>
+            <dd>
+              {perDay.toFixed(perDay < 10 ? 1 : 0)}
+              <span className="outcome-summary__share">{allVisits} in total</span>
+            </dd>
           </div>
         </dl>
       </div>

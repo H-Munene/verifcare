@@ -114,7 +114,11 @@
   pointer-events: none;
 }
 
+/* The date, with a rule under it across the whole pop-up (user request). */
 .trend__tooltip-date {
+  margin: 0 -10px 2px;
+  padding: 0 10px 6px;
+  border-bottom: 1px solid var(--color-border-structural);
   font-size: 12px;
   font-weight: 500;
   color: var(--color-ink-primary);
@@ -142,10 +146,6 @@
 .trend__tooltip-value {
   color: var(--color-ink-primary);
   font-variant-numeric: tabular-nums;
-}
-
-.trend__tooltip-share {
-  color: var(--color-ink-muted);
 }
 
 .trend__table {
