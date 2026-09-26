@@ -36,8 +36,6 @@ export interface MissedVisitAlert {
 }
 
 export interface DashboardOverview {
-  // SAMPLE DATA (remove with api/dashboardSample.ts): true when the page shows generated data.
-  sample?: boolean;
   date: string;
   timeZone: string;
   generatedAt: string;
@@ -52,24 +50,11 @@ export interface DashboardOverview {
   };
 }
 
-// SAMPLE DATA (remove with api/dashboardSample.ts): VITE_DASHBOARD_SAMPLE_DATA=true in the local
-// .env swaps the Overview's data for a generated busy day. The sample module is its own chunk,
-// only downloaded when the flag is on.
-const useSampleData = import.meta.env.VITE_DASHBOARD_SAMPLE_DATA === 'true';
-
 export function createDashboardApi(client: ApiClient) {
   return {
-    getOverview: async (date: string) => {
-      if (useSampleData) {
-        return (await import('./dashboardSample')).sampleOverview(date);
-      }
-      return client.get<DashboardOverview>(`/dashboard/overview?date=${encodeURIComponent(date)}`);
-    },
-    acknowledgeAlert: async (notificationId: string) => {
-      if (useSampleData) {
-        return (await import('./dashboardSample')).acknowledgeSampleAlert(notificationId);
-      }
-      return client.post<unknown>(`/notifications/${notificationId}/acknowledge`);
-    },
+    getOverview: (date: string) =>
+      client.get<DashboardOverview>(`/dashboard/overview?date=${encodeURIComponent(date)}`),
+    acknowledgeAlert: (notificationId: string) =>
+      client.post<unknown>(`/notifications/${notificationId}/acknowledge`),
   };
 }

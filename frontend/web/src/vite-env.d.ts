@@ -14,9 +14,6 @@ interface ImportMetaEnv {
   // Which map the Overview uses: "osm" (OpenStreetMap, the default since 2026-09-26's experiment)
   // or "google".
   readonly VITE_OVERVIEW_MAP?: string;
-  // SAMPLE DATA (remove with api/dashboardSample.ts): "true" shows a generated busy day on the
-  // Overview instead of real data. Local .env only.
-  readonly VITE_DASHBOARD_SAMPLE_DATA?: string;
 }
 
 interface ImportMeta {

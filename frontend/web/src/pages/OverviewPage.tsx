@@ -183,14 +183,6 @@ export function OverviewPage() {
     <div className="overview">
       {header}
 
-      {/* SAMPLE DATA (remove with api/dashboardSample.ts) */}
-      {overview.sample ? (
-        <p className="overview__sample-note" role="note">
-          Showing sample data for a busy day, not real visits. Links to visits and dependants are
-          turned off. Set VITE_DASHBOARD_SAMPLE_DATA to false in .env to see real data.
-        </p>
-      ) : null}
-
       <div className="overview__grid">
         <div
           className="overview__tiles"
@@ -294,11 +286,7 @@ export function OverviewPage() {
                     onMouseLeave={() => setActiveHome(null)}
                     onFocus={() => setActiveHome(visit.dependant.id)}
                     onBlur={() => setActiveHome(null)}
-                    onClick={() => {
-                      if (!overview.sample) {
-                        void navigate(`/visits/${visit.id}`);
-                      }
-                    }}
+                    onClick={() => void navigate(`/visits/${visit.id}`)}
                   >
                     <span className="overview__visit-time">
                       {formatTime(visit.scheduledStart, overview.timeZone)}
@@ -368,7 +356,6 @@ export function OverviewPage() {
               timeZone={overview.timeZone}
               acknowledging={acknowledge.isPending ? acknowledge.variables : undefined}
               acknowledgeFailed={acknowledge.isError}
-              linksEnabled={!overview.sample}
               onAcknowledge={(id) => acknowledge.mutate(id)}
             />
           </div>
@@ -388,14 +375,12 @@ function AttentionList({
   timeZone,
   acknowledging,
   acknowledgeFailed,
-  linksEnabled,
   onAcknowledge,
 }: {
   attention: DashboardOverview['attention'];
   timeZone: string;
   acknowledging: string | undefined;
   acknowledgeFailed: boolean;
-  linksEnabled: boolean;
   onAcknowledge: (notificationId: string) => void;
 }) {
   const { missedVisitAlerts, flaggedPhotos, dependantsWithoutPhoto } = attention;
@@ -484,11 +469,9 @@ function AttentionList({
                           Due {due(alert.scheduledStart)}
                         </span>
                       </p>
-                      {linksEnabled ? (
-                        <div className="overview__attention-actions">
-                          <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
-                        </div>
-                      ) : null}
+                      <div className="overview__attention-actions">
+                        <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
+                      </div>
                     </div>
                     <Button
                       type="button"
@@ -552,22 +535,16 @@ function AttentionList({
                 <ul className="overview__attention-list overview__attention-rows">
                   {withoutPhoto.map((d) => (
                     <li key={d.id}>
-                      {linksEnabled ? (
-                        <Link to={`/dependants/${d.id}`} className="overview__attention-row">
-                          <span className="overview__attention-title">{d.fullName}</span>
-                          <HugeiconsIcon
-                            icon={ArrowRight01Icon}
-                            size={16}
-                            strokeWidth={1.8}
-                            className="overview__attention-chevron"
-                            aria-hidden
-                          />
-                        </Link>
-                      ) : (
-                        <span className="overview__attention-row">
-                          <span className="overview__attention-title">{d.fullName}</span>
-                        </span>
-                      )}
+                      <Link to={`/dependants/${d.id}`} className="overview__attention-row">
+                        <span className="overview__attention-title">{d.fullName}</span>
+                        <HugeiconsIcon
+                          icon={ArrowRight01Icon}
+                          size={16}
+                          strokeWidth={1.8}
+                          className="overview__attention-chevron"
+                          aria-hidden
+                        />
+                      </Link>
                     </li>
                   ))}
                   {dependantsWithoutPhoto.total > withoutPhoto.length ? (
