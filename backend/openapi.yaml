@@ -223,6 +223,12 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: sort
+          in: query
+          description: Order by `name` or `hireDate`; a leading `-` sorts descending. A missing hire date sorts earliest. Without it, the list is in id order. A cursor only works with the sort it came from.
+          schema:
+            type: string
+            enum: [name, -name, hireDate, -hireDate]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -310,6 +316,18 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/DependantStatus'
+        - name: photo
+          in: query
+          description: Only dependants whose check-in photo stands this way, as reported in each one's `checkinPhotoStatus`.
+          schema:
+            type: string
+            enum: [ready, awaiting_review, missing]
+        - name: sort
+          in: query
+          description: Order by `name` or `dob`; a leading `-` sorts descending. Without it, the list is in id order. A cursor only works with the sort it came from.
+          schema:
+            type: string
+            enum: [name, -name, dob, -dob]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -729,6 +747,12 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: sort
+          in: query
+          description: Order by `scheduledStart`; a leading `-` sorts latest first. Without it, the list is in id (creation) order. A cursor only works with the sort it came from.
+          schema:
+            type: string
+            enum: [scheduledStart, -scheduledStart]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:

@@ -42,7 +42,7 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, inArray, isNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -53,7 +53,14 @@ import type { Db } from '../db/client.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
-import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
+import {
+  decodeCursor,
+  keysetCondition,
+  keysetOrder,
+  paginate,
+  resolveSort,
+  type SortKey,
+} from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 import { findFamilyMemberLink } from './dependants.js';
 
@@ -221,7 +228,17 @@ const updateVisitScheduleRequestSchema = z.object({
   status: visitStatusSchema.optional(),
 });
 
+// Sortable columns (2026-09-26, the supervisor console's tables). Truncated to milliseconds so
+// the value round-trips exactly through the cursor (see pagination.ts's header).
+const VISIT_SORT_KEYS = {
+  scheduledStart: {
+    expr: sql`date_trunc('milliseconds', ${schema.visitSchedules.scheduledStart})`,
+    cast: 'timestamptz',
+  },
+} as const satisfies Record<string, SortKey>;
+
 const listVisitSchedulesQuerySchema = z.object({
+  sort: z.enum(['scheduledStart', '-scheduledStart']).optional(),
   status: visitStatusSchema.optional(),
   caregiverId: z.string().uuid().optional(),
   dependantId: z.string().uuid().optional(),
@@ -456,10 +473,11 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           lte(schema.visitSchedules.scheduledStart, new Date(query.scheduledStartTo)),
         );
       }
+      const sort = resolveSort(query.sort, VISIT_SORT_KEYS);
       if (query.cursor) {
         let cursor;
         try {
-          cursor = decodeCursor(query.cursor);
+          cursor = decodeCursor(query.cursor, sort?.param);
         } catch {
           sendProblem(res, {
             type: 'about:blank',
@@ -469,7 +487,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           });
           return;
         }
-        conditions.push(cursorCondition(schema.visitSchedules.id, cursor));
+        conditions.push(keysetCondition(schema.visitSchedules.id, cursor, sort));
       }
 
       let rows: (typeof schema.visitSchedules.$inferSelect)[];
@@ -478,7 +496,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           .select()
           .from(schema.visitSchedules)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(asc(schema.visitSchedules.id))
+          .orderBy(...keysetOrder(schema.visitSchedules.id, sort))
           .limit(query.limit + 1);
       } else if (caller.role === 'caregiver') {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -490,7 +508,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           .select()
           .from(schema.visitSchedules)
           .where(and(...conditions))
-          .orderBy(asc(schema.visitSchedules.id))
+          .orderBy(...keysetOrder(schema.visitSchedules.id, sort))
           .limit(query.limit + 1);
       } else {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -506,12 +524,16 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
             eq(schema.visitSchedules.dependantId, schema.dependantFamilyMembers.dependantId),
           )
           .where(and(...conditions))
-          .orderBy(asc(schema.visitSchedules.id))
+          .orderBy(...keysetOrder(schema.visitSchedules.id, sort))
           .limit(query.limit + 1);
         rows = joined.map((r) => r.visitSchedule);
       }
 
-      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({
+        id: row.id,
+        sort: sort?.param,
+        value: sort ? row.scheduledStart.toISOString() : undefined,
+      }));
       res.status(200).json({ items: await attachDisplayNames(db, items), nextCursor });
     } catch (err) {
       next(err);

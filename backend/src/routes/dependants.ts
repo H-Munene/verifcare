@@ -58,12 +58,23 @@ import { requireRole } from '../auth/middleware.js';
 import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
-import { checkinPhotoStatuses, type CheckinPhotoStatus } from '../db/checkinPhotos.js';
+import {
+  checkinPhotoStatusCondition,
+  checkinPhotoStatuses,
+  type CheckinPhotoStatus,
+} from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
-import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
+import {
+  decodeCursor,
+  keysetCondition,
+  keysetOrder,
+  paginate,
+  resolveSort,
+  type SortKey,
+} from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 
 export interface DependantsRouterDependencies {
@@ -406,8 +417,18 @@ const listCareTasksQuerySchema = z.object({
     .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 
+// Sortable columns (2026-09-26, the supervisor console's tables): "name" ascending, "-name"
+// descending; without one the list keeps its id order.
+const DEPENDANT_SORT_KEYS = {
+  name: { expr: schema.dependants.fullName, cast: 'text' },
+  dob: { expr: schema.dependants.dob, cast: 'date' },
+} as const satisfies Record<string, SortKey>;
+
 const listDependantsQuerySchema = z.object({
   status: z.enum(['active', 'deactivated']).optional(),
+  // Where the check-in photo stands, as in checkinPhotoStatus on each dependant.
+  photo: z.enum(['ready', 'awaiting_review', 'missing']).optional(),
+  sort: z.enum(['name', '-name', 'dob', '-dob']).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -742,10 +763,14 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (query.status) {
         conditions.push(eq(schema.dependants.status, query.status));
       }
+      if (query.photo) {
+        conditions.push(checkinPhotoStatusCondition(schema.dependants.id, query.photo));
+      }
+      const sort = resolveSort(query.sort, DEPENDANT_SORT_KEYS);
       if (query.cursor) {
         let cursor;
         try {
-          cursor = decodeCursor(query.cursor);
+          cursor = decodeCursor(query.cursor, sort?.param);
         } catch {
           sendProblem(res, {
             type: 'about:blank',
@@ -755,7 +780,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
-        conditions.push(cursorCondition(schema.dependants.id, cursor));
+        conditions.push(keysetCondition(schema.dependants.id, cursor, sort));
       }
 
       let rows;
@@ -764,7 +789,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           .select(dependantColumns())
           .from(schema.dependants)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(asc(schema.dependants.id))
+          .orderBy(...keysetOrder(schema.dependants.id, sort))
           .limit(query.limit + 1);
       } else {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -780,11 +805,15 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             eq(schema.dependants.id, schema.dependantFamilyMembers.dependantId),
           )
           .where(and(...conditions))
-          .orderBy(asc(schema.dependants.id))
+          .orderBy(...keysetOrder(schema.dependants.id, sort))
           .limit(query.limit + 1);
       }
 
-      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({
+        id: row.id,
+        sort: sort?.param,
+        value: sort ? (sort.param.endsWith('dob') ? row.dob : row.fullName) : undefined,
+      }));
       res.status(200).json({ items: await toDependantResponses(db, items), nextCursor });
     } catch (err) {
       next(err);
