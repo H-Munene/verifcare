@@ -187,8 +187,8 @@ export function VisitsMap({ apiKey, visits, timeZone, activeId, onActiveChange }
                 the left; the dependant's name, then a rule across the whole summary, then each
                 visit's caregiver and times on the right. */}
             <div className="visits-map__tooltip" role="status">
-              <div className="visits-map__icon-cell visits-map__head-cell" />
-              <div className="visits-map__detail-cell visits-map__head-cell visits-map__dependant">
+              <div className="visits-map__icon-cell" />
+              <div className="visits-map__detail-cell visits-map__dependant">
                 {active.dependantName}
               </div>
               {active.visits.map((visit) => (

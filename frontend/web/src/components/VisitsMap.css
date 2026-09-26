@@ -48,27 +48,24 @@
 
 /* The vertical rule: the icon column's right edge, unbroken from top to bottom because the rows
    have no gap between them. */
+/* The vertical rule: the icon column's right edge, unbroken from top to bottom because the rows
+   have no gap between them. */
 .visits-map__icon-cell {
   display: flex;
   justify-content: center;
-  padding: 10px 0 0;
+  padding: 10px 0;
   border-right: 1px solid var(--color-border-structural);
 }
 
 .visits-map__detail-cell {
   min-width: 0;
-  padding: 10px 14px 0;
+  padding: 10px 14px;
 }
 
-.visits-map__detail-cell:last-child,
-.visits-map__icon-cell:nth-last-child(2) {
-  padding-bottom: 12px;
-}
-
-/* The rule under the dependant's name runs across both columns, edge to edge. */
-.visits-map__head-cell {
-  padding-top: 10px;
-  padding-bottom: 10px;
+/* A line under every row - the dependant's name and each visit - across both columns, edge to
+   edge (user request). The last visit has none, since the summary's own border is there. */
+.visits-map__icon-cell:not(:nth-last-child(2)),
+.visits-map__detail-cell:not(:last-child) {
   border-bottom: 1px solid var(--color-border-structural);
 }
 
