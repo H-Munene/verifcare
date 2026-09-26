@@ -14,6 +14,7 @@ import { createBiometricEnrollmentsRouter } from './routes/biometricEnrollments.
 import { createCaregiversRouter } from './routes/caregivers.js';
 import { createCheckinRouter } from './routes/checkin.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
+import { createDashboardRouter } from './routes/dashboard.js';
 import { createDependantsRouter } from './routes/dependants.js';
 import { createNotificationsRouter } from './routes/notifications.js';
 import { createTermsRouter } from './routes/terms.js';
@@ -207,6 +208,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     app.use('/notifications', createNotificationsRouter({ requireAuth }));
     app.use('/terms', createTermsRouter({ requireAuth }));
     app.use('/family-link-requests', createFamilyLinkRequestsRouter({ requireAuth }));
+    app.use('/dashboard', createDashboardRouter({ requireAuth }));
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.

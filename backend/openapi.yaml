@@ -34,6 +34,8 @@ security:
   - bearerAuth: []
 
 tags:
+  - name: Dashboard
+    description: The supervisor console's Overview page.
   - name: Family Link Requests
     description: A family member asking a dependant's primary contact to link them, and the primary contact's answer.
   - name: Terms
@@ -1144,8 +1146,7 @@ paths:
                   status:
                     $ref: '#/components/schemas/TaskCompletionStatus'
                   reason:
-                    allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
-                    nullable: true
+                    oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
                   notes:
                     type: [string, 'null']
                   completedAt:
@@ -1282,6 +1283,48 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '409':
           description: Already linked to this dependant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /dashboard/overview:
+    get:
+      tags: [Dashboard]
+      summary: The Overview page's data for one day (supervisors only)
+      description: |
+        One Nairobi calendar day's visits (cancelled ones left out), each with its dependant's home
+        location and a `state` for the map: `upcoming` (not checked in, start not reached),
+        `awaiting_checkin` (not checked in, between start and end), `checked_in` (checked in, with
+        or without a checkout since), or `no_checkin` (end passed with no check-in, or marked
+        missed/investigated). Also the 14 days of visit outcomes ending on that day, and what needs
+        a supervisor's attention now. Days are Africa/Nairobi days whatever the caller's time zone.
+      operationId: getDashboardOverview
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: YYYY-MM-DD; defaults to today in Nairobi.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The overview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOverview'
+        '400':
+          description: The date isn't a real YYYY-MM-DD date.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: The caller isn't a supervisor.
           content:
             application/problem+json:
               schema:
@@ -1666,6 +1709,83 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
+    DashboardOverview:
+      type: object
+      required: [date, timeZone, generatedAt, visits, trend, attention]
+      properties:
+        date: {type: string, format: date}
+        timeZone: {type: string, example: Africa/Nairobi}
+        generatedAt: {type: string, format: date-time}
+        visits:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              state: {type: string, enum: [upcoming, awaiting_checkin, checked_in, no_checkin]}
+              status: {type: string}
+              scheduledStart: {type: string, format: date-time}
+              scheduledEnd: {type: string, format: date-time}
+              checkinAt: {type: [string, 'null'], format: date-time}
+              checkoutAt: {type: [string, 'null'], format: date-time}
+              caregiver:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  fullName: {type: string}
+                  phoneNumber: {type: string}
+              dependant:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  fullName: {type: string}
+                  lat: {type: number}
+                  lng: {type: number}
+        trend:
+          type: array
+          description: 14 days, oldest first. `open` is visits not yet completed or missed.
+          items:
+            type: object
+            properties:
+              date: {type: string, format: date}
+              completed: {type: integer}
+              missed: {type: integer}
+              cancelled: {type: integer}
+              open: {type: integer}
+        attention:
+          type: object
+          properties:
+            missedVisitAlerts:
+              type: object
+              description: Unacknowledged missed-visit alerts; `items` is the newest five.
+              properties:
+                total: {type: integer}
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: {type: string, format: uuid}
+                      sentAt: {type: [string, 'null'], format: date-time}
+                      visitScheduleId: {type: string, format: uuid}
+                      scheduledStart: {type: string, format: date-time}
+                      dependantName: {type: string}
+                      caregiverName: {type: string}
+            flaggedPhotos:
+              type: integer
+              description: Photos flagged as possible duplicates, waiting for review.
+            dependantsWithoutPhoto:
+              type: object
+              description: Active dependants with no usable photo, who can't be scheduled; `items` is the first five by name.
+              properties:
+                total: {type: integer}
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: {type: string, format: uuid}
+                      fullName: {type: string}
     FamilyLinkRequests:
       type: object
       required: [incoming, outgoing]
@@ -2320,12 +2440,10 @@ components:
         required:
           type: boolean
         status:
-          allOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }]
-          nullable: true
+          oneOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }, { type: 'null' }]
           description: 'Null: not yet addressed this visit.'
         reason:
-          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
-          nullable: true
+          oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
         notes:
           type: [string, 'null']
         completedAt:
@@ -2350,8 +2468,7 @@ components:
         status:
           $ref: '#/components/schemas/TaskCompletionStatus'
         reason:
-          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
-          nullable: true
+          oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
           description: 'Set only when status is not_completed.'
         notes:
           type: [string, 'null']
@@ -2674,8 +2791,7 @@ components:
         dependantDisplayName:
           type: string
         dependantHomeAddressText:
-          type: string
-          nullable: true
+          type: [string, 'null']
         geofenceLat:
           type: number
           format: double
