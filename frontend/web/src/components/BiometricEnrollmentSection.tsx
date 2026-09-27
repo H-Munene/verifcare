@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { BiometricEnrollment, SubjectType } from '../api/biometricEnrollments';
-import { uploadFileToPresignedUrl } from '../api/biometricEnrollments';
-import { ApiError } from '../api/client';
+import {
+  ENROLLMENT_CONTENT_TYPES,
+  ENROLLMENT_MAX_BYTES,
+  uploadFileToPresignedUrl,
+} from '../api/biometricEnrollments';
 import { useApi } from '../api/useApi';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
-import { Input } from '../design-system/Input';
+import { ImageDropzone } from '../design-system/ImageDropzone';
 import { Modal } from '../design-system/Modal';
 import './BiometricEnrollmentSection.css';
 
@@ -211,22 +214,20 @@ function UploadEnrollmentModal({
         </div>
       ) : (
         <form className="biometric-enrollment-section__modal-form" onSubmit={handleSubmit}>
-          <Input
+          <ImageDropzone
             id="enrollmentFile"
-            type="file"
-            label="Photo (JPEG or PNG)"
-            accept="image/jpeg,image/png"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            label="Photo"
+            value={file}
+            onChange={(next) => {
+              setFile(next);
+              mutation.reset();
+            }}
+            accept={ENROLLMENT_CONTENT_TYPES}
+            maxBytes={ENROLLMENT_MAX_BYTES}
+            error={mutation.error?.message}
+            busy={mutation.isPending}
+            busyLabel="Uploading and checking the face..."
           />
-          {mutation.error ? (
-            <div className="biometric-enrollment-section__modal-error">
-              {mutation.error instanceof ApiError
-                ? (mutation.error.problem.detail ?? mutation.error.problem.title)
-                : mutation.error instanceof Error
-                  ? mutation.error.message
-                  : 'Something went wrong.'}
-            </div>
-          ) : null}
           <div className="biometric-enrollment-section__modal-actions">
             <Button type="button" onClick={onClose}>
               Cancel
