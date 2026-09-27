@@ -31,7 +31,7 @@
 	     fails silently without this. Foreground-only (WhenInUse), matching the plan: check-in only
 	     happens while the app is open, no background location tracking. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Mzazi Care uses your location to confirm you're at the dependant's home before check-in.</string>
+	<string>Mzazi Care uses your location to confirm you're at the dependant's home when you check in and check out.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Mzazi Care takes a photo of you and the dependant to verify identity at check-in.</string>
 	<key>NSMicrophoneUsageDescription</key>

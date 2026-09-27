@@ -12,6 +12,7 @@ import '../api/api_client.dart';
 import '../api/checkin_api.dart';
 import '../api/directions_api.dart';
 import '../api/visit_schedules_api.dart';
+import '../location.dart';
 import 'photo_verification_screen.dart';
 
 const _primaryBlue = Color(0xFF0077E6);
@@ -122,26 +123,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
   }
 
   Future<void> _startLocationUpdates() async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    final unavailable = await locationUnavailableReason('check in');
+    if (unavailable != null) {
       if (!mounted) return;
-      setState(() {
-        _locationErrorMessage = permission == LocationPermission.deniedForever
-            ? 'Location permission permanently denied. Enable it in device settings to check in.'
-            : 'Location permission is required to check in.';
-      });
-      return;
-    }
-
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      if (!mounted) return;
-      setState(() {
-        _locationErrorMessage = 'Turn on device location services to check in.';
-      });
+      setState(() => _locationErrorMessage = unavailable);
       return;
     }
 

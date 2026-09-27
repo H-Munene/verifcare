@@ -54,6 +54,7 @@ import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
+import { haversineDistanceMeters } from '../geo.js';
 import {
   decodeCursor,
   keysetCondition,
@@ -72,6 +73,9 @@ interface VerificationEventResponse {
   checkinGpsLat: number | null;
   checkinGpsLng: number | null;
   distanceFromGeofenceMeters: number | null;
+  checkoutGpsLat: number | null;
+  checkoutGpsLng: number | null;
+  checkoutDistanceFromGeofenceMeters: number | null;
   caregiverMatchConfidence: number | null;
   dependantMatchConfidence: number | null;
   caregiverLivenessPassed: boolean | null;
@@ -88,6 +92,9 @@ function toVerificationEventResponse(
     checkinGpsLat: row.checkinGpsLat,
     checkinGpsLng: row.checkinGpsLng,
     distanceFromGeofenceMeters: row.distanceFromGeofenceMeters,
+    checkoutGpsLat: row.checkoutGpsLat,
+    checkoutGpsLng: row.checkoutGpsLng,
+    checkoutDistanceFromGeofenceMeters: row.checkoutDistanceFromGeofenceMeters,
     caregiverMatchConfidence:
       row.caregiverMatchConfidence === null ? null : Number(row.caregiverMatchConfidence),
     dependantMatchConfidence:
@@ -252,6 +259,13 @@ const listVisitSchedulesQuerySchema = z.object({
 // Express 5's params type allows string | string[], so req.params.visitScheduleId isn't a plain
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
 const visitScheduleIdParamSchema = z.string().uuid();
+
+// The caregiver's GPS fix at checkout. Named and bounded exactly like check-in's geofence request
+// (routes/checkin.ts), so the app sends the same shape for both ends of a visit.
+const checkoutRequestSchema = z.object({
+  gpsLat: z.number().min(-90).max(90),
+  gpsLng: z.number().min(-180).max(180),
+});
 
 // Scheduling guardrail (2026-09-26, user request): a visit can't be scheduled or rescheduled until
 // both the caregiver and the dependant have a photo check-in can verify against - otherwise the
@@ -850,6 +864,13 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
 
   // POST /{id}/checkout (HEZ-39): the final step of the check-in flow (architecture.md step 5) -
   // sets verification_events.checkout_at and flips visit_schedules.status to 'completed'.
+  //
+  // Checkout must happen inside the dependant's geofence radius (2026-09-27, user request), measured
+  // with the same distance function and radius check-in uses: otherwise a caregiver could check in,
+  // leave, and check out later from anywhere, and the recorded visit length would say nothing about
+  // time actually spent at the home. The fix and its distance are stored on verification_events
+  // as the record of where checkout happened. Accuracy and mock-location aren't checked here
+  // (check-in checks them); only the position was asked for.
   // Deliberately does not depend on HEZ-38 (audio upload + acoustic-model call), which is
   // separately deferred (milestone 4) - nothing here checks for an audio_records row.
   router.post('/:visitScheduleId/checkout', async (req, res, next) => {
@@ -859,6 +880,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       res,
     );
     if (!visitScheduleId) {
+      return;
+    }
+    const body = parseOrSendProblem(checkoutRequestSchema, req.body, res);
+    if (!body) {
       return;
     }
     const db = getDb(res);
@@ -908,6 +933,33 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
+      const [dependant] = await db
+        .select({
+          geofenceLat: schema.dependants.geofenceLat,
+          geofenceLng: schema.dependants.geofenceLng,
+          geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
+        })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, visit.dependantId));
+      if (!dependant) {
+        throw new Error(`visit_schedules ${visitScheduleId} references a nonexistent dependant.`);
+      }
+      const distanceMeters = haversineDistanceMeters(
+        body.gpsLat,
+        body.gpsLng,
+        dependant.geofenceLat,
+        dependant.geofenceLng,
+      );
+      if (distanceMeters > dependant.geofenceRadiusMeters) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: `You're ${Math.round(distanceMeters)} m from the dependant's home, outside its ${dependant.geofenceRadiusMeters} m check-out radius. Check out from the home.`,
+        });
+        return;
+      }
+
       // Visit task checklist (docs/visit-task-checklist-plan.md): a required, active task with no
       // visit_task_completions row for this visit blocks checkout outright, per the user's own
       // explicit choice (not just a warning) - "addressed" means any status was recorded
@@ -944,7 +996,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       const [updated] = await db.transaction(async (tx) => {
         await tx
           .update(schema.verificationEvents)
-          .set({ checkoutAt: now })
+          .set({
+            checkoutAt: now,
+            checkoutGpsLat: body.gpsLat,
+            checkoutGpsLng: body.gpsLng,
+            checkoutDistanceFromGeofenceMeters: distanceMeters,
+          })
           .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
         return tx
           .update(schema.visitSchedules)

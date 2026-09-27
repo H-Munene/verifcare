@@ -454,6 +454,12 @@ export const verificationEvents = pgTable(
     checkinGpsLat: doublePrecision(),
     checkinGpsLng: doublePrecision(),
     distanceFromGeofenceMeters: doublePrecision(),
+    // Where the caregiver was when they checked out, and how far that was from the geofence
+    // centre (migration 0015): checkout must happen inside the home's radius, like check-in, and
+    // this is the record that it did. Null for visits checked out before the rule existed.
+    checkoutGpsLat: doublePrecision(),
+    checkoutGpsLng: doublePrecision(),
+    checkoutDistanceFromGeofenceMeters: doublePrecision(),
     caregiverMatchConfidence: numeric({ precision: 5, scale: 2 }),
     dependantMatchConfidence: numeric({ precision: 5, scale: 2 }),
     caregiverLivenessPassed: boolean(),

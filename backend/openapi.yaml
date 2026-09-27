@@ -1103,7 +1103,30 @@ paths:
         `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
         dependant_care_tasks row has no matching visit_task_completions row for this visit -
         "addressed" means any status was recorded, not necessarily `completed`.
+
+        Must happen inside the dependant's geofence radius, measured from the caregiver's current
+        GPS fix with the same distance calculation as check-in; the fix and its distance are stored
+        on `verification_events` (`checkoutGpsLat`, `checkoutGpsLng`,
+        `checkoutDistanceFromGeofenceMeters`).
       operationId: checkoutVisit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gpsLat, gpsLng]
+              properties:
+                gpsLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                gpsLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
       responses:
         '200':
           description: Checked out.
@@ -1111,6 +1134,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VisitSchedule'
+        '400':
+          description: The location is missing or invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The caregiver is outside the dependant's geofence radius; `detail` gives the distance and the radius.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
           content:
@@ -2766,6 +2801,16 @@ components:
           type: [number, 'null']
           format: double
         distanceFromGeofenceMeters:
+          type: [number, 'null']
+          format: double
+        checkoutGpsLat:
+          type: [number, 'null']
+          format: double
+          description: Where the caregiver checked out. Null before checkout, and for visits checked out before checkout locations were recorded.
+        checkoutGpsLng:
+          type: [number, 'null']
+          format: double
+        checkoutDistanceFromGeofenceMeters:
           type: [number, 'null']
           format: double
         caregiverMatchConfidence:

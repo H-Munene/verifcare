@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../api/api_client.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
+import '../location.dart';
 import '../visit_notifications.dart';
 
 // visit_task_completions.reason's enum (backend/src/db/schema.ts taskSkipReasonEnum).
@@ -16,6 +18,11 @@ const _skipReasons = {
 /// Review before checkout: every unticked task needs a reason before the button enables (for
 /// optional tasks too, per the user's own spec - stricter than the server, which only gates on
 /// required ones). The audio log shows as present/absent but never blocks checkout.
+///
+/// Checkout sends the phone's current location, and the server refuses it outside the dependant's
+/// home radius; that refusal (or any other failure) stays on screen above the button rather than
+/// in a passing snackbar, since the caregiver has to act on it (walk back to the home) before
+/// trying again.
 class CheckoutScreen extends StatefulWidget {
   final VisitSchedule visit;
   final VisitSchedulesApi visitSchedulesApi;
@@ -40,6 +47,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _reasons = <String, String>{};
   final _notes = <String, TextEditingController>{};
   bool _submitting = false;
+  String? _error;
 
   List<VisitTask> get _unchecked => widget.tasks
       .where((t) => !widget.checkedTaskIds.contains(t.careTaskId))
@@ -58,7 +66,27 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _checkout() async {
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    // Location first: without it checkout can't succeed, so there's no point saving tasks before
+    // finding that out.
+    final unavailable = await locationUnavailableReason('check out');
+    if (unavailable != null) return _fail(unavailable);
+    final Position position;
+    try {
+      position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+    } catch (_) {
+      return _fail(
+        "Couldn't get your location - check that location is on and try again.",
+      );
+    }
     try {
       // Re-save every task, not just the unticked ones, so the server's record is exactly what
       // this screen showed (a tick that failed to save earlier gets another chance here).
@@ -75,20 +103,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           );
         }),
       );
-      await widget.visitSchedulesApi.checkout(widget.visit.id);
+      await widget.visitSchedulesApi.checkout(
+        widget.visit.id,
+        gpsLat: position.latitude,
+        gpsLng: position.longitude,
+      );
       await VisitNotifications.showCheckedOut(widget.visit);
       if (!mounted) return;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _submitting = false);
-      showSnack(
-        context,
+      _fail(
         e is ApiException
             ? (e.problem.detail ?? e.problem.title)
             : 'Could not reach the server - try again.',
       );
     }
+  }
+
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _submitting = false;
+      _error = message;
+    });
   }
 
   @override
@@ -135,19 +172,56 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         child: constrainedContent(
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: ElevatedButton(
-              onPressed: _canSubmit ? _checkout : null,
-              style: pillButtonStyle,
-              child: _submitting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('Check out'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_error case final error?) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: dangerTint,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          size: 20,
+                          color: dangerRed,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            error,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              height: 1.35,
+                              color: inkDefault,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                ElevatedButton(
+                  onPressed: _canSubmit ? _checkout : null,
+                  style: pillButtonStyle,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Check out'),
+                ),
+              ],
             ),
           ),
         ),
