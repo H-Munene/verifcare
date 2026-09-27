@@ -44,7 +44,9 @@ export function useEnrollPhoto(subjectType: SubjectType, subjectId: string | nul
       // The prefix covers the person's record too (e.g. ['dependant', id]), whose check-in photo
       // status the new photo may have changed, as well as every photo list for them.
       void queryClient.invalidateQueries({ queryKey: [subjectType, subjectId] });
+      // A flagged photo adds to the Reviews list and the Overview/bell's review count.
       void queryClient.invalidateQueries({ queryKey: ['flagged-enrollments'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard-overview'] });
     },
   });
 }

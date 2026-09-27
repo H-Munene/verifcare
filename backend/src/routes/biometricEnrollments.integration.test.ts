@@ -44,7 +44,12 @@ interface EnrollmentBody {
   matchedSimilarity: number | null;
 }
 interface EnrollmentPageBody {
-  items: EnrollmentBody[];
+  items: (EnrollmentBody & {
+    imageUrl: string;
+    subjectName: string | null;
+    matchedSubjectName: string | null;
+    matchedImageUrl: string | null;
+  })[];
   nextCursor: string | null;
 }
 interface UploadUrlBody {
@@ -757,6 +762,104 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentPageBody(res).items).toHaveLength(1);
         expect(enrollmentPageBody(res).items[0]?.status).toBe('flagged');
+      });
+
+      it("names both people and links the matched person's best active photo", async () => {
+        const supervisor = await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+        const uploader = await createTestCaregiver('caregiver-1-sub');
+        const matched = await createTestDependant(supervisor.id);
+        const db = getDb();
+        // The matched dependant's photos: a better and a worse active one, and a superseded one.
+        await db.insert(schema.biometricEnrollments).values(
+          [
+            ['best', 'active', 92],
+            ['worse', 'active', 60],
+            ['old', 'superseded', 99],
+          ].map(([name, status, qualityScore]) => ({
+            subjectType: 'dependant' as const,
+            dependantId: matched.id,
+            s3Key: `dependant/${matched.id}/1/${name}.jpg`,
+            imageOrder: 1,
+            status: status as string,
+            qualityScore: qualityScore as number,
+            enrolledBy: supervisor.id,
+          })),
+        );
+        const createViewUrl = vi.fn((s3Key: string) => Promise.resolve(`https://view/${s3Key}`));
+        const auth = testAuthHeader({
+          sub: 'supervisor-sub',
+          role: 'supervisor',
+          email: undefined,
+        });
+        const flaggingApp = buildTestApp(
+          fakeStorage({ createViewUrl }),
+          fakeFaceCollection({
+            checkDuplicate: vi.fn().mockResolvedValue({
+              duplicate: true,
+              matchedSubjectType: 'dependant',
+              matchedSubjectId: matched.id,
+              similarity: 97.5,
+            }),
+          }),
+        );
+        await request(flaggingApp)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId: uploader.id,
+            imageOrder: 1,
+            s3Key: `caregiver/${uploader.id}/1/flagged.jpg`,
+          });
+
+        const res = await request(flaggingApp)
+          .get('/biometric-enrollments/flagged')
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(200);
+        const [item] = enrollmentPageBody(res).items;
+        expect(item?.imageUrl).toBe(`https://view/caregiver/${uploader.id}/1/flagged.jpg`);
+        expect(item?.subjectName).toBe(uploader.fullName);
+        expect(item?.matchedSubjectName).toBe('Grandma Wanjiru');
+        expect(item?.matchedImageUrl).toBe(`https://view/dependant/${matched.id}/1/best.jpg`);
+      });
+
+      it('returns a null matched photo when the matched person has no active photo', async () => {
+        await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+        const uploader = await createTestCaregiver('caregiver-1-sub');
+        const auth = testAuthHeader({
+          sub: 'supervisor-sub',
+          role: 'supervisor',
+          email: undefined,
+        });
+        const app = buildTestApp(
+          fakeStorage(),
+          fakeFaceCollection({
+            checkDuplicate: vi.fn().mockResolvedValue({
+              duplicate: true,
+              matchedSubjectType: 'caregiver',
+              matchedSubjectId: '22222222-2222-2222-2222-222222222222',
+              similarity: 96,
+            }),
+          }),
+        );
+        await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId: uploader.id,
+            imageOrder: 1,
+            s3Key: `caregiver/${uploader.id}/1/flagged.jpg`,
+          });
+
+        const res = await request(app)
+          .get('/biometric-enrollments/flagged')
+          .set('x-test-auth', auth);
+
+        const [item] = enrollmentPageBody(res).items;
+        expect(item?.matchedImageUrl).toBeNull();
+        expect(item?.matchedSubjectName).toBeNull();
       });
 
       it('forbids a family member from listing flagged enrollments', async () => {

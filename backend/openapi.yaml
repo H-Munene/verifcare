@@ -677,7 +677,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BiometricEnrollmentPage'
+                $ref: '#/components/schemas/FlaggedBiometricEnrollmentPage'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -2732,16 +2732,38 @@ components:
           type: integer
           minimum: 1
           maximum: 3
-    BiometricEnrollmentPage:
+    FlaggedBiometricEnrollmentPage:
       type: object
       required: [items]
       properties:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/BiometricEnrollment'
+            $ref: '#/components/schemas/FlaggedBiometricEnrollment'
         nextCursor:
           type: [string, 'null']
+    FlaggedBiometricEnrollment:
+      description: |
+        A flagged enrollment with what a supervisor needs to compare the two faces before approving
+        or rejecting it: both people's names and the matched person's current photo.
+      allOf:
+        - $ref: '#/components/schemas/BiometricEnrollment'
+        - type: object
+          required: [subjectName, matchedSubjectName, matchedImageUrl]
+          properties:
+            subjectName:
+              type: [string, 'null']
+              description: Full name of the person this photo was uploaded for.
+            matchedSubjectName:
+              type: [string, 'null']
+              description: Full name of the already-enrolled person the face matched.
+            matchedImageUrl:
+              type: [string, 'null']
+              format: uri
+              description: |
+                A short-lived presigned GET URL for the matched person's active photo (the best
+                quality one, as check-in picks it), like `imageUrl`. Null when they have no active
+                photo any more, e.g. after being offboarded.
 
     VisitSchedule:
       type: object

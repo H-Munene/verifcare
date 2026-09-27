@@ -1,5 +1,6 @@
 // POST /biometric-enrollments/upload-url, POST/GET /biometric-enrollments (HEZ-31),
 // GET /biometric-enrollments/flagged, POST /biometric-enrollments/{id}/approve|reject (HEZ-85).
+// The flagged listing also names both people and links the matched person's photo (2026-09-27).
 //
 // Who enrolls whom (confirmed with the user before implementing, not assumed):
 // - supervisor: may enroll any caregiver or any dependant.
@@ -29,7 +30,7 @@
 // (indexes the face, promotes to active) or rejects (marks deleted, never indexed) it via the two
 // new endpoints below.
 
-import { and, asc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -94,6 +95,98 @@ async function toResponse(
     enrolledAt: row.enrolledAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+// A flagged row with what a supervisor needs to judge it side by side (2026-09-27): who uploaded
+// it and who it looks like, by name, plus the matched person's current photo - their active row,
+// best quality first, as check-in picks it - so approve/reject isn't decided blind. Null when the
+// matched person has no active photo any more (e.g. offboarded since). Batched: one names query
+// per subject type and one photo query for the whole page, however many rows.
+interface FlaggedEnrollmentResponse extends BiometricEnrollmentResponse {
+  subjectName: string | null;
+  matchedSubjectName: string | null;
+  matchedImageUrl: string | null;
+}
+
+async function toFlaggedResponses(
+  db: Db,
+  rows: (typeof schema.biometricEnrollments.$inferSelect)[],
+  storage: BiometricStorage,
+): Promise<FlaggedEnrollmentResponse[]> {
+  const ids = { caregiver: new Set<string>(), dependant: new Set<string>() };
+  const matchedIds = { caregiver: new Set<string>(), dependant: new Set<string>() };
+  for (const row of rows) {
+    const subjectId = row.caregiverId ?? row.dependantId;
+    if (subjectId) {
+      ids[row.subjectType].add(subjectId);
+    }
+    if (row.matchedSubjectType && row.matchedSubjectId) {
+      ids[row.matchedSubjectType].add(row.matchedSubjectId);
+      matchedIds[row.matchedSubjectType].add(row.matchedSubjectId);
+    }
+  }
+
+  const names = new Map<string, string>();
+  if (ids.caregiver.size > 0) {
+    for (const person of await db
+      .select({ id: schema.users.id, fullName: schema.users.fullName })
+      .from(schema.users)
+      .where(inArray(schema.users.id, [...ids.caregiver]))) {
+      names.set(`caregiver:${person.id}`, person.fullName);
+    }
+  }
+  if (ids.dependant.size > 0) {
+    for (const person of await db
+      .select({ id: schema.dependants.id, fullName: schema.dependants.fullName })
+      .from(schema.dependants)
+      .where(inArray(schema.dependants.id, [...ids.dependant]))) {
+      names.set(`dependant:${person.id}`, person.fullName);
+    }
+  }
+
+  const matchedPhotos = new Map<string, string>();
+  const photoConditions = [
+    matchedIds.caregiver.size > 0
+      ? inArray(schema.biometricEnrollments.caregiverId, [...matchedIds.caregiver])
+      : undefined,
+    matchedIds.dependant.size > 0
+      ? inArray(schema.biometricEnrollments.dependantId, [...matchedIds.dependant])
+      : undefined,
+  ].filter((condition) => condition !== undefined);
+  if (photoConditions.length > 0) {
+    const photos = await db
+      .select({
+        subjectType: schema.biometricEnrollments.subjectType,
+        caregiverId: schema.biometricEnrollments.caregiverId,
+        dependantId: schema.biometricEnrollments.dependantId,
+        s3Key: schema.biometricEnrollments.s3Key,
+      })
+      .from(schema.biometricEnrollments)
+      .where(and(eq(schema.biometricEnrollments.status, 'active'), or(...photoConditions)))
+      .orderBy(sql`${schema.biometricEnrollments.qualityScore} DESC NULLS LAST`);
+    for (const photo of photos) {
+      const key = `${photo.subjectType}:${photo.caregiverId ?? photo.dependantId}`;
+      if (!matchedPhotos.has(key)) {
+        matchedPhotos.set(key, photo.s3Key);
+      }
+    }
+  }
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const matchedKey =
+        row.matchedSubjectType && row.matchedSubjectId
+          ? `${row.matchedSubjectType}:${row.matchedSubjectId}`
+          : undefined;
+      const matchedS3Key = matchedKey ? matchedPhotos.get(matchedKey) : undefined;
+      return {
+        ...(await toResponse(row, storage)),
+        subjectName: names.get(`${row.subjectType}:${row.caregiverId ?? row.dependantId}`) ?? null,
+        matchedSubjectName: (matchedKey && names.get(matchedKey)) ?? null,
+        matchedImageUrl: matchedS3Key ? await storage.createViewUrl(matchedS3Key) : null,
+      };
+    }),
+  );
 }
 
 const subjectTypeSchema = z.enum(['caregiver', 'dependant']);
@@ -468,7 +561,7 @@ export function createBiometricEnrollmentsRouter(
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
       res.status(200).json({
-        items: await Promise.all(items.map((row) => toResponse(row, storage))),
+        items: await toFlaggedResponses(db, items, storage),
         nextCursor,
       });
     } catch (err) {
