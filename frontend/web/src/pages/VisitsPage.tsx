@@ -6,13 +6,12 @@ import {
 } from '@hugeicons/core-free-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import type { Caregiver } from '../api/caregivers';
 import type { Dependant } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
-import type { BadgeTone } from '../design-system/Badge';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Label } from '../design-system/Input';
@@ -25,6 +24,9 @@ import { useCursorPages } from '../hooks/useCursorPages';
 import { useListParams } from '../hooks/useListParams';
 import './VisitsPage.css';
 import { TableSkeleton } from '../design-system/Skeleton';
+import { statusLabel, statusTone } from '../components/visitStatus';
+import { SidePanel } from '../design-system/SidePanel';
+import { VisitDetails } from '../components/VisitDetails';
 
 // Unifies the former Scheduling and Visits nav entries into one page (2026-09-23, user request):
 // a "Schedule Visit" action plus a live table of every visit, the table's own status column doing
@@ -36,31 +38,6 @@ import { TableSkeleton } from '../design-system/Skeleton';
 // second fetch is still needed for the Schedule Visit modal's own two selects, which genuinely
 // need the full active caregiver/dependant lists, not just whichever names already appear in the
 // current page of visits.
-function statusTone(status: VisitStatus): BadgeTone {
-  switch (status) {
-    case 'completed':
-      return 'success';
-    case 'missed':
-    case 'investigated':
-      return 'danger';
-    default:
-      return 'neutral';
-  }
-}
-
-// "Checked In"/"Checked Out" read far more naturally in a visit table than the raw
-// in_progress/completed status names - the underlying VisitStatus values are unchanged, this is
-// display-only.
-function statusLabel(status: VisitStatus): string {
-  switch (status) {
-    case 'in_progress':
-      return 'Checked In';
-    case 'completed':
-      return 'Checked Out';
-    default:
-      return status.replace('_', ' ');
-  }
-}
 
 function formatWindow(scheduledStart: string, scheduledEnd: string): string {
   const start = new Date(scheduledStart);
@@ -117,7 +94,6 @@ function dateRange(preset: DatePreset): { from: string; to: string } {
 export function VisitsPage() {
   const { visitSchedules, caregivers, dependants } = useApi();
   const { identity } = useAuth();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   // Supervisor-only, same as the old Scheduling page - this app is the Supervisor Console (its own
   // login screen says so), so every main page here is already gated the same way, confirmed with
@@ -132,6 +108,8 @@ export function VisitsPage() {
   const sort = params.oneOf('sort', SORTS, '-scheduledStart');
   const pages = useCursorPages(`${status}|${caregiverId}|${dependantId}|${date}|${sort}`);
   const { directionOf, toggled } = sortState<'scheduledStart'>(sort);
+  // The visit shown in the side panel (2026-09-27, user request: rows open a panel, not a page).
+  const [panelVisit, setPanelVisit] = useState<VisitSchedule | null>(null);
   const [modalState, setModalState] = useState<
     { mode: 'create' } | { mode: 'edit'; visit: VisitSchedule } | null
   >(null);
@@ -274,13 +252,21 @@ export function VisitsPage() {
                   <tr
                     key={visit.id}
                     className="ds-table__row--link"
-                    onClick={() => void navigate(`/visits/${visit.id}`)}
+                    onClick={() => setPanelVisit(visit)}
                   >
                     <td>
+                      {/* A real link, so the keyboard reaches it and a new tab still opens the
+                          full page; a plain click opens the panel. */}
                       <Link
                         to={`/visits/${visit.id}`}
                         className="ds-table__link"
-                        onClick={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
+                            event.preventDefault();
+                            setPanelVisit(visit);
+                          }
+                        }}
                       >
                         {visit.caregiverDisplayName}
                       </Link>
@@ -347,6 +333,26 @@ export function VisitsPage() {
             </Button>
           </div>
         </>
+      ) : null}
+
+      {panelVisit ? (
+        <SidePanel
+          eyebrow="Visit"
+          title={
+            <>
+              {panelVisit.caregiverDisplayName} <span className="visits-page__arrow">→</span>{' '}
+              {panelVisit.dependantDisplayName}
+            </>
+          }
+          onClose={() => setPanelVisit(null)}
+          footer={
+            <Link to={`/visits/${panelVisit.id}`} className="visits-page__panel-link">
+              Open the full page
+            </Link>
+          }
+        >
+          <VisitDetails visit={panelVisit} />
+        </SidePanel>
       ) : null}
 
       {modalState ? (

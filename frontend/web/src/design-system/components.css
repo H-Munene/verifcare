@@ -991,29 +991,34 @@
 }
 
 .ds-timeline__dot {
-  width: 14px;
-  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid var(--color-border-structural);
+  border: 1.5px dashed var(--color-ink-muted);
   flex-shrink: 0;
-  margin-top: 2px;
+  margin-top: 1px;
+  color: #ffffff;
 }
 
 .ds-timeline__dot--complete {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
+  background: var(--color-state-checked-in-icon);
+  border: 0;
 }
 
 .ds-timeline__line {
-  width: 2px;
+  width: 1px;
   flex: 1;
   min-height: 28px;
+  margin: 4px 0;
   background: var(--color-border-structural);
 }
 
 .ds-timeline__line--complete {
-  background: var(--color-accent);
+  background: var(--color-border-structural);
 }
 
 .ds-timeline__content {
@@ -1021,7 +1026,7 @@
 }
 
 .ds-timeline__label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-ink-primary);
 }

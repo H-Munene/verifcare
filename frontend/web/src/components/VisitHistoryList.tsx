@@ -8,38 +8,15 @@ import { TableFrame, Th } from '../design-system/Table';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi';
-import type { VisitStatus } from '../api/visitSchedules';
-import type { BadgeTone } from '../design-system/Badge';
 import { Badge } from '../design-system/Badge';
 import './VisitHistoryList.css';
 import { TableSkeleton } from '../design-system/Skeleton';
+import { statusLabel, statusTone } from './visitStatus';
 
 // Shared by DependantDetailPage's and CaregiverDetailPage's own Visit History tab (2026-09-23,
 // user request) - GET /visit-schedules already supports filtering by exactly one of
 // caregiverId/dependantId, so this is a thin, read-only reuse of the same list endpoint
 // VisitsPage's own table uses, not a new backend capability.
-function statusTone(status: VisitStatus): BadgeTone {
-  switch (status) {
-    case 'completed':
-      return 'success';
-    case 'missed':
-    case 'investigated':
-      return 'danger';
-    default:
-      return 'neutral';
-  }
-}
-
-function statusLabel(status: VisitStatus): string {
-  switch (status) {
-    case 'in_progress':
-      return 'Checked In';
-    case 'completed':
-      return 'Checked Out';
-    default:
-      return status.replace('_', ' ');
-  }
-}
 
 function formatWindow(scheduledStart: string, scheduledEnd: string): string {
   const start = new Date(scheduledStart);

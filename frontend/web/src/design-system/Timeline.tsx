@@ -1,3 +1,5 @@
+import { Tick02Icon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import './components.css';
 
 // A vertical progress timeline for a real-world sequence of timestamped events (the visit detail
@@ -27,9 +29,14 @@ export function Timeline({ steps }: { steps: TimelineStep[] }) {
         return (
           <div className="ds-timeline__step" key={step.label}>
             <div className="ds-timeline__rail">
+              {/* Done: a green tick. Not yet: a dashed circle (after temp_images/timeline_ui.png). */}
               <div
                 className={'ds-timeline__dot' + (isComplete ? ' ds-timeline__dot--complete' : '')}
-              />
+              >
+                {isComplete ? (
+                  <HugeiconsIcon icon={Tick02Icon} size={10} strokeWidth={3} aria-hidden />
+                ) : null}
+              </div>
               {index < steps.length - 1 ? (
                 <div
                   className={
@@ -39,7 +46,10 @@ export function Timeline({ steps }: { steps: TimelineStep[] }) {
               ) : null}
             </div>
             <div className="ds-timeline__content">
-              <div className="ds-timeline__label">{step.label}</div>
+              <div className="ds-timeline__label">
+                {step.label}
+                <span className="sr-only">{isComplete ? ', done' : ', not yet'}</span>
+              </div>
               <div className="ds-timeline__timestamp">
                 {step.timestamp ? formatTimestamp(step.timestamp) : 'Not yet'}
               </div>
