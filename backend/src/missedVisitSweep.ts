@@ -1,5 +1,6 @@
 import type { ScheduledHandler } from 'aws-lambda';
 import { and, inArray, lt } from 'drizzle-orm';
+import { recordAudit } from './audit.js';
 import type { Db } from './db/client.js';
 import { getLambdaDb } from './db/lambdaDb.js';
 import * as schema from './db/schema.js';
@@ -12,31 +13,60 @@ import * as schema from './db/schema.js';
 // `handler` below is the only part that actually needs a live Lambda environment (getLambdaDb()'s
 // Secrets Manager credential resolution).
 //
-// Deliberately does not touch `notification_log`/SNS yet, even though both are already wired
-// (infra/lib/missedVisitSweep.ts's ALERTS_TOPIC_ARN, schema.ts's notification_log 'missed_visit'
-// type) - no Alerts UI exists anywhere in this app yet to consume either, and who the
-// recipientUserId(s) should be (every supervisor? a fixed on-call user?) was never asked or
-// answered. Left for a real Alerts feature to answer, not guessed here.
+// Raises one missed-visit alert per missed visit (2026-09-27, the Compliance tab's alert-response
+// report, which had nothing to measure until alerts existed). The product owner chose one shared
+// alert per visit over one per supervisor: missed-visit handling is a collective supervisor
+// responsibility (routes/notifications.ts already lets any supervisor acknowledge any alert), so
+// the alert has no single recipient (recipient_user_id NULL = every supervisor) and the report
+// measures response time from `sent_at` to whoever acknowledged it. SNS delivery
+// (infra/lib/missedVisitSweep.ts's ALERTS_TOPIC_ARN) is still not wired: the supervisor console's
+// alerts bell and Overview are the in-app channel.
+//
+// One transaction: the status change, the alerts and their audit rows commit together, so a
+// failure can't leave a missed visit with no alert. The UPDATE ... RETURNING is also what picks
+// the visits (not a SELECT first), so a visit checked out a moment before can't be swept anyway.
+// The unique index uq_notification_log_missed_visit makes the alert insert idempotent.
 export async function sweepMissedVisits(db: Db): Promise<{ missedVisitIds: string[] }> {
-  const overdue = await db
-    .select({ id: schema.visitSchedules.id })
-    .from(schema.visitSchedules)
-    .where(
-      and(
-        inArray(schema.visitSchedules.status, ['scheduled', 'in_progress']),
-        lt(schema.visitSchedules.scheduledEnd, new Date()),
-      ),
-    );
-  if (overdue.length === 0) {
-    return { missedVisitIds: [] };
-  }
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const missed = await tx
+      .update(schema.visitSchedules)
+      .set({ status: 'missed', updatedAt: now })
+      .where(
+        and(
+          inArray(schema.visitSchedules.status, ['scheduled', 'in_progress']),
+          lt(schema.visitSchedules.scheduledEnd, now),
+        ),
+      )
+      .returning({ id: schema.visitSchedules.id });
+    if (missed.length === 0) {
+      return { missedVisitIds: [] };
+    }
 
-  const missedVisitIds = overdue.map((row) => row.id);
-  await db
-    .update(schema.visitSchedules)
-    .set({ status: 'missed', updatedAt: new Date() })
-    .where(inArray(schema.visitSchedules.id, missedVisitIds));
-  return { missedVisitIds };
+    const missedVisitIds = missed.map((row) => row.id);
+    await tx
+      .insert(schema.notificationLog)
+      .values(
+        missedVisitIds.map((visitScheduleId) => ({
+          type: 'missed_visit',
+          visitScheduleId,
+          recipientUserId: null,
+          channel: 'in_app',
+          sentAt: now,
+        })),
+      )
+      .onConflictDoNothing();
+    for (const id of missedVisitIds) {
+      await recordAudit(tx, {
+        actorUserId: null,
+        action: 'visit_schedule.mark_missed',
+        entityType: 'visit_schedule',
+        entityId: id,
+        metadata: { reason: 'scheduled end passed without a checkout' },
+      });
+    }
+    return { missedVisitIds };
+  });
 }
 
 export const handler: ScheduledHandler = async (event) => {
