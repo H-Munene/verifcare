@@ -601,6 +601,13 @@ export const termsAcceptances = pgTable(
     document: text().notNull(),
     version: text().notNull(),
     acceptedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    // The consent screen's two checkboxes (migration 0014, terms v2): consent to photos being
+    // used to verify identity at visits, and to audio being recorded during visits. Kept on the
+    // acceptance as the append-only proof of what the person ticked, alongside the
+    // consent_records rows the same acceptance creates (which can later be revoked). Null on v1
+    // acceptances, which didn't ask - null means "not asked", not "refused".
+    biometricConsent: boolean(),
+    audioConsent: boolean(),
   },
   (table) => [
     check(

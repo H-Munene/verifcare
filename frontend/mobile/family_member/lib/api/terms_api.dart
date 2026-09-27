@@ -60,10 +60,21 @@ class TermsApi {
   Future<TermsDocument> current() async =>
       TermsDocument.fromJson(await _client.get('/terms/current'));
 
-  /// Records acceptance of the [version] the user was shown. A 409 means the terms changed since
-  /// they were loaded, and the user must see the new version.
-  Future<void> accept({required String sub, required String version}) async {
-    await _client.post('/terms/current/accept', {'version': version});
+  /// Records acceptance of the [version] the user was shown, with the consent screen's two
+  /// required consents (the server refuses an acceptance without both, and records them as
+  /// consent records). A 409 means the terms changed since they were loaded, and the user must
+  /// see the new version.
+  Future<void> accept({
+    required String sub,
+    required String version,
+    required bool biometricConsent,
+    required bool audioConsent,
+  }) async {
+    await _client.post('/terms/current/accept', {
+      'version': version,
+      'biometricConsent': biometricConsent,
+      'audioConsent': audioConsent,
+    });
     _acceptedBy.add(sub);
   }
 
