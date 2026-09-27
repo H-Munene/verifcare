@@ -34,9 +34,12 @@ type AttentionCategory = 'missed' | 'photos' | 'noPhoto';
 export function AttentionList({
   attention,
   timeZone,
+  appearance = 'segmented',
 }: {
   attention: DashboardOverview['attention'];
   timeZone: string;
+  /** Segmented buttons on the Overview; tabs in the alerts side panel (user request). */
+  appearance?: 'segmented' | 'tabs';
 }) {
   const { dashboard } = useApi();
   const queryClient = useQueryClient();
@@ -97,6 +100,7 @@ export function AttentionList({
         onChange={(id) => setChosen(id as AttentionCategory)}
         label="What needs your attention"
         idPrefix="attention"
+        appearance={appearance}
       />
       {/* Scrolls within the space under the segments, without growing the panel: the Visit
           outcomes panel beside it sets the row's height, so the bottom stays level. */}

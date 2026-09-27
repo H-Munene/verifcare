@@ -50,7 +50,7 @@ export function AlertsBell() {
       {open ? (
         <SidePanel title="Needs your attention" eyebrow="Alerts" onClose={() => setOpen(false)}>
           {attention && query.data ? (
-            <AttentionList attention={attention} timeZone={query.data.timeZone} />
+            <AttentionList attention={attention} timeZone={query.data.timeZone} appearance="tabs" />
           ) : query.isError ? (
             <p className="alerts-bell__message">Alerts couldn't be loaded. Try again shortly.</p>
           ) : (

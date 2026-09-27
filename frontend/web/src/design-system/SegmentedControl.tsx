@@ -25,6 +25,11 @@ export interface SegmentedControlProps {
   label: string;
   /** Prefix for the ids of the panels each segment controls: `${idPrefix}-${segment.id}`. */
   idPrefix: string;
+  /**
+   * Joined buttons on a track (default), or underlined tabs - the alerts side panel's look
+   * (2026-09-27, user request). Same keyboard behaviour and semantics either way.
+   */
+  appearance?: 'segmented' | 'tabs';
 }
 
 export function SegmentedControl({
@@ -33,6 +38,7 @@ export function SegmentedControl({
   onChange,
   label,
   idPrefix,
+  appearance = 'segmented',
 }: SegmentedControlProps) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -56,7 +62,12 @@ export function SegmentedControl({
   }
 
   return (
-    <div className="ds-segmented" role="tablist" aria-label={label} onKeyDown={onKeyDown}>
+    <div
+      className={appearance === 'tabs' ? 'ds-segmented ds-segmented--tabs' : 'ds-segmented'}
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+    >
       {segments.map((segment, index) => {
         const isSelected = segment.id === selected;
         return (

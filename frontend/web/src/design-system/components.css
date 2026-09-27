@@ -814,6 +814,32 @@
   color: var(--color-accent-tint-text);
 }
 
+/* The tabs appearance: labels in a row over a hairline, the selected one underlined in the
+   accent colour, as in the side-panel inspiration. */
+.ds-segmented--tabs {
+  gap: 20px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-structural);
+  border-radius: 0;
+  background: none;
+}
+
+.ds-segmented--tabs .ds-segmented__segment {
+  flex: 0 0 auto;
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.ds-segmented--tabs .ds-segmented__segment--selected {
+  border-bottom-color: var(--color-accent);
+  background: none;
+  box-shadow: none;
+}
+
 /* On a phone the segments wrap rather than overflow the panel. */
 @media (max-width: 640px) {
   .ds-segmented {
@@ -876,7 +902,7 @@
   display: flex;
   justify-content: flex-end;
   background: rgb(41 41 41 / 28%);
-  animation: ds-fade-in 160ms ease-out;
+  animation: ds-fade-in 200ms ease-out;
 }
 
 .ds-side-panel {
@@ -887,7 +913,16 @@
   background: var(--color-page-background);
   border-left: 1px solid var(--color-border-structural);
   box-shadow: -12px 0 32px rgb(41 41 41 / 14%);
-  animation: ds-slide-in 200ms ease-out;
+  animation: ds-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Closing: the panel slides back out and the page undims, then the panel unmounts. */
+.ds-side-panel-overlay--closing {
+  animation: ds-fade-out 200ms ease-in forwards;
+}
+
+.ds-side-panel-overlay--closing .ds-side-panel {
+  animation: ds-slide-out 200ms ease-in forwards;
 }
 
 .ds-side-panel__head {
@@ -953,7 +988,18 @@
 
 @keyframes ds-slide-in {
   from {
-    transform: translateX(24px);
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ds-slide-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ds-fade-out {
+  to {
     opacity: 0;
   }
 }
