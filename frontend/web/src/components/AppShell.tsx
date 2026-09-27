@@ -31,7 +31,7 @@ const NAV_SECTIONS = [
   { label: 'Caregivers', path: '/caregivers', icon: UserGroupIcon },
   { label: 'Dependants', path: '/dependants', icon: HandHeartIcon },
   { label: 'Reviews', path: '/reviews', icon: UserSearch01Icon },
-  { label: 'Compliance', path: undefined, icon: SecurityCheckIcon },
+  { label: 'Compliance', path: '/compliance', icon: SecurityCheckIcon },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -52,7 +52,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     segments.length === 1
       ? NAV_SECTIONS.find((section) => section.path === `/${segments[0]}`)?.label
       : undefined;
-  const supervisorOnlySections = new Set(['Overview', 'Visits', 'Caregivers', 'Reviews']);
+  const supervisorOnlySections = new Set([
+    'Overview',
+    'Visits',
+    'Caregivers',
+    'Reviews',
+    'Compliance',
+  ]);
   const navSections = NAV_SECTIONS.map((section) =>
     supervisorOnlySections.has(section.label) && !isSupervisor
       ? { ...section, path: undefined }

@@ -4,7 +4,9 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { RESOLUTION_OUTCOME_LABELS } from '../api/compliance';
 import { useApi } from '../api/useApi';
+import { useAuth } from '../auth/AuthContext';
 import type {
   VerificationAttempt,
   VerificationAttemptType,
@@ -14,6 +16,7 @@ import { Badge } from '../design-system/Badge';
 import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 import { Timeline, type TimelineStep } from '../design-system/Timeline';
 import { VisitLocationMap, type HomeState } from './VisitLocationMap';
+import { VisitResolutionSection } from './VisitResolutionSection';
 import { statusLabel, statusTone } from './visitStatus';
 import './VisitDetails.css';
 
@@ -69,6 +72,7 @@ function attemptStep(
 
 export function VisitDetails({ visit }: { visit: VisitSchedule }) {
   const { visitSchedules, dependants } = useApi();
+  const { identity } = useAuth();
   // The time the panel opened, read once: whether a step "won't happen now" depends on it.
   const [now] = useState(() => Date.now());
   const verificationQuery = useQuery({
@@ -83,6 +87,8 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
 
   const event = verificationQuery.data?.event ?? null;
   const attempts = verificationQuery.data?.attempts ?? [];
+  const resolutions = verificationQuery.data?.resolutions ?? [];
+  const exceptionKinds = verificationQuery.data?.exceptionKinds ?? [];
   const dependant = dependantQuery.data;
   const checkin =
     event?.checkinGpsLat != null && event.checkinGpsLng != null
@@ -113,6 +119,16 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
             ? 'skipped'
             : 'pending',
   }));
+  // The latest resolution closes the story (Compliance tab, 2026-09-27).
+  const latestResolution = resolutions[0];
+  if (latestResolution) {
+    steps.push({
+      label: `Resolved: ${RESOLUTION_OUTCOME_LABELS[latestResolution.outcome]}`,
+      timestamp: latestResolution.resolvedAt,
+      state: 'done',
+      detail: `${latestResolution.resolvedByName}: ${latestResolution.note}`,
+    });
+  }
 
   const start = new Date(visit.scheduledStart);
   const end = new Date(visit.scheduledEnd);
@@ -215,6 +231,15 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
           <Timeline steps={steps} />
         )}
       </section>
+
+      {/* Supervisors resolve exceptions; the section shows once the visit is one. */}
+      {identity?.role === 'supervisor' && exceptionKinds.length > 0 ? (
+        <VisitResolutionSection
+          visitId={visit.id}
+          exceptionKinds={exceptionKinds}
+          resolutions={resolutions}
+        />
+      ) : null}
     </div>
   );
 }
