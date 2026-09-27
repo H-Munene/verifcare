@@ -5,37 +5,25 @@
 // the backend's own day, and today's view refreshes every minute because visit states move with
 // the clock.
 
-import {
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  CalendarRemove02Icon,
-  CameraOff02Icon,
-  Clock01Icon,
-  UserIcon,
-  UserSearch01Icon,
-} from '@hugeicons/core-free-icons';
+import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { DashboardOverview, OverviewVisit, VisitState } from '../api/dashboard';
 import { useApi } from '../api/useApi';
+import { AttentionList } from '../components/AttentionList';
 import { OsmVisitsMap } from '../components/OsmVisitsMap';
 import { OutcomeSummary } from '../components/OutcomeSummary';
 import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
-import { STATE_META, VISIT_STATES, formatTime } from '../components/visitStates';
+import { STATE_META, VISIT_STATES, formatTime, todayInNairobi } from '../components/visitStates';
 import { Button } from '../design-system/Button';
-import { SegmentedControl, type Segment } from '../design-system/SegmentedControl';
 import './OverviewPage.css';
 
 const TIME_ZONE = 'Africa/Nairobi';
 const USE_GOOGLE_MAP = import.meta.env.VITE_OVERVIEW_MAP === 'google';
 const REFRESH_MS = 60_000;
-
-function today(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(new Date());
-}
 
 function shiftDate(date: string, days: number): string {
   const d = new Date(`${date}T12:00:00Z`);
@@ -51,10 +39,6 @@ function longDate(date: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** The small line under each tile's count: the fact a supervisor would look for next. */
@@ -83,10 +67,9 @@ function tileDetail(state: VisitState, visits: OverviewVisit[], overview: Dashbo
 
 export function OverviewPage() {
   const { dashboard } = useApi();
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const todayDate = today();
+  const todayDate = todayInNairobi();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date') ?? '')
     ? searchParams.get('date')!
     : todayDate;
@@ -100,11 +83,6 @@ export function OverviewPage() {
     refetchInterval: isToday ? REFRESH_MS : false,
     // Keep the last day on screen while the next loads, rather than blanking the whole page.
     placeholderData: keepPreviousData,
-  });
-
-  const acknowledge = useMutation({
-    mutationFn: (notificationId: string) => dashboard.acknowledgeAlert(notificationId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard-overview'] }),
   });
 
   function showDate(next: string) {
@@ -351,213 +329,10 @@ export function OverviewPage() {
             </h2>
           </div>
           <div className="overview__panel-body overview__attention-body">
-            <AttentionList
-              attention={attention}
-              timeZone={overview.timeZone}
-              acknowledging={acknowledge.isPending ? acknowledge.variables : undefined}
-              acknowledgeFailed={acknowledge.isError}
-              onAcknowledge={(id) => acknowledge.mutate(id)}
-            />
+            <AttentionList attention={attention} timeZone={overview.timeZone} />
           </div>
         </section>
       </div>
     </div>
-  );
-}
-
-type AttentionCategory = 'missed' | 'photos' | 'noPhoto';
-
-// "Needs your attention", one category at a time behind segmented buttons (user request,
-// 2026-09-26): missed visits to acknowledge, photos flagged for review, and dependants who can't
-// be scheduled without a photo. It opens on the first category with anything in it.
-function AttentionList({
-  attention,
-  timeZone,
-  acknowledging,
-  acknowledgeFailed,
-  onAcknowledge,
-}: {
-  attention: DashboardOverview['attention'];
-  timeZone: string;
-  acknowledging: string | undefined;
-  acknowledgeFailed: boolean;
-  onAcknowledge: (notificationId: string) => void;
-}) {
-  const { missedVisitAlerts, flaggedPhotos, dependantsWithoutPhoto } = attention;
-  // Every entry, in a list that scrolls within the panel (user request, 2026-09-26). The server
-  // caps each list at 100, so "N more" only appears past that.
-  const alerts = missedVisitAlerts.items;
-  const withoutPhoto = dependantsWithoutPhoto.items;
-  // Each category's icon is on its segment, not repeated on every entry (user request).
-  const segments: Segment[] = [
-    {
-      id: 'missed',
-      label: 'Missed',
-      count: missedVisitAlerts.total,
-      icon: CalendarRemove02Icon,
-      iconColor: 'var(--color-state-no-checkin-icon)',
-    },
-    {
-      id: 'photos',
-      label: 'Photos',
-      count: flaggedPhotos,
-      icon: UserSearch01Icon,
-      iconColor: 'var(--color-state-awaiting-icon)',
-    },
-    {
-      id: 'noPhoto',
-      label: 'No photo',
-      count: dependantsWithoutPhoto.total,
-      icon: CameraOff02Icon,
-      iconColor: 'var(--color-state-upcoming-icon)',
-    },
-  ];
-  const [chosen, setChosen] = useState<AttentionCategory | null>(null);
-  const category = (chosen ??
-    segments.find((s) => (s.count ?? 0) > 0)?.id ??
-    'missed') as AttentionCategory;
-  const due = (iso: string) =>
-    new Date(iso).toLocaleString(undefined, {
-      day: 'numeric',
-      month: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZone,
-    });
-
-  return (
-    <>
-      <SegmentedControl
-        segments={segments}
-        selected={category}
-        onChange={(id) => setChosen(id as AttentionCategory)}
-        label="What needs your attention"
-        idPrefix="attention"
-      />
-      {/* Scrolls within the space under the segments, without growing the panel: the Visit
-          outcomes panel beside it sets the row's height, so the bottom stays level. */}
-      <div className="overview__attention-viewport">
-        <div
-          id={`attention-${category}`}
-          role="tabpanel"
-          aria-labelledby={`attention-tab-${category}`}
-          className="overview__attention-panel"
-        >
-          {category === 'missed' ? (
-            missedVisitAlerts.total === 0 ? (
-              <p className="overview__empty">No missed visits to acknowledge.</p>
-            ) : (
-              <ul className="overview__attention-list">
-                {alerts.map((alert) => (
-                  <li key={alert.id} className="overview__attention-item">
-                    <div className="overview__attention-body">
-                      <p className="overview__attention-title">
-                        Missed visit to {alert.dependantName}
-                      </p>
-                      <p className="overview__attention-meta overview__attention-facts">
-                        <span>
-                          <HugeiconsIcon icon={UserIcon} size={13} strokeWidth={1.8} aria-hidden />
-                          {alert.caregiverName}
-                        </span>
-                        <span>
-                          <HugeiconsIcon
-                            icon={Clock01Icon}
-                            size={13}
-                            strokeWidth={1.8}
-                            aria-hidden
-                          />
-                          Due {due(alert.scheduledStart)}
-                        </span>
-                      </p>
-                      <div className="overview__attention-actions">
-                        <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      className="overview__attention-button"
-                      disabled={acknowledging === alert.id}
-                      onClick={() => onAcknowledge(alert.id)}
-                    >
-                      {acknowledging === alert.id ? 'Acknowledging...' : 'Acknowledge'}
-                    </Button>
-                  </li>
-                ))}
-                {missedVisitAlerts.total > alerts.length ? (
-                  <li className="overview__attention-more">
-                    {plural(
-                      missedVisitAlerts.total - alerts.length,
-                      'more missed visit',
-                      'more missed visits',
-                    )}{' '}
-                    to acknowledge.
-                  </li>
-                ) : null}
-                {acknowledgeFailed ? (
-                  <li className="overview__attention-error" role="alert">
-                    That alert couldn't be acknowledged. Try again.
-                  </li>
-                ) : null}
-              </ul>
-            )
-          ) : null}
-
-          {category === 'photos' ? (
-            flaggedPhotos === 0 ? (
-              <p className="overview__empty">No photos waiting for review.</p>
-            ) : (
-              <div className="overview__attention-item">
-                <div className="overview__attention-body">
-                  <p className="overview__attention-title">
-                    {plural(flaggedPhotos, 'photo looks', 'photos look')} like someone already
-                    registered
-                  </p>
-                  <p className="overview__attention-meta">
-                    Check-in can't use {flaggedPhotos === 1 ? 'it' : 'them'} until you review{' '}
-                    {flaggedPhotos === 1 ? 'it' : 'them'}.
-                  </p>
-                  <div className="overview__attention-actions">
-                    <Link to="/reviews">Review photos</Link>
-                  </div>
-                </div>
-              </div>
-            )
-          ) : null}
-
-          {category === 'noPhoto' ? (
-            dependantsWithoutPhoto.total === 0 ? (
-              <p className="overview__empty">Every active dependant has a photo.</p>
-            ) : (
-              <>
-                <p className="overview__attention-meta overview__attention-intro">
-                  Visits can't be scheduled for these dependants until a photo is added.
-                </p>
-                <ul className="overview__attention-list overview__attention-rows">
-                  {withoutPhoto.map((d) => (
-                    <li key={d.id}>
-                      <Link to={`/dependants/${d.id}`} className="overview__attention-row">
-                        <span className="overview__attention-title">{d.fullName}</span>
-                        <HugeiconsIcon
-                          icon={ArrowRight01Icon}
-                          size={16}
-                          strokeWidth={1.8}
-                          className="overview__attention-chevron"
-                          aria-hidden
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                  {dependantsWithoutPhoto.total > withoutPhoto.length ? (
-                    <li className="overview__attention-more">
-                      And {dependantsWithoutPhoto.total - withoutPhoto.length} more.
-                    </li>
-                  ) : null}
-                </ul>
-              </>
-            )
-          ) : null}
-        </div>
-      </div>
-    </>
   );
 }

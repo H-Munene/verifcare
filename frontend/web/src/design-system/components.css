@@ -825,6 +825,111 @@
   }
 }
 
+/* ---------- Side panel ----------
+   Slides in from the right over a dimmed page (temp_images/sidepanel.png). */
+
+.ds-side-panel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(41 41 41 / 28%);
+  animation: ds-fade-in 160ms ease-out;
+}
+
+.ds-side-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100vw);
+  height: 100%;
+  background: var(--color-page-background);
+  border-left: 1px solid var(--color-border-structural);
+  box-shadow: -12px 0 32px rgb(41 41 41 / 14%);
+  animation: ds-slide-in 200ms ease-out;
+}
+
+.ds-side-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 20px 16px 24px;
+  border-bottom: 1px solid var(--color-border-structural);
+}
+
+.ds-side-panel__eyebrow {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.ds-side-panel__title {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.ds-side-panel__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-default);
+  background: none;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+}
+
+.ds-side-panel__close:hover {
+  background: var(--color-border-divider);
+  color: var(--color-ink-primary);
+}
+
+.ds-side-panel__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* A column, so content that fills the height (a scrolling list) can do so. */
+.ds-side-panel__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.ds-side-panel__footer {
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-border-structural);
+}
+
+@keyframes ds-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@keyframes ds-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-side-panel-overlay,
+  .ds-side-panel {
+    animation: none;
+  }
+}
+
 /* ---------- Timeline ---------- */
 
 .ds-timeline {

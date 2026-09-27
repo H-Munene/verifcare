@@ -10,6 +10,7 @@ import {
   UserSearch01Icon,
 } from '@hugeicons/core-free-icons';
 import { NavItem } from '../design-system/NavItem';
+import { AlertsBell } from './AlertsBell';
 import { Breadcrumbs } from './Breadcrumbs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ProfileMenu } from './ProfileMenu';
@@ -85,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="app-shell__topbar-left">
             <Breadcrumbs />
           </div>
-          <div className="app-shell__topbar-right" />
+          <div className="app-shell__topbar-right">{isSupervisor ? <AlertsBell /> : null}</div>
         </header>
         <main className="app-shell__content">
           {/* A page that fails to render shows a message here instead of blanking the app; keyed

@@ -46,3 +46,11 @@ export function formatTime(iso: string, timeZone: string): string {
     timeZone,
   });
 }
+
+/**
+ * Today's date in Nairobi, YYYY-MM-DD - the backend's "day". Shared so the Overview and the
+ * alerts bell ask for the same day and share one cached overview.
+ */
+export function todayInNairobi(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi' }).format(new Date());
+}
