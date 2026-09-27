@@ -22,3 +22,7 @@ out.json
 CLAUDE.md
 /.claude
 .agents
+
+# The Claude Code skills installer's lockfile for .claude/skills: tooling state, not needed to
+# build or run anything in this repo.
+skills-lock.json
