@@ -1,0 +1,140 @@
+/* The Overview's tile look (pages/OverviewPage.css .overview__tiles): tiles share 1px borders -
+   the grid gap shows the border colour through - rather than floating as separate cards. */
+
+.visit-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 24px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-structural);
+  border-radius: 12px;
+  background: var(--color-border-structural);
+}
+
+/* SkeletonRegion wraps its placeholders in one extra div; let the tiles sit in the grid. */
+.visit-stats > div[aria-hidden] {
+  display: contents;
+}
+
+.visit-stats__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 20px 18px;
+  background: var(--color-page-background);
+}
+
+.visit-stats__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-default);
+}
+
+.visit-stats__dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-state-cancelled);
+}
+
+.visit-stats__dot--missed {
+  background: var(--color-state-no-checkin);
+}
+
+.visit-stats__figure {
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -1px;
+  color: var(--color-ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A date instead of a count: smaller than the numbers so it fits, the same baseline rhythm. */
+.visit-stats__when {
+  display: flex;
+  align-items: flex-end;
+  min-height: 35px;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--color-ink-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+a.visit-stats__when:hover {
+  color: var(--color-accent);
+}
+
+a.visit-stats__when:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.visit-stats__when--none {
+  color: var(--color-ink-muted);
+}
+
+.visit-stats__detail {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.visit-stats__error {
+  margin: 0 0 24px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}
+
+/* Narrower: the three counts on one row and the two dates on the next, every cell filled so no
+   grey gap shows through the grid. */
+@media (max-width: 1100px) {
+  .visit-stats {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .visit-stats__tile {
+    grid-column: span 2;
+  }
+
+  .visit-stats__tile:nth-of-type(n + 4) {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .visit-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .visit-stats__tile,
+  .visit-stats__tile:nth-of-type(n + 4) {
+    grid-column: span 1;
+  }
+
+  .visit-stats__tile:nth-of-type(5) {
+    grid-column: span 2;
+  }
+
+  /* Half-width tiles are too narrow to cut the detail line short; let it wrap instead. */
+  .visit-stats__detail {
+    white-space: normal;
+  }
+
+  .visit-stats__when {
+    font-size: 16px;
+    white-space: normal;
+  }
+}

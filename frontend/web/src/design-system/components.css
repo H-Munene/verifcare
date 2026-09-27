@@ -168,6 +168,11 @@
   font-weight: 500;
 }
 
+.ds-tag--neutral {
+  background: var(--color-border-divider);
+  color: var(--color-ink-subtle);
+}
+
 .ds-badge {
   display: inline-flex;
   align-items: center;

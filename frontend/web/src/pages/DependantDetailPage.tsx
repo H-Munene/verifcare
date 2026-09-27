@@ -2,22 +2,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client';
-import type { DependantFamilyMember } from '../api/dependants';
 import { useApi } from '../api/useApi';
-import { useAuth } from '../auth/AuthContext';
 import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
+import { FamilyMembersTable } from '../components/FamilyMembersTable';
 import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
 } from '../components/FamilyMemberResolver';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Input } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
 import { Switch } from '../design-system/Switch';
 import { Tabs } from '../design-system/Tabs';
-import { Tag } from '../design-system/Tag';
 import './DependantDetailPage.css';
 import { DetailSkeleton } from '../design-system/Skeleton';
 
@@ -47,6 +46,10 @@ export function DependantDetailPage() {
   const dependantQuery = useQuery({
     queryKey: ['dependant', dependantId],
     queryFn: () => dependants.getDependant(dependantId!),
+  });
+  const statsQuery = useQuery({
+    queryKey: ['dependant', dependantId, 'stats'],
+    queryFn: () => dependants.getDependantStats(dependantId!),
   });
   const familyMembersQuery = useQuery({
     queryKey: ['dependant', dependantId, 'family-members'],
@@ -96,6 +99,13 @@ export function DependantDetailPage() {
         </div>
       </div>
 
+      <VisitStatsTiles
+        stats={statsQuery.data}
+        isLoading={statsQuery.isLoading}
+        isError={statsQuery.isError}
+        perspective="dependant"
+      />
+
       <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 
       <div className="dependant-detail__tab-panel">
@@ -105,24 +115,22 @@ export function DependantDetailPage() {
               <h2 className="dependant-detail__section-title">Family Members</h2>
               <Button onClick={() => setAddingMember(true)}>+ Add Family Member</Button>
             </div>
-            {familyMembersQuery.data?.length ? (
-              <div className="ds-card">
-                {familyMembersQuery.data.map((member) => (
-                  <FamilyMemberRow
-                    key={member.familyMemberUserId}
-                    dependantId={dependant.id}
-                    member={member}
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="dependant-detail__empty">No family members linked yet.</p>
-            )}
+            <FamilyMembersTable
+              dependantId={dependant.id}
+              dependantName={dependant.fullName}
+              members={familyMembersQuery.data}
+              isLoading={familyMembersQuery.isLoading}
+              isError={familyMembersQuery.isError}
+            />
           </section>
         ) : null}
 
         {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection subjectType="dependant" subjectId={dependant.id} />
+          <BiometricEnrollmentSection
+            subjectType="dependant"
+            subjectId={dependant.id}
+            subjectName={dependant.fullName}
+          />
         ) : null}
 
         {activeTab === 'visits' ? <VisitHistoryList dependantId={dependant.id} /> : null}
@@ -136,110 +144,6 @@ export function DependantDetailPage() {
 
       {addingMember ? (
         <AddFamilyMemberModal dependantId={dependant.id} onClose={() => setAddingMember(false)} />
-      ) : null}
-    </div>
-  );
-}
-
-const ID_TYPE_LABELS: Record<'national_id' | 'passport', string> = {
-  national_id: 'National ID',
-  passport: 'Passport',
-};
-
-// One linked family member. The name comes with the list itself (it used to be a GET /users/{id}
-// per row). The row expands to the member's registration details (2026-09-26, user request).
-function FamilyMemberRow({
-  dependantId,
-  member,
-}: {
-  dependantId: string;
-  member: DependantFamilyMember;
-}) {
-  const { dependants } = useApi();
-  const { identity } = useAuth();
-  const queryClient = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
-  const detailsId = `family-member-details-${member.familyMemberUserId}`;
-
-  // PATCH .../family-members/{userId} is supervisor-only (HEZ-30) - matches this app's exclusive
-  // supervisor use case, but still gated on the caller's actual role rather than assumed, the same
-  // way RegisterDependantPage gates the status field.
-  const makePrimaryMutation = useMutation({
-    mutationFn: () =>
-      dependants.updateFamilyMember(dependantId, member.familyMemberUserId, {
-        isPrimaryContact: true,
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ['dependant', dependantId, 'family-members'],
-      });
-    },
-  });
-
-  const identityDocument =
-    member.idType && member.idNumber
-      ? `${ID_TYPE_LABELS[member.idType]} · ${member.idNumber}`
-      : 'Not recorded';
-  const details: [string, string][] = [
-    ['Email', member.email ?? 'Not recorded'],
-    ['Phone', member.phoneNumber ?? 'Not recorded'],
-    ['ID document', identityDocument],
-    ['Relationship', member.relationship ?? 'Not set'],
-    ['Primary contact', member.isPrimaryContact ? 'Yes' : 'No'],
-    ['Added by', member.addedByName ?? 'Unknown'],
-    [
-      'Linked on',
-      new Date(member.createdAt).toLocaleDateString('en-KE', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      }),
-    ],
-  ];
-
-  return (
-    <div className="dependant-detail__member">
-      <div className="ds-row-store">
-        <button
-          type="button"
-          className="dependant-detail__member-toggle"
-          aria-expanded={expanded}
-          aria-controls={detailsId}
-          onClick={() => setExpanded((open) => !open)}
-        >
-          <span
-            className={`dependant-detail__member-chevron${expanded ? ' dependant-detail__member-chevron--open' : ''}`}
-            aria-hidden="true"
-          >
-            ›
-          </span>
-          <span>
-            <span className="ds-row-store__title">{member.fullName}</span>
-            <span className="ds-row-store__caption">
-              {member.relationship ?? 'Relationship not set'}
-            </span>
-          </span>
-        </button>
-        {member.isPrimaryContact ? (
-          <Tag>Primary contact</Tag>
-        ) : identity?.role === 'supervisor' ? (
-          <Button
-            onClick={() => makePrimaryMutation.mutate()}
-            disabled={makePrimaryMutation.isPending}
-          >
-            Make primary
-          </Button>
-        ) : null}
-      </div>
-      {expanded ? (
-        <dl id={detailsId} className="dependant-detail__member-details">
-          {details.map(([label, value]) => (
-            <div key={label} className="dependant-detail__member-detail">
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
       ) : null}
     </div>
   );

@@ -67,6 +67,7 @@ import type { Db } from '../db/client.js';
 import { grantConsents, hasGivenTermsConsents } from '../db/consents.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
+import { visitStatsFor } from '../db/visitStats.js';
 import { sendProblem } from '../errors.js';
 import {
   decodeCursor,
@@ -866,6 +867,46 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         }
       }
       res.status(200).json(await toOneDependantResponse(db, row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Visit statistics for the dependant's page (2026-09-27) - see db/visitStats.ts. The same
+  // access rule as GET /:dependantId: a supervisor, or a family member linked to this dependant,
+  // since these are facts about that dependant's own care.
+  router.get('/:dependantId/stats', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [row] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (caller.role !== 'supervisor') {
+        const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+      res.status(200).json(await visitStatsFor(db, { dependantId }, new Date()));
     } catch (err) {
       next(err);
     }

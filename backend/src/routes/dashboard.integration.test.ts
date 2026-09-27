@@ -14,7 +14,8 @@ import {
   teardownTestDb,
   truncateAllTables,
 } from '../db/testSupport.js';
-import { createDashboardRouter, visitState } from './dashboard.js';
+import { visitState } from '../visitOutcome.js';
+import { createDashboardRouter } from './dashboard.js';
 
 const hasTestDb = Boolean(getTestDatabaseUrl());
 
