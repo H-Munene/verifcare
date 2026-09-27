@@ -15,20 +15,36 @@
   filter: saturate(0.2) brightness(1.04);
 }
 
-/* Round pins with a white ring, in the same colours as the legend under the map. */
+/* Round pins with a white ring; a glyph in the middle says how the visit went. */
 .visit-map__pin {
-  display: block;
-  width: 22px;
-  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   border: 3px solid #ffffff;
   border-radius: 50%;
   box-shadow: 0 1px 4px rgb(41 41 41 / 35%);
+  background: var(--color-state-upcoming);
 }
 
-.visit-map__pin--home {
-  background: var(--color-accent);
+.visit-map__pin--missed {
+  background: var(--color-state-no-checkin);
 }
 
-.visit-map__pin--checkin {
+.visit-map__pin--completed {
   background: var(--color-state-checked-in);
+}
+
+.visit-map__pin--ongoing {
+  background: var(--color-state-awaiting);
+}
+
+/* The caregiver's check-in point: smaller, plain blue. */
+.visit-map__pin--checkin {
+  width: 18px;
+  height: 18px;
+  margin: 4px;
+  border-width: 2px;
+  background: var(--color-accent);
 }

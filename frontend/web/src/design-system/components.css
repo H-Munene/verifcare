@@ -1036,34 +1036,17 @@
   flex-shrink: 0;
 }
 
-.ds-timeline__dot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 1.5px dashed var(--color-ink-muted);
+.ds-timeline__mark {
   flex-shrink: 0;
-  margin-top: 1px;
-  color: #ffffff;
-}
-
-.ds-timeline__dot--complete {
-  background: var(--color-state-checked-in-icon);
-  border: 0;
+  margin-top: 2px;
+  color: var(--color-ink-muted);
 }
 
 .ds-timeline__line {
   width: 1px;
   flex: 1;
   min-height: 28px;
-  margin: 4px 0;
-  background: var(--color-border-structural);
-}
-
-.ds-timeline__line--complete {
+  margin: 6px 0 4px;
   background: var(--color-border-structural);
 }
 

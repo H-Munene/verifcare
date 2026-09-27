@@ -20,7 +20,16 @@
 .visit-details__facts dd {
   margin: 4px 0 0;
   font-size: 14px;
+  font-weight: 600;
   color: var(--color-ink-primary);
+}
+
+.visit-details__wide {
+  grid-column: 1 / -1;
+}
+
+.visit-details__address {
+  white-space: pre-line;
 }
 
 .visit-details__section {
@@ -33,38 +42,6 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--color-ink-primary);
-}
-
-.visit-details__legend {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: 13px;
-  color: var(--color-ink-default);
-}
-
-.visit-details__legend li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.visit-details__pin {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  border-radius: 50%;
-}
-
-.visit-details__pin--home {
-  background: var(--color-accent);
-}
-
-.visit-details__pin--checkin {
-  background: var(--color-state-checked-in);
 }
 
 .visit-details__timeline-skeleton {
