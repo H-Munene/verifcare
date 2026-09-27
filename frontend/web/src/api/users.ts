@@ -38,6 +38,8 @@ function toQueryString(params: SearchUsersParams): string {
 
 export function createUsersApi(client: ApiClient) {
   return {
+    /** The signed-in person's own record (GET /users/me). */
+    getMe: () => client.get<User>('/users/me'),
     getUser: (userId: string) => client.get<User>(`/users/${userId}`),
     // Exact-match search (email XOR phoneNumber) - both columns are UNIQUE in the DB, so this
     // returns at most one result. Added 2026-09-14 so a supervisor can look up an existing user

@@ -1,4 +1,5 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, not, sql, type SQL } from 'drizzle-orm';
+import type { PgColumn } from 'drizzle-orm/pg-core';
 import type { Db } from './client.js';
 import * as schema from './schema.js';
 
@@ -48,4 +49,25 @@ export async function checkinPhotoStatuses(
     }
   }
   return statuses;
+}
+
+/**
+ * The same three statuses as a WHERE condition on [dependantId], for filtering a dependant list
+ * by photo status (the supervisor console's filter, 2026-09-26) - the database equivalent of
+ * checkinPhotoStatuses above, so the filter and the status shown can never disagree.
+ */
+export function checkinPhotoStatusCondition(
+  dependantId: PgColumn,
+  status: CheckinPhotoStatus,
+): SQL {
+  const has = (enrollmentStatus: 'active' | 'flagged') =>
+    sql`exists (select 1 from ${schema.biometricEnrollments} where ${schema.biometricEnrollments.dependantId} = ${dependantId} and ${schema.biometricEnrollments.status} = ${enrollmentStatus})`;
+  switch (status) {
+    case 'ready':
+      return has('active');
+    case 'awaiting_review':
+      return and(not(has('active')), has('flagged'))!;
+    case 'missing':
+      return and(not(has('active')), not(has('flagged')))!;
+  }
 }

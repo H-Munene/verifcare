@@ -76,6 +76,14 @@
   margin-bottom: 0;
 }
 
+.app-shell__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
 .app-shell__topbar-right {
   display: flex;
   align-items: center;
@@ -83,32 +91,28 @@
   flex-shrink: 0;
 }
 
-.app-shell__user {
-  font-size: 13px;
-  color: var(--color-ink-default);
-}
-
-.app-shell__sign-out {
-  background: none;
-  border: none;
-  color: var(--color-accent);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-}
-
-.app-shell__sign-out:hover {
-  color: var(--color-accent-hover);
-}
-
 .app-shell__content {
   flex: 1;
   padding: 24px;
-  max-width: 1200px;
   /* The one actual scroll region for page content - the sidebar and topbar stay fixed above/
      beside it, per the user's explicit "sidebar should not scroll with the rest of main content"
-     request. */
+     request. It spans the full width so its scrollbar sits at the window's edge; the width cap
+     is on the page inside it. Capping this element instead left the scrollbar floating
+     mid-window with empty space to its right on wide screens (user report, 2026-09-26). */
   overflow-y: auto;
+  /* The containing block for anything absolutely positioned on a page that has no nearer
+     positioned ancestor - a visually hidden label, say. Without it such an element is placed
+     against the whole document, escapes this scroll area and gives the window a second
+     scrollbar (it happened twice on the Overview, 2026-09-26). */
+  position: relative;
+}
+
+/* 1200px wide including the 24px side padding, as before, and centred so the space either side
+   of the page is equal on wide screens (user request, 2026-09-26). Zero specificity (:where), so
+   a page that sets its own narrower width, like the registration forms, always keeps it. */
+:where(.app-shell__content) > * {
+  max-width: 1152px;
+  margin-inline: auto;
 }
 
 @media (max-width: 960px) {

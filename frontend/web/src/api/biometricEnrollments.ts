@@ -23,8 +23,17 @@ export interface BiometricEnrollment {
   updatedAt: string;
 }
 
-export interface BiometricEnrollmentPage {
-  items: BiometricEnrollment[];
+// GET /biometric-enrollments/flagged adds what a supervisor needs to compare the two faces
+// (backend/openapi.yaml's FlaggedBiometricEnrollment).
+export interface FlaggedBiometricEnrollment extends BiometricEnrollment {
+  subjectName: string | null;
+  matchedSubjectName: string | null;
+  /** Presigned GET URL for the matched person's active photo; null if they have none. */
+  matchedImageUrl: string | null;
+}
+
+export interface FlaggedBiometricEnrollmentPage {
+  items: FlaggedBiometricEnrollment[];
   nextCursor: string | null;
 }
 
@@ -34,11 +43,22 @@ export interface PresignedUpload {
   expiresAt: string;
 }
 
+export type EnrollmentContentType = 'image/jpeg' | 'image/png';
+
+// What the upload-url endpoint accepts (its contentType enum), and the most Rekognition reads
+// from an S3 object (15 MB, per its image limits) - checked before upload so a person hears about
+// a wrong or oversized file straight away instead of after a failed round trip.
+export const ENROLLMENT_CONTENT_TYPES: readonly EnrollmentContentType[] = [
+  'image/jpeg',
+  'image/png',
+];
+export const ENROLLMENT_MAX_BYTES = 15 * 1024 * 1024;
+
 export interface CreateUploadUrlRequest {
   subjectType: SubjectType;
   subjectId: string;
   imageOrder: number;
-  contentType: 'image/jpeg' | 'image/png';
+  contentType: EnrollmentContentType;
 }
 
 export interface CreateBiometricEnrollmentRequest {
@@ -75,7 +95,9 @@ export function createBiometricEnrollmentsApi(client: ApiClient) {
         `/biometric-enrollments${toQueryString({ subjectType, subjectId })}`,
       ),
     listFlagged: (params: ListFlaggedParams = {}) =>
-      client.get<BiometricEnrollmentPage>(`/biometric-enrollments/flagged${toQueryString(params)}`),
+      client.get<FlaggedBiometricEnrollmentPage>(
+        `/biometric-enrollments/flagged${toQueryString(params)}`,
+      ),
     approveEnrollment: (id: string) =>
       client.post<BiometricEnrollment>(`/biometric-enrollments/${id}/approve`),
     rejectEnrollment: (id: string) =>

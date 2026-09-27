@@ -18,7 +18,7 @@
 // mistaken premise that a caregiver might already have a Cognito account from self-signing-up
 // elsewhere.
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { Router, type RequestHandler } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -29,8 +29,16 @@ import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboardin
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
+import { visitStatsFor } from '../db/visitStats.js';
 import { sendProblem } from '../errors.js';
-import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
+import {
+  decodeCursor,
+  keysetCondition,
+  keysetOrder,
+  paginate,
+  resolveSort,
+  type SortKey,
+} from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 
 export interface CaregiversRouterDependencies {
@@ -96,7 +104,15 @@ const updateCaregiverRequestSchema = z.object({
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
 const caregiverIdParamSchema = z.string().uuid();
 
+// Sortable columns (2026-09-26, the supervisor console's tables). hire_date can be NULL, and a
+// keyset sort can't page over NULLs, so a missing hire date sorts as the earliest possible date.
+const CAREGIVER_SORT_KEYS = {
+  name: { expr: schema.users.fullName, cast: 'text' },
+  hireDate: { expr: sql`coalesce(${schema.caregivers.hireDate}, '-infinity'::date)`, cast: 'date' },
+} as const satisfies Record<string, SortKey>;
+
 const listCaregiversQuerySchema = z.object({
+  sort: z.enum(['name', '-name', 'hireDate', '-hireDate']).optional(),
   active: z
     .enum(['true', 'false'])
     .optional()
@@ -292,10 +308,11 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
       if (query.active !== undefined) {
         conditions.push(eq(schema.caregivers.active, query.active));
       }
+      const sort = resolveSort(query.sort, CAREGIVER_SORT_KEYS);
       if (query.cursor) {
         let cursor;
         try {
-          cursor = decodeCursor(query.cursor);
+          cursor = decodeCursor(query.cursor, sort?.param);
         } catch {
           sendProblem(res, {
             type: 'about:blank',
@@ -305,7 +322,7 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           });
           return;
         }
-        conditions.push(cursorCondition(schema.caregivers.userId, cursor));
+        conditions.push(keysetCondition(schema.caregivers.userId, cursor, sort));
       }
 
       const rows = await db
@@ -313,10 +330,18 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         .from(schema.caregivers)
         .innerJoin(schema.users, eq(schema.caregivers.userId, schema.users.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .orderBy(asc(schema.caregivers.userId))
+        .orderBy(...keysetOrder(schema.caregivers.userId, sort))
         .limit(query.limit + 1);
 
-      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.userId }));
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({
+        id: row.userId,
+        sort: sort?.param,
+        value: sort
+          ? sort.param.endsWith('hireDate')
+            ? (row.hireDate ?? '-infinity')
+            : row.fullName
+          : undefined,
+      }));
       res.status(200).json({ items: items.map(toCaregiverResponse), nextCursor });
     } catch (err) {
       next(err);
@@ -343,6 +368,32 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         return;
       }
       res.status(200).json(toCaregiverResponse(row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Visit statistics for the caregiver's page (2026-09-27) - see db/visitStats.ts. Supervisor-
+  // only like every route here (the router-level gate above).
+  router.get('/:caregiverId/stats', async (req, res, next) => {
+    const caregiverId = parseOrSendProblem(caregiverIdParamSchema, req.params.caregiverId, res);
+    if (!caregiverId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    try {
+      const [row] = await db
+        .select({ userId: schema.caregivers.userId })
+        .from(schema.caregivers)
+        .where(eq(schema.caregivers.userId, caregiverId));
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      res.status(200).json(await visitStatsFor(db, { caregiverId }, new Date()));
     } catch (err) {
       next(err);
     }

@@ -1,0 +1,112 @@
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
+import { useRef, type KeyboardEvent } from 'react';
+import './components.css';
+
+// A row of joined buttons that switches between views of one panel (2026-09-26, first used for
+// the Overview's "Needs your attention" categories), like the week/month/year switch in the
+// user's inspiration images. It is a tab list to assistive tech: one tab stop, arrow keys move
+// between segments, and each segment names the panel it controls.
+
+export interface Segment {
+  id: string;
+  label: string;
+  /** Shown after the label, e.g. how many items the segment holds. */
+  count?: number;
+  /** Shown before the label, in [iconColor] (else the text colour). */
+  icon?: IconSvgElement;
+  iconColor?: string;
+}
+
+export interface SegmentedControlProps {
+  segments: Segment[];
+  selected: string;
+  onChange: (id: string) => void;
+  /** Names the group, e.g. "Attention categories". */
+  label: string;
+  /** Prefix for the ids of the panels each segment controls: `${idPrefix}-${segment.id}`. */
+  idPrefix: string;
+  /**
+   * Joined buttons on a track (default), or underlined tabs - the alerts side panel's look
+   * (2026-09-27, user request). Same keyboard behaviour and semantics either way.
+   */
+  appearance?: 'segmented' | 'tabs';
+}
+
+export function SegmentedControl({
+  segments,
+  selected,
+  onChange,
+  label,
+  idPrefix,
+  appearance = 'segmented',
+}: SegmentedControlProps) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const current = segments.findIndex((s) => s.id === selected);
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    const target =
+      step !== undefined
+        ? (current + step + segments.length) % segments.length
+        : event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? segments.length - 1
+            : undefined;
+    if (target === undefined) {
+      return;
+    }
+    event.preventDefault();
+    onChange(segments[target]!.id);
+    refs.current[target]?.focus();
+  }
+
+  return (
+    <div
+      className={appearance === 'tabs' ? 'ds-segmented ds-segmented--tabs' : 'ds-segmented'}
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+    >
+      {segments.map((segment, index) => {
+        const isSelected = segment.id === selected;
+        return (
+          <button
+            key={segment.id}
+            ref={(el) => {
+              refs.current[index] = el;
+            }}
+            type="button"
+            role="tab"
+            id={`${idPrefix}-tab-${segment.id}`}
+            aria-selected={isSelected}
+            aria-controls={`${idPrefix}-${segment.id}`}
+            tabIndex={isSelected ? 0 : -1}
+            className={[
+              'ds-segmented__segment',
+              isSelected ? 'ds-segmented__segment--selected' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onClick={() => onChange(segment.id)}
+          >
+            {/* The tabs appearance is text only (user request for the alerts panel). */}
+            {segment.icon && appearance !== 'tabs' ? (
+              <HugeiconsIcon
+                icon={segment.icon}
+                size={16}
+                strokeWidth={1.7}
+                color={segment.iconColor ?? 'currentColor'}
+                aria-hidden
+              />
+            ) : null}
+            {segment.label}
+            {segment.count !== undefined ? (
+              <span className="ds-segmented__count">{segment.count}</span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

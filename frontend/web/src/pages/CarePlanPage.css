@@ -40,12 +40,6 @@
   gap: 8px;
 }
 
-.care-plan-page__empty {
-  text-align: center;
-  color: var(--color-ink-muted);
-  height: 48px;
-}
-
 .care-plan-page__error {
   font-size: 13px;
   color: var(--color-danger-text);

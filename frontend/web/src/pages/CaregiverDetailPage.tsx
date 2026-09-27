@@ -5,10 +5,14 @@ import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
 import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Tabs } from '../design-system/Tabs';
 import './CaregiverDetailPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
+import { Calendar03Icon, Call02Icon, IdIcon } from '@hugeicons/core-free-icons';
+import { MetaList } from '../design-system/MetaList';
 
 type DetailTab = 'enrollment' | 'visits';
 
@@ -22,6 +26,16 @@ const TABS = [
 // whole page. Visit History is new here: this page had none at all before (matches the wireframe
 // and HEZ-54's own stated scope at the time, since there was no real visit data to show), now
 // backed by the same VisitHistoryList DependantDetailPage's own identical tab uses.
+/** A calendar date (YYYY-MM-DD) as e.g. "22 Sep 2026"; noon UTC keeps the day in every zone. */
+function readableDate(date: string): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function CaregiverDetailPage() {
   const { caregiverId } = useParams<{ caregiverId: string }>();
   const { caregivers } = useApi();
@@ -32,6 +46,11 @@ export function CaregiverDetailPage() {
   const caregiverQuery = useQuery({
     queryKey: ['caregiver', caregiverId],
     queryFn: () => caregivers.getCaregiver(caregiverId!),
+  });
+
+  const statsQuery = useQuery({
+    queryKey: ['caregiver', caregiverId, 'stats'],
+    queryFn: () => caregivers.getCaregiverStats(caregiverId!),
   });
 
   // The backend runs biometric-enrollment offboarding cleanup on active:false itself - nothing
@@ -45,7 +64,7 @@ export function CaregiverDetailPage() {
   });
 
   if (caregiverQuery.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (caregiverQuery.isError || !caregiverQuery.data) {
     return <p>Failed to load this caregiver.</p>;
@@ -62,10 +81,18 @@ export function CaregiverDetailPage() {
               {caregiver.active ? 'Active' : 'Inactive'}
             </Badge>
           </div>
-          <div className="caregiver-detail__meta">
-            {caregiver.employeeNumber ?? 'No employee #'} · {caregiver.phoneNumber ?? 'No phone'} ·
-            Hired {caregiver.hireDate ?? 'unknown'}
-          </div>
+          <MetaList
+            items={[
+              { icon: IdIcon, children: caregiver.employeeNumber ?? 'No employee number' },
+              { icon: Call02Icon, children: caregiver.phoneNumber ?? 'No phone number' },
+              {
+                icon: Calendar03Icon,
+                children: caregiver.hireDate
+                  ? `Hired ${readableDate(caregiver.hireDate)}`
+                  : 'Hire date not recorded',
+              },
+            ]}
+          />
         </div>
         <Button
           variant="primary"
@@ -77,11 +104,22 @@ export function CaregiverDetailPage() {
         </Button>
       </div>
 
+      <VisitStatsTiles
+        stats={statsQuery.data}
+        isLoading={statsQuery.isLoading}
+        isError={statsQuery.isError}
+        perspective="caregiver"
+      />
+
       <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 
       <div className="caregiver-detail__tab-panel">
         {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection subjectType="caregiver" subjectId={caregiver.userId} />
+          <BiometricEnrollmentSection
+            subjectType="caregiver"
+            subjectId={caregiver.userId}
+            subjectName={caregiver.fullName}
+          />
         ) : null}
         {activeTab === 'visits' ? <VisitHistoryList caregiverId={caregiver.userId} /> : null}
       </div>

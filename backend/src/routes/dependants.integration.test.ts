@@ -253,6 +253,70 @@ describe.skipIf(!hasTestDb)(
         });
       });
 
+      it("records the primary contact's photo and audio consent for a dependant they register, once they've given it on the consent screen", async () => {
+        const db = getDb();
+        const consenting = await createTestUser('fm-yes', 'family_member', '+254700000080');
+        const onlyV1 = await createTestUser('fm-v1', 'family_member', '+254700000081');
+        // fm-yes ticked both boxes on the consent screen (terms v2); fm-v1 only accepted v1, which
+        // never asked.
+        await db.insert(schema.termsAcceptances).values([
+          {
+            userId: consenting.id,
+            document: 'family_member',
+            version: '2',
+            biometricConsent: true,
+            audioConsent: true,
+          },
+          {
+            userId: onlyV1.id,
+            document: 'family_member',
+            version: '1',
+          },
+        ]);
+
+        const registered = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('fm-yes', 'family_member'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                cognitoSub: 'fm-yes',
+                phoneNumber: '+254700000080',
+                fullName: 'Consenting',
+              },
+            }),
+          );
+        expect(registered.status).toBe(201);
+        const consents = await db
+          .select()
+          .from(schema.consentRecords)
+          .where(eq(schema.consentRecords.dependantId, dependantBody(registered).id));
+        expect(consents.map((row) => row.consentType).sort()).toEqual([
+          'audio_cognitive_monitoring',
+          'biometric_verification',
+        ]);
+        expect(consents.every((row) => row.grantedBy === consenting.id)).toBe(true);
+
+        const withoutConsent = await request(app)
+          .post('/dependants')
+          .set('x-test-auth', testAuthHeader('fm-v1', 'family_member'))
+          .send(
+            createDependantPayload({
+              primaryFamilyMember: {
+                cognitoSub: 'fm-v1',
+                phoneNumber: '+254700000081',
+                fullName: 'Only v1',
+              },
+            }),
+          );
+        expect(withoutConsent.status).toBe(201);
+        const none = await db
+          .select()
+          .from(schema.consentRecords)
+          .where(eq(schema.consentRecords.dependantId, dependantBody(withoutConsent).id));
+        expect(none).toHaveLength(0);
+      });
+
       it('accepts an optional primaryConditionSummary', async () => {
         await createTestUser('sup-cond', 'supervisor', '+254700000090');
 

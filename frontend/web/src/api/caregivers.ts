@@ -3,6 +3,7 @@
 // exactly - not re-derived from scratch. Mirrors api/dependants.ts's exact module shape.
 
 import type { ApiClient } from './client';
+import type { VisitStats } from './visitStats';
 
 export type CaregiverIdType = 'national_id' | 'passport';
 export type CaregiverGender = 'male' | 'female';
@@ -62,6 +63,7 @@ export interface UpdateCaregiverRequest {
 
 export interface ListCaregiversParams {
   active?: boolean;
+  sort?: 'name' | '-name' | 'hireDate' | '-hireDate';
   cursor?: string;
   limit?: number;
 }
@@ -83,6 +85,8 @@ export function createCaregiversApi(client: ApiClient) {
       client.get<CaregiverPage>(`/caregivers${toQueryString(params)}`),
     createCaregiver: (body: CreateCaregiverRequest) => client.post<Caregiver>('/caregivers', body),
     getCaregiver: (caregiverId: string) => client.get<Caregiver>(`/caregivers/${caregiverId}`),
+    getCaregiverStats: (caregiverId: string) =>
+      client.get<VisitStats>(`/caregivers/${caregiverId}/stats`),
     updateCaregiver: (caregiverId: string, body: UpdateCaregiverRequest) =>
       client.patch<Caregiver>(`/caregivers/${caregiverId}`, body),
   };

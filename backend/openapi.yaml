@@ -34,6 +34,8 @@ security:
   - bearerAuth: []
 
 tags:
+  - name: Dashboard
+    description: The supervisor console's Overview page.
   - name: Family Link Requests
     description: A family member asking a dependant's primary contact to link them, and the primary contact's answer.
   - name: Terms
@@ -221,6 +223,12 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: sort
+          in: query
+          description: Order by `name` or `hireDate`; a leading `-` sorts descending. A missing hire date sorts earliest. Without it, the list is in id order. A cursor only works with the sort it came from.
+          schema:
+            type: string
+            enum: [name, -name, hireDate, -hireDate]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -274,6 +282,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /caregivers/{caregiverId}/stats:
+    parameters:
+      - $ref: '#/components/parameters/CaregiverId'
+    get:
+      tags: [Caregivers]
+      summary: Visit statistics for a caregiver
+      description: |
+        What the caregiver's page shows at a glance: their visits over the last 30 days by outcome,
+        their completion rate, and their next and most recent visits, across every dependant they
+        visit. Outcomes follow the same rules as `GET /dashboard/overview`'s trend. Supervisor-only,
+        like every `/caregivers` route.
+      operationId: getCaregiverStats
+      responses:
+        '200':
+          description: The caregiver's visit statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitStats'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /dependants:
     post:
       tags: [Dependants]
@@ -282,6 +314,10 @@ paths:
         Atomically creates the `dependants` row and its first `dependant_family_members` link
         (`primaryFamilyMember`, marked `isPrimaryContact: true`), per architecture.md's
         atomic-first-family-member-at-registration requirement.
+
+        If the primary family member has given both consents on the family app's consent screen
+        (`POST /terms/current/accept`), the same transaction records `biometric_verification` and
+        `audio_cognitive_monitoring` consent for the new dependant, granted by them.
       operationId: createDependant
       requestBody:
         required: true
@@ -308,6 +344,18 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/DependantStatus'
+        - name: photo
+          in: query
+          description: Only dependants whose check-in photo stands this way, as reported in each one's `checkinPhotoStatus`.
+          schema:
+            type: string
+            enum: [ready, awaiting_review, missing]
+        - name: sort
+          in: query
+          description: Order by `name` or `dob`; a leading `-` sorts descending. Without it, the list is in id order. A cursor only works with the sort it came from.
+          schema:
+            type: string
+            enum: [name, -name, dob, -dob]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -360,6 +408,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Dependant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /dependants/{dependantId}/stats:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    get:
+      tags: [Dependants]
+      summary: Visit statistics for a dependant
+      description: |
+        What the dependant's page shows at a glance: their visits over the last 30 days by outcome,
+        the completion rate, and the next and most recent visits. Outcomes follow the same rules as
+        `GET /dashboard/overview`'s trend. The same access as `GET /dependants/{dependantId}`: a
+        supervisor, or a family member linked to this dependant (403 otherwise).
+      operationId: getDependantStats
+      responses:
+        '200':
+          description: The dependant's visit statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitStats'
         '404':
           $ref: '#/components/responses/NotFound'
         default:
@@ -540,7 +612,12 @@ paths:
     post:
       tags: [Biometric Enrollments]
       summary: Confirm an uploaded biometric image and record it
-      description: Called after the client has PUT the image to the presigned URL from `/biometric-enrollments/upload-url`.
+      description: |
+        Called after the client has PUT the image to the presigned URL from
+        `/biometric-enrollments/upload-url`. A photo that activates supersedes every other active
+        row for the subject, whatever its `imageOrder` (one photo per person); a photo flagged as a
+        likely duplicate supersedes nothing until a supervisor approves it, so the current photo
+        stays in use meanwhile.
       operationId: createBiometricEnrollment
       requestBody:
         required: true
@@ -604,7 +681,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BiometricEnrollmentPage'
+                $ref: '#/components/schemas/FlaggedBiometricEnrollmentPage'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -615,7 +692,7 @@ paths:
       description: |
         Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
         until now, since it wasn't indexed while flagged) and promotes the row to `active`,
-        superseding any existing active row for the same subject/imageOrder.
+        superseding every other active row for the subject (one photo per person).
       operationId: approveBiometricEnrollment
       parameters:
         - name: id
@@ -692,7 +769,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '422':
-          $ref: '#/components/responses/MissingCheckinPhoto'
+          $ref: '#/components/responses/Unschedulable'
         default:
           $ref: '#/components/responses/Problem'
     get:
@@ -727,6 +804,12 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: sort
+          in: query
+          description: Order by `scheduledStart`; a leading `-` sorts latest first. Without it, the list is in id (creation) order. A cursor only works with the sort it came from.
+          schema:
+            type: string
+            enum: [scheduledStart, -scheduledStart]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -783,7 +866,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '422':
-          $ref: '#/components/responses/MissingCheckinPhoto'
+          $ref: '#/components/responses/Unschedulable'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -1073,7 +1156,30 @@ paths:
         `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
         dependant_care_tasks row has no matching visit_task_completions row for this visit -
         "addressed" means any status was recorded, not necessarily `completed`.
+
+        Must happen inside the dependant's geofence radius, measured from the caregiver's current
+        GPS fix with the same distance calculation as check-in; the fix and its distance are stored
+        on `verification_events` (`checkoutGpsLat`, `checkoutGpsLng`,
+        `checkoutDistanceFromGeofenceMeters`).
       operationId: checkoutVisit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gpsLat, gpsLng]
+              properties:
+                gpsLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                gpsLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
       responses:
         '200':
           description: Checked out.
@@ -1081,6 +1187,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VisitSchedule'
+        '400':
+          description: The location is missing or invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The caregiver is outside the dependant's geofence radius; `detail` gives the distance and the radius.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
           content:
@@ -1144,8 +1262,7 @@ paths:
                   status:
                     $ref: '#/components/schemas/TaskCompletionStatus'
                   reason:
-                    allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
-                    nullable: true
+                    oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
                   notes:
                     type: [string, 'null']
                   completedAt:
@@ -1282,6 +1399,48 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '409':
           description: Already linked to this dependant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /dashboard/overview:
+    get:
+      tags: [Dashboard]
+      summary: The Overview page's data for one day (supervisors only)
+      description: |
+        One Nairobi calendar day's visits (cancelled ones left out), each with its dependant's home
+        location and a `state` for the map: `upcoming` (not checked in, start not reached),
+        `awaiting_checkin` (not checked in, between start and end), `checked_in` (checked in, with
+        or without a checkout since), or `no_checkin` (end passed with no check-in, or marked
+        missed/investigated). Also the 14 days of visit outcomes ending on that day, and what needs
+        a supervisor's attention now. Days are Africa/Nairobi days whatever the caller's time zone.
+      operationId: getDashboardOverview
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: YYYY-MM-DD; defaults to today in Nairobi.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The overview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOverview'
+        '400':
+          description: The date isn't a real YYYY-MM-DD date.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: The caller isn't a supervisor.
           content:
             application/problem+json:
               schema:
@@ -1468,8 +1627,15 @@ paths:
       tags: [Terms]
       summary: Accept the current terms
       description: |
-        Records the caller's acceptance of the version they were shown. Idempotent: accepting again
-        keeps the original acceptance time (acceptances are append-only).
+        Records the caller's acceptance of the version they were shown, with the consent screen's two
+        required consents. Idempotent: accepting again keeps the original acceptance time
+        (acceptances are append-only).
+
+        Also records the matching consent records (`biometric_verification` and
+        `audio_cognitive_monitoring`), skipping any already active: for a caregiver, for
+        themselves; for a family member, for each active dependant they are the primary contact
+        of. Dependants a consenting family member registers later get the same consent at
+        registration.
       operationId: acceptCurrentTerms
       requestBody:
         required: true
@@ -1477,11 +1643,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [version]
+              required: [version, biometricConsent, audioConsent]
               properties:
                 version:
                   type: string
                   description: The version the user was shown; must be the current one.
+                biometricConsent:
+                  type: boolean
+                  enum: [true]
+                  description: Consent to photos being used to verify identity at each visit. Must be true.
+                audioConsent:
+                  type: boolean
+                  enum: [true]
+                  description: Consent to audio being recorded during visits. Must be true.
       responses:
         '200':
           description: Accepted.
@@ -1499,6 +1673,12 @@ paths:
                   acceptedAt:
                     type: string
                     format: date-time
+        '400':
+          description: A consent was missing or not true, or the body was otherwise invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: The terms were updated since the app loaded them - the user must review the current version.
           content:
@@ -1642,12 +1822,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-    MissingCheckinPhoto:
+    Unschedulable:
       description: |
-        The caregiver or the dependant (or both) has no active photo, so check-in couldn't verify
-        them and the visit can't be scheduled, or moved to a new time, until one is added. A photo
-        still awaiting a supervisor's review doesn't count. Status-only updates (e.g. cancelling)
-        are never blocked by this.
+        The visit can't be scheduled, or moved to a new time, and `detail` says who is missing
+        what. Either the caregiver or the dependant (or both) has no active photo, so check-in
+        couldn't verify them (a photo still awaiting a supervisor's review doesn't count); or one
+        of them has no active (unrevoked) `biometric_verification` consent record, given by
+        accepting the terms in the mobile app. Status-only updates (e.g. cancelling) are never
+        blocked by this.
       content:
         application/problem+json:
           schema:
@@ -1666,6 +1848,146 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
+    VisitStats:
+      type: object
+      required: [windowDays, visits, completionRate, lastMissedVisitStart, nextVisit, lastVisit]
+      properties:
+        windowDays:
+          type: integer
+          description: How many days back `visits` covers (30), ending now.
+        visits:
+          type: object
+          description: |
+            Visits that started in the window, by outcome. `missed` includes a visit whose end
+            passed with no check-in even before the missed-visit sweep marks it; `open` is one
+            under way or checked in but not yet checked out.
+          required: [total, completed, missed, cancelled, open]
+          properties:
+            total: { type: integer }
+            completed: { type: integer }
+            missed: { type: integer }
+            cancelled: { type: integer }
+            open: { type: integer }
+        completionRate:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+          description: completed / (completed + missed); null when neither happened in the window.
+        lastMissedVisitStart:
+          type: [string, 'null']
+          format: date-time
+          description: When the most recent missed visit in the window was due to start.
+        nextVisit:
+          description: The next scheduled visit still to come.
+          oneOf:
+            - $ref: '#/components/schemas/VisitStatsVisit'
+            - type: 'null'
+        lastVisit:
+          description: The most recent visit someone checked in to, however long ago.
+          oneOf:
+            - allOf:
+                - $ref: '#/components/schemas/VisitStatsVisit'
+                - type: object
+                  required: [checkinAt, checkoutAt]
+                  properties:
+                    checkinAt: { type: string, format: date-time }
+                    checkoutAt: { type: [string, 'null'], format: date-time }
+            - type: 'null'
+    VisitStatsVisit:
+      type: object
+      required:
+        [id, scheduledStart, scheduledEnd, caregiverId, caregiverName, dependantId, dependantName]
+      properties:
+        id: { type: string, format: uuid }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        caregiverId: { type: string, format: uuid }
+        caregiverName: { type: string }
+        dependantId: { type: string, format: uuid }
+        dependantName: { type: string }
+    DashboardOverview:
+      type: object
+      required: [date, timeZone, generatedAt, visits, trend, previousPeriod, attention]
+      properties:
+        date: { type: string, format: date }
+        timeZone: { type: string, example: Africa/Nairobi }
+        generatedAt: { type: string, format: date-time }
+        visits:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              state: { type: string, enum: [upcoming, awaiting_checkin, checked_in, no_checkin] }
+              status: { type: string }
+              scheduledStart: { type: string, format: date-time }
+              scheduledEnd: { type: string, format: date-time }
+              checkinAt: { type: [string, 'null'], format: date-time }
+              checkoutAt: { type: [string, 'null'], format: date-time }
+              caregiver:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  fullName: { type: string }
+                  phoneNumber: { type: string }
+              dependant:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  fullName: { type: string }
+                  lat: { type: number }
+                  lng: { type: number }
+        trend:
+          type: array
+          description: 14 days, oldest first. `open` is visits not yet completed or missed.
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              completed: { type: integer }
+              missed: { type: integer }
+              cancelled: { type: integer }
+              open: { type: integer }
+        previousPeriod:
+          type: object
+          description: Completed and missed visits in the 14 days before `trend`, so a client can compare completion rates.
+          properties:
+            completed: { type: integer }
+            missed: { type: integer }
+        attention:
+          type: object
+          properties:
+            missedVisitAlerts:
+              type: object
+              description: Unacknowledged missed-visit alerts, newest first; `items` holds up to 100.
+              properties:
+                total: { type: integer }
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      sentAt: { type: [string, 'null'], format: date-time }
+                      visitScheduleId: { type: string, format: uuid }
+                      scheduledStart: { type: string, format: date-time }
+                      dependantName: { type: string }
+                      caregiverName: { type: string }
+            flaggedPhotos:
+              type: integer
+              description: Photos flagged as possible duplicates, waiting for review.
+            dependantsWithoutPhoto:
+              type: object
+              description: Active dependants with no usable photo, who can't be scheduled; `items` holds up to 100, by name.
+              properties:
+                total: { type: integer }
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      fullName: { type: string }
     FamilyLinkRequests:
       type: object
       required: [incoming, outgoing]
@@ -1676,43 +1998,43 @@ components:
             type: object
             required: [id, requester, relationship, createdAt, dependants]
             properties:
-              id: {type: string, format: uuid}
+              id: { type: string, format: uuid }
               requester:
                 type: object
                 properties:
-                  fullName: {type: string}
-                  email: {type: [string, 'null']}
-                  phoneNumber: {type: [string, 'null']}
-              relationship: {type: [string, 'null']}
-              createdAt: {type: string, format: date-time}
+                  fullName: { type: string }
+                  email: { type: [string, 'null'] }
+                  phoneNumber: { type: [string, 'null'] }
+              relationship: { type: [string, 'null'] }
+              createdAt: { type: string, format: date-time }
               dependants:
                 type: array
                 items:
                   type: object
                   properties:
-                    id: {type: string, format: uuid}
-                    fullName: {type: string}
-                    alreadyLinked: {type: boolean}
+                    id: { type: string, format: uuid }
+                    fullName: { type: string }
+                    alreadyLinked: { type: boolean }
         outgoing:
           type: array
           items:
             type: object
             required: [id, targetContact, status, createdAt, decidedAt, unread, linkedDependants]
             properties:
-              id: {type: string, format: uuid}
-              targetContact: {type: string}
-              relationship: {type: [string, 'null']}
-              status: {type: string, enum: [pending, approved, rejected]}
-              createdAt: {type: string, format: date-time}
-              decidedAt: {type: [string, 'null'], format: date-time}
-              unread: {type: boolean}
+              id: { type: string, format: uuid }
+              targetContact: { type: string }
+              relationship: { type: [string, 'null'] }
+              status: { type: string, enum: [pending, approved, rejected] }
+              createdAt: { type: string, format: date-time }
+              decidedAt: { type: [string, 'null'], format: date-time }
+              unread: { type: boolean }
               linkedDependants:
                 type: array
                 items:
                   type: object
                   properties:
-                    id: {type: string, format: uuid}
-                    fullName: {type: string}
+                    id: { type: string, format: uuid }
+                    fullName: { type: string }
     CurrentTerms:
       type: object
       required: [document, version, title, effectiveDate, sections, acceptedAt]
@@ -2154,7 +2476,17 @@ components:
         absent from a family member's response altogether, since a national ID number is
         sensitive and another family member has no need for it.
       required:
-        [dependantId, familyMemberUserId, fullName, isPrimaryContact, addedBy, createdAt, email, phoneNumber, addedByName]
+        [
+          dependantId,
+          familyMemberUserId,
+          fullName,
+          isPrimaryContact,
+          addedBy,
+          createdAt,
+          email,
+          phoneNumber,
+          addedByName,
+        ]
       properties:
         dependantId:
           type: string
@@ -2320,12 +2652,10 @@ components:
         required:
           type: boolean
         status:
-          allOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }]
-          nullable: true
+          oneOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }, { type: 'null' }]
           description: 'Null: not yet addressed this visit.'
         reason:
-          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
-          nullable: true
+          oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
         notes:
           type: [string, 'null']
         completedAt:
@@ -2350,8 +2680,7 @@ components:
         status:
           $ref: '#/components/schemas/TaskCompletionStatus'
         reason:
-          allOf: [{ $ref: '#/components/schemas/TaskSkipReason' }]
-          nullable: true
+          oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
           description: 'Set only when status is not_completed.'
         notes:
           type: [string, 'null']
@@ -2465,16 +2794,38 @@ components:
           type: integer
           minimum: 1
           maximum: 3
-    BiometricEnrollmentPage:
+    FlaggedBiometricEnrollmentPage:
       type: object
       required: [items]
       properties:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/BiometricEnrollment'
+            $ref: '#/components/schemas/FlaggedBiometricEnrollment'
         nextCursor:
           type: [string, 'null']
+    FlaggedBiometricEnrollment:
+      description: |
+        A flagged enrollment with what a supervisor needs to compare the two faces before approving
+        or rejecting it: both people's names and the matched person's current photo.
+      allOf:
+        - $ref: '#/components/schemas/BiometricEnrollment'
+        - type: object
+          required: [subjectName, matchedSubjectName, matchedImageUrl]
+          properties:
+            subjectName:
+              type: [string, 'null']
+              description: Full name of the person this photo was uploaded for.
+            matchedSubjectName:
+              type: [string, 'null']
+              description: Full name of the already-enrolled person the face matched.
+            matchedImageUrl:
+              type: [string, 'null']
+              format: uri
+              description: |
+                A short-lived presigned GET URL for the matched person's active photo (the best
+                quality one, as check-in picks it), like `imageUrl`. Null when they have no active
+                photo any more, e.g. after being offboarded.
 
     VisitSchedule:
       type: object
@@ -2584,6 +2935,16 @@ components:
         distanceFromGeofenceMeters:
           type: [number, 'null']
           format: double
+        checkoutGpsLat:
+          type: [number, 'null']
+          format: double
+          description: Where the caregiver checked out. Null before checkout, and for visits checked out before checkout locations were recorded.
+        checkoutGpsLng:
+          type: [number, 'null']
+          format: double
+        checkoutDistanceFromGeofenceMeters:
+          type: [number, 'null']
+          format: double
         caregiverMatchConfidence:
           type: [number, 'null']
           format: double
@@ -2674,8 +3035,7 @@ components:
         dependantDisplayName:
           type: string
         dependantHomeAddressText:
-          type: string
-          nullable: true
+          type: [string, 'null']
         geofenceLat:
           type: number
           format: double

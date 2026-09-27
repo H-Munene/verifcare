@@ -33,11 +33,13 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
   },
 );
 
-/// A fake backend: GET returns [current()], POST records the version sent and answers [onAccept].
+/// A fake backend: GET returns [current()], POST records the version sent (and the body, for the
+/// consents) and answers [onAccept].
 class _Backend {
   Map<String, dynamic> Function() current = _terms;
   http.Response? Function()? onAccept;
   final accepted = <String>[];
+  final acceptBodies = <Map<String, dynamic>>[];
   int gets = 0;
 
   MockClient get client => MockClient((request) async {
@@ -47,10 +49,12 @@ class _Backend {
       return _json(current());
     }
     if (request.method == 'POST' && path == '/terms/current/accept') {
-      final version = (jsonDecode(request.body) as Map)['version'] as String;
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final version = body['version'] as String;
       final response = onAccept?.call();
       if (response != null) return response;
       accepted.add(version);
+      acceptBodies.add(body);
       return _json({
         'document': 'family_member',
         'version': version,
@@ -59,6 +63,18 @@ class _Backend {
     }
     throw StateError('Unexpected request: ${request.method} ${request.url}');
   });
+}
+
+Finder get _acceptButton => find.widgetWithText(ElevatedButton, 'Accept');
+
+bool _acceptEnabled(WidgetTester tester) =>
+    tester.widget<ElevatedButton>(_acceptButton).onPressed != null;
+
+/// Ticks both consent checkboxes, which Accept needs.
+Future<void> _consentToBoth(WidgetTester tester) async {
+  await tester.tap(find.byType(CheckboxListTile).at(0));
+  await tester.tap(find.byType(CheckboxListTile).at(1));
+  await tester.pumpAndSettle();
 }
 
 Future<TermsApi> _pumpGate(
@@ -96,7 +112,8 @@ void main() {
       expect(popped, isTrue);
       expect(find.text('Terms of Use and Privacy Notice'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Accept'));
+      await _consentToBoth(tester);
+      await tester.tap(_acceptButton);
       await tester.pumpAndSettle();
       expect(backend.accepted, ['1']);
       expect(find.text('HOME'), findsOneWidget);
@@ -188,11 +205,57 @@ void main() {
     };
     await http.runWithClient(() async {
       await _pumpGate(tester, backend);
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Accept'));
+      await _consentToBoth(tester);
+      await tester.tap(_acceptButton);
       await tester.pumpAndSettle();
       expect(find.textContaining('have just been updated'), findsOneWidget);
       expect(find.textContaining('Version 2'), findsOneWidget);
       expect(find.text('HOME'), findsNothing);
+      // Consent given against the old wording doesn't carry over to the new version.
+      expect(_acceptEnabled(tester), isFalse);
+    }, () => backend.client);
+  });
+
+  testWidgets('Accept needs both consent boxes ticked, and sends both', (
+    tester,
+  ) async {
+    final backend = _Backend();
+    await http.runWithClient(() async {
+      await _pumpGate(tester, backend);
+      final boxes = find.byType(CheckboxListTile);
+      expect(boxes, findsNWidgets(2));
+      expect(_acceptEnabled(tester), isFalse);
+
+      // One box alone isn't enough, whichever it is.
+      await tester.tap(boxes.at(0));
+      await tester.pumpAndSettle();
+      expect(_acceptEnabled(tester), isFalse);
+      await tester.tap(boxes.at(0));
+      await tester.tap(boxes.at(1));
+      await tester.pumpAndSettle();
+      expect(_acceptEnabled(tester), isFalse);
+
+      // Decline never depends on the boxes.
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Decline'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
+      await tester.tap(boxes.at(0));
+      await tester.pumpAndSettle();
+      expect(_acceptEnabled(tester), isTrue);
+      await tester.tap(_acceptButton);
+      await tester.pumpAndSettle();
+      expect(backend.acceptBodies.single, {
+        'version': '1',
+        'biometricConsent': true,
+        'audioConsent': true,
+      });
+      expect(find.text('HOME'), findsOneWidget);
     }, () => backend.client);
   });
 

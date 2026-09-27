@@ -32,7 +32,7 @@ export function LoginPage() {
 
   if (identity) {
     const from = (location.state as { from?: Location } | null)?.from;
-    return <Navigate to={from?.pathname ?? '/dependants'} replace />;
+    return <Navigate to={from?.pathname ?? '/'} replace />;
   }
 
   return (

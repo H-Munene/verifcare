@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { BiometricEnrollment } from '../api/biometricEnrollments';
-import { uploadFileToPresignedUrl } from '../api/biometricEnrollments';
+import { ENROLLMENT_CONTENT_TYPES, ENROLLMENT_MAX_BYTES } from '../api/biometricEnrollments';
 import { ApiError } from '../api/client';
 import type {
   Caregiver,
@@ -12,11 +11,15 @@ import type {
 } from '../api/caregivers';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { EnrollmentOutcome } from '../components/EnrollmentOutcome';
 import { Button } from '../design-system/Button';
 import { Card } from '../design-system/Card';
+import { ImageDropzone } from '../design-system/ImageDropzone';
 import { Input } from '../design-system/Input';
 import { Stepper } from '../design-system/Stepper';
 import './RegisterCaregiverPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
+import { useEnrollPhoto } from '../hooks/useEnrollPhoto';
 
 // Replaces the earlier single-section form (2026-09-22) - caregivers are professional individuals
 // needing more identity/professional detail than Full Name/Phone alone, and the backend contract
@@ -25,8 +28,7 @@ import './RegisterCaregiverPage.css';
 // now all required. Rebuilt as a two-step wizard - Details, then Photo - mirroring
 // RegisterDependantPage.tsx's own stepper architecture, since caregiver check-in verification
 // needs the same single enrolled photo a dependant's own check-in co-presence step already
-// requires (see BiometricEnrollmentSection.tsx/api/biometricEnrollments.ts, reused unchanged here
-// with subjectType 'caregiver').
+// requires (the shared hooks/useEnrollPhoto upload flow, with subjectType 'caregiver').
 //
 // Only two steps, unlike RegisterDependantPage's six - there's no location/geofence/family-contact
 // data on a caregiver, so Details collects everything in one step and Photo is purely the
@@ -60,7 +62,7 @@ export function RegisterCaregiverPage() {
     return <p>Only supervisors can register or edit caregivers.</p>;
   }
   if (isEdit && existing.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (isEdit && (existing.isError || !existing.data)) {
     return <p>Failed to load this caregiver.</p>;
@@ -84,7 +86,7 @@ function splitFullName(fullName: string): { firstName: string; lastName: string 
 
 function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial?: Caregiver }) {
   const isEdit = Boolean(caregiverId);
-  const { caregivers, biometricEnrollments } = useApi();
+  const { caregivers } = useApi();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -109,7 +111,6 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
   // Photo step - biometric-enrollments' own FK check requires this id to already exist.
   const [createdCaregiverId, setCreatedCaregiverId] = useState<string | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoResult, setPhotoResult] = useState<BiometricEnrollment | null>(null);
 
   const createMutation = useMutation({ mutationFn: caregivers.createCaregiver });
   const updateMutation = useMutation({
@@ -117,33 +118,9 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
       caregivers.updateCaregiver(caregiverId!, body),
   });
 
-  // Single required photo, imageOrder fixed at 1 - mirrors RegisterDependantPage.tsx's own Photo
-  // step exactly (see that file's header comment for why this exists and why it's just one image).
-  const photoMutation = useMutation({
-    mutationFn: async () => {
-      if (!photoFile || !createdCaregiverId) {
-        throw new Error('Choose a photo first.');
-      }
-      if (!['image/jpeg', 'image/png'].includes(photoFile.type)) {
-        throw new Error('Only JPEG or PNG images are accepted.');
-      }
-      const contentType = photoFile.type as 'image/jpeg' | 'image/png';
-      const presigned = await biometricEnrollments.createUploadUrl({
-        subjectType: 'caregiver',
-        subjectId: createdCaregiverId,
-        imageOrder: 1,
-        contentType,
-      });
-      await uploadFileToPresignedUrl(presigned.uploadUrl, photoFile);
-      return biometricEnrollments.confirmEnrollment({
-        subjectType: 'caregiver',
-        subjectId: createdCaregiverId,
-        s3Key: presigned.s3Key,
-        imageOrder: 1,
-      });
-    },
-    onSuccess: (enrollment) => setPhotoResult(enrollment),
-  });
+  // Single photo, imageOrder fixed at 1 - mirrors RegisterDependantPage.tsx's own Photo step
+  // exactly (see that file's header comment for why this exists and why it's just one image).
+  const photoMutation = useEnrollPhoto('caregiver', createdCaregiverId);
 
   const detailsValid =
     firstName.trim() !== '' &&
@@ -339,13 +316,9 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
               of a visit. Optional for now - you can add or replace it later from the
               caregiver&rsquo;s detail page instead.
             </p>
-            {photoResult ? (
+            {photoMutation.data ? (
               <>
-                <p>
-                  {photoResult.status === 'flagged'
-                    ? `This photo matched an already-enrolled ${photoResult.matchedSubjectType} at ${photoResult.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a supervisor to review on the Flagged Enrollments page, and hasn't been activated.`
-                    : `Uploaded and activated - quality score ${photoResult.qualityScore?.toFixed(1) ?? 'n/a'}.`}
-                </p>
+                <EnrollmentOutcome enrollment={photoMutation.data} />
                 <div className="register-caregiver-page__step-actions">
                   <Button
                     type="button"
@@ -358,23 +331,24 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
               </>
             ) : (
               <>
-                <Input
+                <ImageDropzone
                   id="caregiverPhoto"
-                  type="file"
-                  label="Photo (JPEG or PNG)"
-                  accept="image/jpeg,image/png"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                  label="Photo"
+                  value={photoFile}
+                  onChange={(file) => {
+                    setPhotoFile(file);
+                    photoMutation.reset();
+                  }}
+                  accept={ENROLLMENT_CONTENT_TYPES}
+                  maxBytes={ENROLLMENT_MAX_BYTES}
+                  error={photoMutation.error?.message}
+                  busy={photoMutation.isPending}
+                  busyLabel="Uploading and checking the face..."
                 />
-                {photoMutation.error ? (
-                  <div className="register-caregiver-page__error">
-                    {photoMutation.error instanceof Error
-                      ? photoMutation.error.message
-                      : 'Something went wrong.'}
-                  </div>
-                ) : null}
                 <div className="register-caregiver-page__step-actions">
                   <Button
                     type="button"
+                    disabled={photoMutation.isPending}
                     onClick={() => void navigate(`/caregivers/${createdCaregiverId}`)}
                   >
                     Skip for now
@@ -383,7 +357,7 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
                     type="button"
                     variant="primary"
                     disabled={photoMutation.isPending || !photoFile}
-                    onClick={() => photoMutation.mutate()}
+                    onClick={() => photoFile && photoMutation.mutate(photoFile)}
                   >
                     {photoMutation.isPending ? 'Uploading...' : 'Upload & Finish'}
                   </Button>

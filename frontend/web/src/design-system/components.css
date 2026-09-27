@@ -168,6 +168,11 @@
   font-weight: 500;
 }
 
+.ds-tag--neutral {
+  background: var(--color-border-divider);
+  color: var(--color-ink-subtle);
+}
+
 .ds-badge {
   display: inline-flex;
   align-items: center;
@@ -228,12 +233,9 @@
 }
 
 .ds-nav-item__icon {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: currentColor;
-  opacity: 0.35;
+  display: inline-flex;
   flex-shrink: 0;
+  line-height: 0;
 }
 
 /* ---------- Card ---------- */
@@ -320,7 +322,16 @@
   transform: translateX(14px);
 }
 
-/* ---------- Table rows: pick one per surface, never mix ---------- */
+/* ---------- Table ----------
+   The user's inspiration (temp_images/table.png, table2.PNG, 2026-09-26): a rounded frame, an
+   icon beside each heading, column dividers and zebra rows. */
+
+.ds-table-frame {
+  border: 1px solid var(--color-border-structural);
+  border-radius: 12px;
+  overflow-x: auto;
+  background: var(--color-page-background);
+}
 
 .ds-table {
   width: 100%;
@@ -328,20 +339,278 @@
 }
 
 .ds-table th {
+  height: 44px;
+  padding: 0 14px;
   text-align: left;
   font-size: 13px;
-  font-weight: 500;
-  color: var(--color-ink-subtle);
-  padding: 8px 12px;
+  /* Bold headings (user request, 2026-09-26); index.css loads Inter's 600 for it. */
+  font-weight: 600;
+  color: var(--color-ink-primary);
+  white-space: nowrap;
   border-bottom: 1px solid var(--color-border-structural);
 }
 
+.ds-table th + th,
+.ds-table td + td {
+  border-left: 1px solid var(--color-border-divider);
+}
+
+.ds-table__heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ds-table__heading svg {
+  color: var(--color-ink-muted);
+  flex: none;
+}
+
+/* A sortable heading is one button across the whole cell, the order arrow at its far end. */
+.ds-table__sort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: calc(100% + 28px);
+  height: 44px;
+  margin: 0 -14px;
+  padding: 0 14px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ds-table__sort:hover {
+  background: #fafafa;
+}
+
+.ds-table__sort:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.ds-table__sort-icon {
+  flex: none;
+  color: var(--color-ink-muted);
+}
+
+.ds-table__sort--active .ds-table__sort-icon {
+  color: var(--color-accent);
+}
+
 .ds-table--table-cell td {
-  height: var(--row-height-table-cell);
-  padding: 0 12px;
+  height: var(--row-height-row-store);
+  padding: 0 14px;
   font-size: 14px;
   color: var(--color-ink-primary);
   border-bottom: 1px solid var(--color-border-divider);
+}
+
+.ds-table tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.ds-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* A row that opens a record: the whole row is the mouse target, and its first cell holds a real
+   link so the keyboard can reach it too. The hover beats the zebra stripe. */
+.ds-table tbody tr.ds-table__row--link {
+  cursor: pointer;
+}
+
+.ds-table tbody tr.ds-table__row--link:hover {
+  background: #f2f2f1;
+}
+
+.ds-table__link {
+  color: var(--color-ink-primary);
+  font-weight: 500;
+}
+
+.ds-table__link:hover {
+  color: var(--color-accent);
+}
+
+.ds-table__empty {
+  height: 64px;
+  text-align: center;
+  color: var(--color-ink-muted);
+}
+
+/* ---------- Filter button and context menu ----------
+   The menu follows temp_images/context_menu.png: white, rounded, grouped items split by rules,
+   a tick and accent colour on the chosen one. */
+
+.ds-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ds-filter-bar__clear {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.ds-filter-bar__clear:hover {
+  color: var(--color-accent-hover);
+}
+
+.ds-filter {
+  position: relative;
+}
+
+.ds-filter__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-height);
+  padding: 0 10px 0 11px;
+  border: 1px dashed var(--color-border-structural);
+  border-radius: var(--radius-pill);
+  background: var(--color-page-background);
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-default);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ds-filter__button svg {
+  color: var(--color-ink-muted);
+  flex: none;
+}
+
+.ds-filter__button:hover {
+  background: #fafafa;
+}
+
+.ds-filter__button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* An applied filter reads as set: solid border, accent tint. */
+.ds-filter__button--applied {
+  border-style: solid;
+  border-color: #b8d9f7;
+  background: var(--color-accent-tint-bg);
+  color: var(--color-accent-tint-text);
+}
+
+.ds-filter__button--applied:hover {
+  background: #d6eafc;
+}
+
+.ds-filter__button--applied svg {
+  color: var(--color-accent-tint-text);
+}
+
+.ds-filter__value {
+  font-weight: 500;
+}
+
+.ds-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-width: 300px;
+  padding: 6px;
+  background: var(--color-page-background);
+  border: 1px solid var(--color-border-structural);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgb(41 41 41 / 12%);
+}
+
+.ds-menu [role='menu'] {
+  max-height: 320px;
+  overflow-y: auto;
+  /* Only ever scrolls up and down (user report: a sideways scrollbar showed at the bottom). */
+  overflow-x: hidden;
+}
+
+.ds-menu__search {
+  padding: 2px 2px 6px;
+  margin: 0 -6px 6px;
+  padding-inline: 8px;
+  border-bottom: 1px solid var(--color-border-divider);
+}
+
+.ds-menu__search input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-default);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ds-menu__search input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.ds-menu__rule {
+  height: 1px;
+  /* Within the list's width: a negative margin here made the list wider than itself, which is
+     what put a sideways scrollbar under the menu. */
+  margin: 6px 0;
+  background: var(--color-border-divider);
+}
+
+.ds-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px 0 6px;
+  border: 0;
+  border-radius: var(--radius-default);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ds-menu__item:hover,
+.ds-menu__item:focus-visible {
+  background: var(--color-surface);
+  outline: none;
+}
+
+.ds-menu__item--selected {
+  color: var(--color-accent);
+}
+
+.ds-menu__tick {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+}
+
+.ds-menu__empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
 }
 
 .ds-row-store {
@@ -484,6 +753,448 @@
   border-bottom-color: var(--color-accent);
 }
 
+/* ---------- Segmented control ----------
+   Joined segments on a grey track; the selected one is a white raised pill, as in the user's
+   inspiration's week/month/year switch. */
+
+.ds-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-structural);
+}
+
+.ds-segmented__segment {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-default);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ds-segmented__segment:hover {
+  color: var(--color-ink-primary);
+}
+
+.ds-segmented__segment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.ds-segmented__segment--selected {
+  background: var(--color-page-background);
+  color: var(--color-ink-primary);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgb(41 41 41 / 12%);
+}
+
+.ds-segmented__count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-structural);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--color-ink-default);
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-segmented__segment--selected .ds-segmented__count {
+  background: var(--color-accent-tint-bg);
+  color: var(--color-accent-tint-text);
+}
+
+/* The tabs appearance: labels in a row over a hairline, the selected one underlined in the
+   accent colour, as in the side-panel inspiration. */
+.ds-segmented--tabs {
+  gap: 20px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-structural);
+  border-radius: 0;
+  background: none;
+}
+
+.ds-segmented--tabs .ds-segmented__segment {
+  flex: 0 0 auto;
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 2px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.ds-segmented--tabs .ds-segmented__segment--selected {
+  border-bottom-color: var(--color-accent);
+  background: none;
+  box-shadow: none;
+}
+
+/* On a phone the segments wrap rather than overflow the panel. */
+@media (max-width: 640px) {
+  .ds-segmented {
+    flex-wrap: wrap;
+  }
+
+  .ds-segmented__segment {
+    flex: 1 1 auto;
+  }
+}
+
+/* ---------- Action menu ----------
+   A row's vertical ellipsis; the menu itself reuses .ds-menu. */
+
+.ds-action-menu__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-default);
+  background: none;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+}
+
+.ds-action-menu__button:hover,
+.ds-action-menu__button[aria-expanded='true'] {
+  background: var(--color-border-divider);
+  color: var(--color-ink-primary);
+}
+
+.ds-action-menu__button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.ds-action-menu.ds-menu {
+  min-width: 170px;
+  z-index: 900;
+}
+
+.ds-action-menu .ds-menu__item svg {
+  flex: none;
+  color: var(--color-ink-subtle);
+}
+
+.ds-menu__item:disabled {
+  color: var(--color-ink-muted);
+  cursor: default;
+}
+
+.ds-menu__item:disabled:hover {
+  background: none;
+}
+
+.ds-menu__item:disabled svg {
+  color: var(--color-ink-muted);
+}
+
+/* ---------- Time select ----------
+   Hour and minute as small bordered pickers with a chevron, a colon between, and AM/PM as text
+   buttons with the chosen one in the accent colour (temp_images/check_in_check_out_select_time_ui.PNG). */
+
+.ds-time-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control-height);
+}
+
+.ds-time-select__field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ds-time-select__field select {
+  height: 34px;
+  padding: 0 28px 0 12px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-default);
+  background: var(--color-page-background);
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-primary);
+  appearance: none;
+  cursor: pointer;
+}
+
+.ds-time-select__field select:hover {
+  border-color: #cfcfcf;
+}
+
+/* The picker being worked on is tinted, as in the reference. */
+.ds-time-select__field select:focus {
+  border-color: transparent;
+  background: var(--color-accent-tint-bg);
+  color: var(--color-accent-tint-text);
+  outline: none;
+}
+
+.ds-time-select__field select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.ds-time-select__field svg {
+  position: absolute;
+  right: 9px;
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+}
+
+.ds-time-select__field select:focus + svg {
+  color: var(--color-accent-tint-text);
+}
+
+.ds-time-select__colon {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
+}
+
+.ds-time-select__period {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.ds-time-select__period-button {
+  padding: 4px 4px;
+  border: 0;
+  border-radius: var(--radius-tag);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+}
+
+.ds-time-select__period-button:hover {
+  color: var(--color-ink-subtle);
+}
+
+.ds-time-select__period-button--selected,
+.ds-time-select__period-button--selected:hover {
+  color: var(--color-accent);
+}
+
+.ds-time-select__period-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ---------- Meta list ----------
+   A record's key facts under its name: small muted icons, spaced out, wrapping when narrow. */
+
+.ds-meta-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--color-ink-default);
+}
+
+.ds-meta-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-meta-list svg {
+  flex: none;
+  color: var(--color-ink-muted);
+}
+
+/* ---------- Skeleton ----------
+   Loading placeholders: a light grey block with a slow sheen passing over it. */
+
+.ds-skeleton {
+  display: block;
+  max-width: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #efefee 0%, #f7f7f6 40%, #efefee 80%);
+  background-size: 300% 100%;
+  animation: ds-skeleton-sheen 1.6s ease-in-out infinite;
+}
+
+@keyframes ds-skeleton-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-skeleton {
+    animation: none;
+  }
+}
+
+.ds-skeleton-detail__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 28px;
+  max-width: 560px;
+}
+
+.ds-skeleton-detail__row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------- Side panel ----------
+   Slides in from the right over a dimmed page (temp_images/sidepanel.png). */
+
+.ds-side-panel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(41 41 41 / 28%);
+  animation: ds-fade-in 200ms ease-out;
+}
+
+.ds-side-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100vw);
+  height: 100%;
+  background: var(--color-page-background);
+  border-left: 1px solid var(--color-border-structural);
+  box-shadow: -12px 0 32px rgb(41 41 41 / 14%);
+  animation: ds-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Closing: the panel slides back out and the page undims, then the panel unmounts. */
+.ds-side-panel-overlay--closing {
+  animation: ds-fade-out 200ms ease-in forwards;
+}
+
+.ds-side-panel-overlay--closing .ds-side-panel {
+  animation: ds-slide-out 200ms ease-in forwards;
+}
+
+.ds-side-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 20px 16px 24px;
+  border-bottom: 1px solid var(--color-border-structural);
+}
+
+.ds-side-panel__eyebrow {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.ds-side-panel__title {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.ds-side-panel__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-default);
+  background: none;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+}
+
+.ds-side-panel__close:hover {
+  background: var(--color-border-divider);
+  color: var(--color-ink-primary);
+}
+
+.ds-side-panel__close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* A column, so content that fills the height (a scrolling list) can do so. */
+.ds-side-panel__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.ds-side-panel__footer {
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-border-structural);
+}
+
+@keyframes ds-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ds-slide-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ds-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes ds-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-side-panel-overlay,
+  .ds-side-panel {
+    animation: none;
+  }
+}
+
 /* ---------- Timeline ---------- */
 
 .ds-timeline {
@@ -503,30 +1214,18 @@
   flex-shrink: 0;
 }
 
-.ds-timeline__dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 2px solid var(--color-border-structural);
+.ds-timeline__mark {
   flex-shrink: 0;
   margin-top: 2px;
-}
-
-.ds-timeline__dot--complete {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
+  color: var(--color-ink-muted);
 }
 
 .ds-timeline__line {
-  width: 2px;
+  width: 1px;
   flex: 1;
   min-height: 28px;
+  margin: 6px 0 4px;
   background: var(--color-border-structural);
-}
-
-.ds-timeline__line--complete {
-  background: var(--color-accent);
 }
 
 .ds-timeline__content {
@@ -534,7 +1233,7 @@
 }
 
 .ds-timeline__label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-ink-primary);
 }

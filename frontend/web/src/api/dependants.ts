@@ -3,6 +3,7 @@
 // interfaces and backend/openapi.yaml exactly - not re-derived from scratch.
 
 import type { ApiClient } from './client';
+import type { VisitStats } from './visitStats';
 
 export type DependantStatus = 'active' | 'deactivated';
 export type DependantGender = 'male' | 'female';
@@ -23,10 +24,15 @@ export interface Dependant {
   geofenceRadiusMeters: number;
   cognitiveMonitoringEnabled: boolean;
   status: DependantStatus;
+  // Where the check-in photo stands (backend db/checkinPhotos.ts): only 'ready' lets a visit be
+  // scheduled.
+  checkinPhotoStatus: CheckinPhotoStatus;
   registeredBy: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export type CheckinPhotoStatus = 'ready' | 'awaiting_review' | 'missing';
 
 export interface DependantPage {
   items: Dependant[];
@@ -136,6 +142,8 @@ export interface UpdateCareTaskRequest {
 
 export interface ListDependantsParams {
   status?: DependantStatus;
+  photo?: CheckinPhotoStatus;
+  sort?: 'name' | '-name' | 'dob' | '-dob';
   cursor?: string;
   limit?: number;
 }
@@ -157,6 +165,8 @@ export function createDependantsApi(client: ApiClient) {
       client.get<DependantPage>(`/dependants${toQueryString(params)}`),
     createDependant: (body: CreateDependantRequest) => client.post<Dependant>('/dependants', body),
     getDependant: (dependantId: string) => client.get<Dependant>(`/dependants/${dependantId}`),
+    getDependantStats: (dependantId: string) =>
+      client.get<VisitStats>(`/dependants/${dependantId}/stats`),
     updateDependant: (dependantId: string, body: UpdateDependantRequest) =>
       client.patch<Dependant>(`/dependants/${dependantId}`, body),
     listFamilyMembers: (dependantId: string) =>

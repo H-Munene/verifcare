@@ -18,6 +18,7 @@ import { CircleF, GoogleMap, MarkerF, PolygonF, useJsApiLoader } from '@react-go
 import { getFeatureBoundingBox, isPointInFeature, type WardFeature } from '../geo/adminBoundaries';
 import { Badge } from '../design-system/Badge';
 import './ExactLocationMap.css';
+import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 
 export interface ExactLocationMapProps {
   apiKey: string;
@@ -103,7 +104,11 @@ export function ExactLocationMap({
     return <Badge tone="danger">Could not load Google Maps - check the API key.</Badge>;
   }
   if (!isLoaded) {
-    return <div className="exact-location-map__loading">Loading map...</div>;
+    return (
+      <SkeletonRegion label="Loading the map">
+        <Skeleton height={320} radius="var(--radius-default)" />
+      </SkeletonRegion>
+    );
   }
 
   const isValid = lat !== null && lng !== null && isPointInFeature(lat, lng, wardFeature);

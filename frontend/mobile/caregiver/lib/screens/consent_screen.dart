@@ -6,11 +6,21 @@ import '../api/api_client.dart';
 import '../api/terms_api.dart';
 import '../app_ui.dart';
 
+// The consent screen's two required checkboxes (2026-09-27, terms v2), in the caregiver's own
+// words: their photo and their visits' audio. Accepting sends both to the server, which records
+// them as consent records - a caregiver without photo consent can't be scheduled.
+const _biometricConsentLabel =
+    'I agree to my photo being taken and used to confirm my identity at each visit.';
+const _audioConsentLabel = 'I agree to audio being recorded during my visits.';
+
 /// Shows [child] only once the signed-in user has accepted the current terms of use and privacy
 /// notice (2026-09-26, user request). Until then the terms fill the screen and can't be dismissed:
 /// no close button, and back does nothing. Accepting is recorded on the server, so it's asked
 /// once per terms version. Declining closes the app, and the terms come back the next time it's
 /// opened.
+///
+/// Accept stays disabled until both consent checkboxes are ticked, since the server refuses an
+/// acceptance without them; Decline is always available, so nobody is pushed into consenting.
 ///
 /// On iOS an app isn't allowed to close itself (Apple's guidelines treat that as a crash), so a
 /// decline there leaves a screen saying the app can't be used without accepting, with a way to
@@ -43,6 +53,8 @@ class _ConsentGateState extends State<ConsentGate> {
   String? _error;
   String? _notice;
   bool _accepting = false;
+  bool _biometricConsent = false;
+  bool _audioConsent = false;
 
   @override
   void initState() {
@@ -62,6 +74,10 @@ class _ConsentGateState extends State<ConsentGate> {
       setState(() {
         _terms = terms;
         _notice = notice;
+        // Fresh terms (first load, or a new version after a 409) mean fresh consent: ticks given
+        // against wording that has since changed don't carry over.
+        _biometricConsent = false;
+        _audioConsent = false;
         _stage = terms.accepted ? _Stage.accepted : _Stage.asking;
       });
     } catch (e) {
@@ -81,7 +97,12 @@ class _ConsentGateState extends State<ConsentGate> {
       _error = null;
     });
     try {
-      await widget.termsApi.accept(sub: widget.sub, version: terms.version);
+      await widget.termsApi.accept(
+        sub: widget.sub,
+        version: terms.version,
+        biometricConsent: _biometricConsent,
+        audioConsent: _audioConsent,
+      );
       if (mounted) setState(() => _stage = _Stage.accepted);
     } on ApiException catch (e) {
       if (e.problem.status == 409) {
@@ -141,6 +162,12 @@ class _ConsentGateState extends State<ConsentGate> {
               notice: _notice,
               error: _error,
               accepting: _accepting,
+              biometricConsent: _biometricConsent,
+              audioConsent: _audioConsent,
+              onBiometricConsentChanged: (value) =>
+                  setState(() => _biometricConsent = value),
+              onAudioConsentChanged: (value) =>
+                  setState(() => _audioConsent = value),
               onAccept: _accept,
               onDecline: _decline,
             ),
@@ -156,6 +183,10 @@ class _TermsView extends StatelessWidget {
   final String? notice;
   final String? error;
   final bool accepting;
+  final bool biometricConsent;
+  final bool audioConsent;
+  final ValueChanged<bool> onBiometricConsentChanged;
+  final ValueChanged<bool> onAudioConsentChanged;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
@@ -164,9 +195,29 @@ class _TermsView extends StatelessWidget {
     required this.notice,
     required this.error,
     required this.accepting,
+    required this.biometricConsent,
+    required this.audioConsent,
+    required this.onBiometricConsentChanged,
+    required this.onAudioConsentChanged,
     required this.onAccept,
     required this.onDecline,
   });
+
+  Widget _consentBox(String label, bool value, ValueChanged<bool> onChanged) =>
+      CheckboxListTile(
+        value: value,
+        onChanged: accepting ? null : (ticked) => onChanged(ticked ?? false),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        horizontalTitleGap: 8,
+        visualDensity: VisualDensity.compact,
+        controlAffinity: ListTileControlAffinity.leading,
+        activeColor: primaryBlue,
+        title: Text(
+          label,
+          style: const TextStyle(fontSize: 13, height: 1.35, color: inkDefault),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +285,9 @@ class _TermsView extends StatelessWidget {
             ],
           ),
         ),
-        Container(
+        // Ink rather than a Container: it paints on the Scaffold's Material, so the consent
+        // checkboxes' tap splashes show instead of being hidden under an opaque box.
+        Ink(
           decoration: const BoxDecoration(
             color: Colors.white,
             border: Border(top: BorderSide(color: borderColor)),
@@ -249,6 +302,17 @@ class _TermsView extends StatelessWidget {
                   _Banner(text: error, tint: dangerTint),
                   const SizedBox(height: 10),
                 ],
+                _consentBox(
+                  _biometricConsentLabel,
+                  biometricConsent,
+                  onBiometricConsentChanged,
+                ),
+                _consentBox(
+                  _audioConsentLabel,
+                  audioConsent,
+                  onAudioConsentChanged,
+                ),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -268,7 +332,10 @@ class _TermsView extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: accepting ? null : onAccept,
+                        onPressed:
+                            accepting || !biometricConsent || !audioConsent
+                            ? null
+                            : onAccept,
                         style: pillButtonStyle,
                         child: accepting
                             ? const SizedBox(

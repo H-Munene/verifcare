@@ -1,6 +1,5 @@
-/* Renamed copy of DependantDetailPage.css's equivalent rules (dependant-detail__section-header/
-   -title/-empty and dependant-detail__modal-*), kept as its own prefix since this component is
-   shared by CaregiverDetailPage too, which doesn't import DependantDetailPage.css. */
+/* Shared by DependantDetailPage and CaregiverDetailPage, so it has its own prefix rather than
+   borrowing either page's classes. */
 
 .biometric-enrollment-section {
   margin-bottom: 24px;
@@ -10,7 +9,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 
 .biometric-enrollment-section__title {
@@ -21,47 +20,113 @@
   margin: 0;
 }
 
-.biometric-enrollment-section__empty {
+.biometric-enrollment-section__intro {
+  margin: 0 0 16px;
   font-size: 13px;
-  color: var(--color-ink-muted);
+  color: var(--color-ink-subtle);
 }
 
-.biometric-enrollment-section__row-main {
+.biometric-enrollment-section__row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 20px;
 }
 
-.biometric-enrollment-section__thumbnail {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-default);
+/* SkeletonRegion wraps its placeholders in one extra div; keep them laid out as the real row. */
+.biometric-enrollment-section__row > div[aria-hidden] {
+  display: contents;
+}
+
+.biometric-enrollment-section__photo {
+  width: 130px;
+  height: 130px;
+  flex: none;
+  border-radius: 12px;
   object-fit: cover;
-  flex-shrink: 0;
-}
-
-.biometric-enrollment-section__thumbnail--empty {
   background: var(--color-surface);
-  border: 1px dashed var(--color-border-structural);
+  border: 1px solid var(--color-border-structural);
 }
 
-.biometric-enrollment-section__modal-form {
+.biometric-enrollment-section__photo--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: #ececeb;
+  border-color: #e2e2e0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink-subtle);
+  text-align: center;
+}
+
+.biometric-enrollment-section__info {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 12px;
+  min-width: 0;
+  max-width: 420px;
 }
 
-.biometric-enrollment-section__modal-actions {
+.biometric-enrollment-section__status {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.biometric-enrollment-section__status--review {
+  color: var(--color-state-awaiting-icon);
+}
+
+.biometric-enrollment-section__note {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink-subtle);
+}
+
+.biometric-enrollment-section__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-button);
+  background: var(--color-page-background);
+  color: var(--color-ink-default);
+  cursor: pointer;
+}
+
+.biometric-enrollment-section__remove:hover {
+  border-color: #f3b8b2;
+  background: var(--color-danger-tint);
+  color: var(--color-danger-text);
+}
+
+.biometric-enrollment-section__remove:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.biometric-enrollment-section__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.biometric-enrollment-section__dialog-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-ink-default);
+}
+
+.biometric-enrollment-section__dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 4px;
-}
-
-.biometric-enrollment-section__modal-error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
+  margin-top: 2px;
 }
