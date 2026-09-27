@@ -3432,6 +3432,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/VerificationAttempt'
+        exceptionKinds:
+          type: array
+          description: Supervisors only. Why the visit is an exception (empty when it isn't); see `GET /compliance/exceptions`.
+          items:
+            $ref: '#/components/schemas/ExceptionKind'
+        resolutions:
+          type: array
+          description: Supervisors only. How the exception was resolved, newest first; the first is the one in force.
+          items:
+            $ref: '#/components/schemas/VisitResolution'
 
     GeofenceCheckinRequest:
       type: object

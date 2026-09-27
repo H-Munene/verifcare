@@ -1018,7 +1018,13 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
 
         expect(response.status).toBe(200);
-        expect(response.body).toEqual({ event: null, attempts: [] });
+        // A supervisor also gets the Compliance fields: nothing to resolve yet.
+        expect(response.body).toEqual({
+          event: null,
+          attempts: [],
+          exceptionKinds: [],
+          resolutions: [],
+        });
 
         // Sensitive read (the Compliance tab's audit log) - a supervisor viewing it is audited.
         const [audit] = await getDb()

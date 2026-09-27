@@ -18,6 +18,7 @@ import {
 } from '../db/testSupport.js';
 import { createComplianceRouter } from './compliance.js';
 import { createVisitResolutionsRouter } from './visitResolutions.js';
+import { createVisitSchedulesRouter } from './visitSchedules.js';
 
 const hasTestDb = Boolean(getTestDatabaseUrl());
 
@@ -46,6 +47,7 @@ function buildTestApp(): Express {
   };
   app.use('/compliance', createComplianceRouter({ requireAuth, now: () => NOW }));
   app.use('/visit-schedules', createVisitResolutionsRouter({ requireAuth, now: () => NOW }));
+  app.use('/visit-schedules', createVisitSchedulesRouter({ requireAuth }));
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -309,6 +311,16 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
     const resolvedPage = resolved.body as ExceptionsBody;
     expect(resolvedPage.items.map((i) => i.visitScheduleId)).toEqual([ids.noCheckout, ids.missed]);
     expect(resolvedPage.items[1]?.latestResolution?.outcome).toBe('caregiver_absent');
+
+    // The visit's side panel reads the history and why it's an exception from its verification.
+    const verification = await request(app)
+      .get(`/visit-schedules/${ids.missed!}/verification`)
+      .set('x-test-auth', supervisorAuth);
+    expect(verification.status).toBe(200);
+    expect(verification.body).toMatchObject({
+      exceptionKinds: ['missed'],
+      resolutions: [{ outcome: 'caregiver_absent', resolvedByName: 'Sarah Kimani' }],
+    });
   });
 
   it('refuses to resolve a visit with nothing to resolve, a blank note, or for a non-supervisor', async () => {

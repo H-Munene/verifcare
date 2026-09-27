@@ -258,6 +258,24 @@ async function latestResolutions(
   return new Map(rows.map(({ visitScheduleId, ...resolution }) => [visitScheduleId, resolution]));
 }
 
+/** Every resolution of one visit, newest first, for its side panel's history. */
+export async function visitResolutionHistory(db: Db, visitScheduleId: string) {
+  return db
+    .select({
+      id: schema.visitResolutions.id,
+      visitScheduleId: schema.visitResolutions.visitScheduleId,
+      outcome: schema.visitResolutions.outcome,
+      note: schema.visitResolutions.note,
+      resolvedBy: schema.visitResolutions.resolvedBy,
+      resolvedByName: schema.users.fullName,
+      resolvedAt: schema.visitResolutions.resolvedAt,
+    })
+    .from(schema.visitResolutions)
+    .innerJoin(schema.users, eq(schema.users.id, schema.visitResolutions.resolvedBy))
+    .where(eq(schema.visitResolutions.visitScheduleId, visitScheduleId))
+    .orderBy(desc(schema.visitResolutions.resolvedAt), desc(schema.visitResolutions.id));
+}
+
 function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
   const map = new Map<string, T[]>();
   for (const row of rows) {

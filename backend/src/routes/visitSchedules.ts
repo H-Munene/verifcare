@@ -50,6 +50,7 @@ import type { AuthenticatedUser } from '../auth/verifier.js';
 import { changedFields, recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import { isCheckinPhoto } from '../db/checkinPhotos.js';
+import { assessVisit, visitRecords, visitResolutionHistory } from '../db/complianceReports.js';
 import type { Db } from '../db/client.js';
 import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
@@ -706,9 +707,21 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         });
       }
 
+      // How an exception was resolved (the Compliance tab): supervisors only, since resolution
+      // notes are the agency's internal account, not something a family member or caregiver sees.
+      let compliance = {};
+      if (caller.role === 'supervisor') {
+        const [record] = await visitRecords(db, { visitScheduleId });
+        compliance = {
+          exceptionKinds: record ? assessVisit(record, new Date()).exceptionKinds : [],
+          resolutions: await visitResolutionHistory(db, visitScheduleId),
+        };
+      }
+
       res.status(200).json({
         event: event ? toVerificationEventResponse(event) : null,
         attempts: attempts.map(toVerificationAttemptResponse),
+        ...compliance,
       });
     } catch (err) {
       next(err);
