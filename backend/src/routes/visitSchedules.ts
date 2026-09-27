@@ -47,8 +47,10 @@ import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/verifier.js';
+import { changedFields, recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import { isCheckinPhoto } from '../db/checkinPhotos.js';
+import { assessVisit, visitRecords, visitResolutionHistory } from '../db/complianceReports.js';
 import type { Db } from '../db/client.js';
 import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
@@ -458,20 +460,35 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
 
-      const [row] = await db
-        .insert(schema.visitSchedules)
-        .values({
-          id: uuidv7(),
-          caregiverId: body.caregiverId,
-          dependantId: body.dependantId,
-          scheduledStart: new Date(body.scheduledStart),
-          scheduledEnd: new Date(body.scheduledEnd),
-          createdBy: callerRow.id,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into visit_schedules returned no row.');
-      }
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.visitSchedules)
+          .values({
+            id: uuidv7(),
+            caregiverId: body.caregiverId,
+            dependantId: body.dependantId,
+            scheduledStart: new Date(body.scheduledStart),
+            scheduledEnd: new Date(body.scheduledEnd),
+            createdBy: callerRow.id,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into visit_schedules returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'visit_schedule.create',
+          entityType: 'visit_schedule',
+          entityId: inserted.id,
+          metadata: {
+            caregiverId: body.caregiverId,
+            dependantId: body.dependantId,
+            scheduledStart: body.scheduledStart,
+            scheduledEnd: body.scheduledEnd,
+          },
+        });
+        return inserted;
+      });
       const [response] = await attachDisplayNames(db, [row]);
       res.status(201).json(response);
     } catch (err) {
@@ -677,9 +694,34 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         .where(eq(schema.verificationAttempts.visitScheduleId, visitScheduleId))
         .orderBy(asc(schema.verificationAttempts.attemptedAt));
 
+      // Sensitive read (the Compliance tab's audit log, per the product owner) - only for a
+      // supervisor or family member looking at someone else's check-in data, not a caregiver
+      // reading their own visit's own trail.
+      if (caller.role !== 'caregiver') {
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
+        await recordAudit(db, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'verification.view',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+        });
+      }
+
+      // How an exception was resolved (the Compliance tab): supervisors only, since resolution
+      // notes are the agency's internal account, not something a family member or caregiver sees.
+      let compliance = {};
+      if (caller.role === 'supervisor') {
+        const [record] = await visitRecords(db, { visitScheduleId });
+        compliance = {
+          exceptionKinds: record ? assessVisit(record, new Date()).exceptionKinds : [],
+          resolutions: await visitResolutionHistory(db, visitScheduleId),
+        };
+      }
+
       res.status(200).json({
         event: event ? toVerificationEventResponse(event) : null,
         attempts: attempts.map(toVerificationAttemptResponse),
+        ...compliance,
       });
     } catch (err) {
       next(err);
@@ -833,19 +875,32 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         }
       }
 
-      const [updated] = await db
-        .update(schema.visitSchedules)
-        .set({
-          ...(body.scheduledStart !== undefined && { scheduledStart: mergedStart }),
-          ...(body.scheduledEnd !== undefined && { scheduledEnd: mergedEnd }),
-          ...(body.status !== undefined && { status: body.status }),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.visitSchedules.id, visitScheduleId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to visit_schedules returned no row.');
-      }
+      // A read, so it needn't be inside the transaction below.
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.visitSchedules)
+          .set({
+            ...(body.scheduledStart !== undefined && { scheduledStart: mergedStart }),
+            ...(body.scheduledEnd !== undefined && { scheduledEnd: mergedEnd }),
+            ...(body.status !== undefined && { status: body.status }),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.visitSchedules.id, visitScheduleId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to visit_schedules returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow?.id ?? null,
+          action: 'visit_schedule.update',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+          metadata: changedFields(existing, row, ['scheduledStart', 'scheduledEnd', 'status']),
+        });
+        return row;
+      });
       const [response] = await attachDisplayNames(db, [updated]);
       res.status(200).json(response);
     } catch (err) {
@@ -1003,11 +1058,20 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
             checkoutDistanceFromGeofenceMeters: distanceMeters,
           })
           .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
-        return tx
+        const rows = await tx
           .update(schema.visitSchedules)
           .set({ status: 'completed', updatedAt: now })
           .where(eq(schema.visitSchedules.id, visitScheduleId))
           .returning();
+        // Distance, not the raw GPS fix itself, which is never copied into the log verbatim.
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'visit.checkout',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+          metadata: { distanceMeters: Math.round(distanceMeters) },
+        });
+        return rows;
       });
       if (!updated) {
         throw new Error('Update to visit_schedules returned no row.');

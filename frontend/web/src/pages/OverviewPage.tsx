@@ -33,16 +33,6 @@ function shiftDate(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function longDate(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
-}
-
 /** The small line under each tile's count: the fact a supervisor would look for next. */
 function tileDetail(state: VisitState, visits: OverviewVisit[], overview: DashboardOverview) {
   const time = (iso: string) => formatTime(iso, overview.timeZone);
@@ -97,12 +87,14 @@ export function OverviewPage() {
   const overview = overviewQuery.data;
   const header = (
     <header className="overview__header">
+      {/* Only when today's view last refreshed (user request, 2026-09-27): the date is in the
+          picker beside it, so the longer "Sunday, 27 September 2026, today" line was repetition. */}
       <div>
-        <p className="overview__subtitle">
-          {longDate(date)}
-          {isToday ? ', today' : ''}. Times are Nairobi time.
-          {overview && isToday ? ` Updated ${formatTime(overview.generatedAt, TIME_ZONE)}.` : ''}
-        </p>
+        {overview && isToday ? (
+          <p className="overview__subtitle">
+            Updated {formatTime(overview.generatedAt, TIME_ZONE)}
+          </p>
+        ) : null}
       </div>
       <div className="overview__date-controls">
         <Button

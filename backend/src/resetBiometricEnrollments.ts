@@ -1,4 +1,5 @@
 import { count } from 'drizzle-orm';
+import { recordAudit } from './audit.js';
 import type { Db } from './db/client.js';
 import * as schema from './db/schema.js';
 
@@ -48,6 +49,15 @@ export async function resetBiometricEnrollments(
     const deleted = confirm === RESET_BIOMETRIC_ENROLLMENTS_CONFIRMATION;
     if (deleted) {
       await tx.delete(schema.biometricEnrollments);
+      // System actor (a job, not a request) - actorUserId null per audit.ts's own convention.
+      // No single entityId: this wipes every row, not one record.
+      await recordAudit(tx, {
+        actorUserId: null,
+        action: 'biometric_enrollment.reset',
+        entityType: 'biometric_enrollment',
+        entityId: null,
+        metadata: { counts },
+      });
     }
     return { deleted, counts };
   });

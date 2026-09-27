@@ -263,6 +263,14 @@ describe.skipIf(!hasTestDb)(
         expect(response.status).toBe(200);
         expect(notificationBody(response).acknowledgedBy).toBe(supervisorB.id);
         expect(notificationBody(response).acknowledgedAt).not.toBeNull();
+
+        const [audit] = await getDb().select().from(schema.auditLog);
+        expect(audit).toMatchObject({
+          action: 'notification.acknowledge',
+          entityType: 'notification',
+          entityId: notification.id,
+          actorUserId: supervisorB.id,
+        });
       });
 
       it('rejects a non-supervisor caller with 403', async () => {
@@ -296,6 +304,9 @@ describe.skipIf(!hasTestDb)(
         expect(notificationBody(second).acknowledgedAt).toBe(
           notificationBody(first).acknowledgedAt,
         );
+
+        // The no-op second call writes no audit row of its own - only the first ack's.
+        expect(await getDb().select().from(schema.auditLog)).toHaveLength(1);
       });
 
       it('returns 404 for a nonexistent notification', async () => {

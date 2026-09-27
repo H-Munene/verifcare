@@ -521,6 +521,50 @@ export const verificationAttempts = pgTable(
 );
 
 // ============================================================================
+// visit_resolutions (append-only, 0016) - a supervisor's account of how a missed visit or a failed
+// check was resolved, for the Compliance tab's exceptions log. Append-only so the history an
+// auditor sees is never rewritten: a later resolution supersedes an earlier one, the latest wins.
+// ============================================================================
+
+export const VISIT_RESOLUTION_OUTCOMES = [
+  'caregiver_absent',
+  'family_cancelled',
+  'dependant_unavailable',
+  'device_or_network_issue',
+  'visit_took_place',
+  'verified_manually',
+  'other',
+] as const;
+export type VisitResolutionOutcome = (typeof VISIT_RESOLUTION_OUTCOMES)[number];
+
+export const visitResolutions = pgTable(
+  'visit_resolutions',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    visitScheduleId: uuid()
+      .notNull()
+      .references(() => visitSchedules.id),
+    outcome: text().$type<VisitResolutionOutcome>().notNull(),
+    note: text().notNull(),
+    resolvedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    resolvedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_visit_resolutions_outcome',
+      sql`${table.outcome} IN ('caregiver_absent', 'family_cancelled', 'dependant_unavailable', 'device_or_network_issue', 'visit_took_place', 'verified_manually', 'other')`,
+    ),
+    check('chk_visit_resolutions_note', sql`length(btrim(${table.note})) > 0`),
+    index('idx_visit_resolutions_visit').on(table.visitScheduleId, table.resolvedAt),
+    // `trg_visit_resolutions_append_only` (rejects UPDATE/DELETE) is added by 0016.
+  ],
+);
+
+// ============================================================================
 // audio_records
 // ============================================================================
 
@@ -571,6 +615,8 @@ export const consentRecords = pgTable(
       .references(() => users.id),
     grantedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp({ withTimezone: true }),
+    // Who revoked it (0016), so the consent register can show it. Null on rows revoked before.
+    revokedBy: uuid().references(() => users.id),
   },
   (table) => [
     check(
@@ -696,9 +742,9 @@ export const notificationLog = pgTable(
     type: text().notNull(),
     visitScheduleId: uuid().references(() => visitSchedules.id),
     audioRecordId: uuid().references(() => audioRecords.id),
-    recipientUserId: uuid()
-      .notNull()
-      .references(() => users.id),
+    // NULL = every supervisor: a missed-visit alert is shared, any supervisor can acknowledge it
+    // (0016). A cognitive_risk alert always names its family member.
+    recipientUserId: uuid().references(() => users.id),
     channel: text(),
     sentAt: timestamp({ withTimezone: true }),
     acknowledgedAt: timestamp({ withTimezone: true }),
@@ -711,6 +757,14 @@ export const notificationLog = pgTable(
       sql`(${table.type} = 'missed_visit' AND ${table.visitScheduleId} IS NOT NULL AND ${table.audioRecordId} IS NULL) OR
           (${table.type} = 'cognitive_risk' AND ${table.audioRecordId} IS NOT NULL AND ${table.visitScheduleId} IS NULL)`,
     ),
+    check(
+      'chk_notification_log_recipient',
+      sql`${table.recipientUserId} IS NOT NULL OR ${table.type} = 'missed_visit'`,
+    ),
+    // One alert per missed visit, so re-running the sweep never raises a second.
+    uniqueIndex('uq_notification_log_missed_visit')
+      .on(table.visitScheduleId)
+      .where(sql`${table.type} = 'missed_visit'`),
     index('idx_notification_log_recipient_sent').on(table.recipientUserId, table.sentAt),
     index('idx_notification_log_visit_schedule').on(table.visitScheduleId),
     index('idx_notification_log_audio_record').on(table.audioRecordId),
@@ -732,13 +786,16 @@ export const auditLog = pgTable(
     action: text().notNull(),
     entityType: text().notNull(),
     // No FK: can point at any entity type in the system, not just two - see schema.sql's file header.
-    entityId: uuid().notNull(),
+    // Nullable (0016) for actions with no single entity, e.g. a compliance export of a whole period.
+    entityId: uuid(),
     metadata: jsonb(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('idx_audit_log_entity').on(table.entityType, table.entityId),
     index('idx_audit_log_actor_time').on(table.actorUserId, table.createdAt),
+    // The audit log screen: newest first across every entity.
+    index('idx_audit_log_created').on(table.createdAt, table.id),
     // `trg_audit_log_append_only` (rejects UPDATE/DELETE) is added by HEZ-9.
   ],
 );

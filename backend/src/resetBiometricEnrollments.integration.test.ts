@@ -95,13 +95,14 @@ describe.skipIf(!hasTestDb)('resetBiometricEnrollments (real Postgres)', () => {
     await teardownTestDb();
   });
 
-  it('only counts without the exact confirmation', async () => {
+  it('only counts without the exact confirmation, and writes no audit row', async () => {
     const db = getDb();
     for (const confirm of [undefined, '', 'yes', `${RESET_BIOMETRIC_ENROLLMENTS_CONFIRMATION} `]) {
       const result = await resetBiometricEnrollments(db, confirm);
       expect(result.deleted).toBe(false);
     }
     expect(await db.select().from(schema.biometricEnrollments)).toHaveLength(3);
+    expect(await db.select().from(schema.auditLog)).toHaveLength(0);
   });
 
   it('reports what was there, then deletes every row of every subject and status', async () => {
@@ -119,5 +120,9 @@ describe.skipIf(!hasTestDb)('resetBiometricEnrollments (real Postgres)', () => {
     // The people themselves are untouched - only their photos go.
     expect(await db.select().from(schema.caregivers)).toHaveLength(1);
     expect(await db.select().from(schema.dependants)).toHaveLength(1);
+    // System actor (a job, not a request), one row for the whole wipe - not per enrollment.
+    const audit = await db.select().from(schema.auditLog);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ actorUserId: null, action: 'biometric_enrollment.reset' });
   });
 });

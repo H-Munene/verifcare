@@ -1,10 +1,11 @@
 // One visit's details in the side panel (2026-09-27): its key facts, a small map with the
-// dependant's home (its pin showing how the visit went) and where the caregiver checked in, and
-// the check-in timeline. VisitPanel shows it wherever a visit is opened.
+// dependant's home (its pin showing how the visit went), and the check-in timeline. VisitPanel shows it wherever a visit is opened.
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { RESOLUTION_OUTCOME_LABELS } from '../api/compliance';
 import { useApi } from '../api/useApi';
+import { useAuth } from '../auth/AuthContext';
 import type {
   VerificationAttempt,
   VerificationAttemptType,
@@ -14,6 +15,7 @@ import { Badge } from '../design-system/Badge';
 import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 import { Timeline, type TimelineStep } from '../design-system/Timeline';
 import { VisitLocationMap, type HomeState } from './VisitLocationMap';
+import { VisitResolutionSection } from './VisitResolutionSection';
 import { statusLabel, statusTone } from './visitStatus';
 import './VisitDetails.css';
 
@@ -35,14 +37,14 @@ function visitOutcome(visit: VisitSchedule, checkedIn: boolean, now: number): Ho
     return 'ongoing';
   }
   if (visit.status === 'cancelled') {
-    return 'none';
+    return 'cancelled';
   }
   // Marked missed, or its end has passed with no check-in (the Overview's rule), is missed.
   const over = now > Date.parse(visit.scheduledEnd);
   if (visit.status === 'missed' || visit.status === 'investigated' || (over && !checkedIn)) {
     return 'missed';
   }
-  return 'none';
+  return 'scheduled';
 }
 
 /** A step's time is its first passing attempt; failures before it become the step's detail. */
@@ -69,6 +71,7 @@ function attemptStep(
 
 export function VisitDetails({ visit }: { visit: VisitSchedule }) {
   const { visitSchedules, dependants } = useApi();
+  const { identity } = useAuth();
   // The time the panel opened, read once: whether a step "won't happen now" depends on it.
   const [now] = useState(() => Date.now());
   const verificationQuery = useQuery({
@@ -83,11 +86,9 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
 
   const event = verificationQuery.data?.event ?? null;
   const attempts = verificationQuery.data?.attempts ?? [];
+  const resolutions = verificationQuery.data?.resolutions ?? [];
+  const exceptionKinds = verificationQuery.data?.exceptionKinds ?? [];
   const dependant = dependantQuery.data;
-  const checkin =
-    event?.checkinGpsLat != null && event.checkinGpsLng != null
-      ? { lat: event.checkinGpsLat, lng: event.checkinGpsLng }
-      : null;
   const outcome = visitOutcome(visit, Boolean(event?.checkinAt), now);
   // Over: nothing more will happen, so a step without a time now won't happen.
   const over =
@@ -113,6 +114,16 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
             ? 'skipped'
             : 'pending',
   }));
+  // The latest resolution closes the story (Compliance tab, 2026-09-27).
+  const latestResolution = resolutions[0];
+  if (latestResolution) {
+    steps.push({
+      label: `Resolved: ${RESOLUTION_OUTCOME_LABELS[latestResolution.outcome]}`,
+      timestamp: latestResolution.resolvedAt,
+      state: 'done',
+      detail: `${latestResolution.resolvedByName}: ${latestResolution.note}`,
+    });
+  }
 
   const start = new Date(visit.scheduledStart);
   const end = new Date(visit.scheduledEnd);
@@ -186,7 +197,6 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
             homeLabel={`${dependant.fullName}'s home`}
             homeState={outcome}
             radiusMeters={dependant.geofenceRadiusMeters}
-            checkin={checkin}
           />
         ) : dependantQuery.isError ? (
           <p className="visit-details__message">The home location couldn't be loaded.</p>
@@ -215,6 +225,15 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
           <Timeline steps={steps} />
         )}
       </section>
+
+      {/* Supervisors resolve exceptions; the section shows once the visit is one. */}
+      {identity?.role === 'supervisor' && exceptionKinds.length > 0 ? (
+        <VisitResolutionSection
+          visitId={visit.id}
+          exceptionKinds={exceptionKinds}
+          resolutions={resolutions}
+        />
+      ) : null}
     </div>
   );
 }

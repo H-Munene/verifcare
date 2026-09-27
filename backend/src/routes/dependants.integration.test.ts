@@ -251,6 +251,16 @@ describe.skipIf(!hasTestDb)(
           isPrimaryContact: true,
           addedBy: supervisor.id,
         });
+
+        const [audit] = await db
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'dependant.create'));
+        expect(audit).toMatchObject({
+          entityType: 'dependant',
+          entityId: dependantBody(response).id,
+          actorUserId: supervisor.id,
+        });
       });
 
       it("records the primary contact's photo and audio consent for a dependant they register, once they've given it on the consent screen", async () => {
@@ -911,6 +921,25 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(dependantBody(response)).toMatchObject({ status: 'deactivated' });
+
+        const db = getDb();
+        const [supervisor] = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.cognitoSub, supervisorSub));
+        const [audit] = await db
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'dependant.update'));
+        expect(audit).toMatchObject({
+          entityType: 'dependant',
+          entityId: dependant.id,
+          actorUserId: supervisor?.id,
+        });
+        expect(audit?.metadata).toMatchObject({
+          status: { from: 'active', to: 'deactivated' },
+          geofenceRadiusMeters: { from: 100, to: 200 },
+        });
       });
 
       it('lets a supervisor update county/constituency/ward (e.g. after re-placing the geofence pin)', async () => {
@@ -1084,6 +1113,17 @@ describe.skipIf(!hasTestDb)(
           .send({ cognitoSub: 'new-third-sub', phoneNumber: '+254700000063', fullName: 'Third' });
 
         expect(response.status).toBe(201);
+
+        const audit = await getDb().select().from(schema.auditLog);
+        const addAudit = audit.find(
+          (a) =>
+            a.action === 'family_member.add' &&
+            a.entityId === familyMemberBody(response).familyMemberUserId,
+        );
+        expect(addAudit).toMatchObject({
+          entityType: 'family_member',
+          metadata: { dependantId: dependant.id },
+        });
       });
 
       it('forbids an unlinked family member from adding a family member', async () => {
@@ -1189,6 +1229,10 @@ describe.skipIf(!hasTestDb)(
         expect(response.status).toBe(409);
       });
     });
+
+    // POST /dependants/{dependantId}/family-members/link's own tests, including its
+    // family_member.link audit row, live in familyLinkRequests.integration.test.ts alongside the
+    // rest of that route's coverage - no need to duplicate it here.
 
     describe('GET /dependants/{dependantId}/family-members', () => {
       it('includes registration details, with the ID document for supervisors only', async () => {
@@ -1326,6 +1370,16 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(familyMemberBody(response)).toMatchObject({ relationship: 'Daughter' });
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'family_member.update'));
+        expect(audit).toMatchObject({
+          entityType: 'family_member',
+          entityId: fm.id,
+          metadata: { relationship: { from: null, to: 'Daughter' } },
+        });
       });
 
       it('forbids a family member, even the primary contact themselves, from editing a link', async () => {
@@ -1446,6 +1500,17 @@ describe.skipIf(!hasTestDb)(
           required: true,
           active: true,
         });
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'care_task.create'));
+        expect(audit).toMatchObject({
+          entityType: 'care_task',
+          entityId: careTaskBody(response).id,
+          actorUserId: sup.id,
+          metadata: { dependantId: dependant.id, title: 'Assist with bathing' },
+        });
       });
 
       it('rejects a caregiver or family_member trying to create a care task', async () => {
@@ -1561,6 +1626,19 @@ describe.skipIf(!hasTestDb)(
           .send({ active: false });
         expect(retired.status).toBe(200);
         expect(careTaskBody(retired).active).toBe(false);
+
+        // Only the accepted PATCH (not the rejected 403 attempt) leaves an audit row.
+        const audit = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'care_task.update'));
+        expect(audit).toHaveLength(1);
+        expect(audit[0]).toMatchObject({
+          entityType: 'care_task',
+          entityId: task.id,
+          actorUserId: sup.id,
+          metadata: { active: { from: true, to: false } },
+        });
       });
     });
   },

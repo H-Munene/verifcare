@@ -55,6 +55,7 @@ import {
   type CognitoAdmin,
 } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
+import { changedFields, recordAudit } from '../audit.js';
 import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
@@ -739,6 +740,20 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           );
         }
 
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'dependant.create',
+          entityType: 'dependant',
+          entityId: dependant.id,
+          metadata: {
+            county: dependant.county,
+            constituency: dependant.constituency,
+            ward: dependant.ward,
+            cognitiveMonitoringEnabled: dependant.cognitiveMonitoringEnabled,
+            primaryFamilyMemberId: familyMemberUserId,
+          },
+        });
+
         return dependant;
       });
 
@@ -941,6 +956,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return;
       }
 
+      let actorRow: typeof schema.users.$inferSelect | undefined;
       if (caller.role !== 'supervisor') {
         if (body.status !== undefined) {
           sendProblem(res, {
@@ -974,19 +990,49 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
+        actorRow = found.callerRow;
+      } else {
+        actorRow = await getUserByCognitoSub(db, caller.sub);
       }
 
-      const [updated] = await db
-        .update(schema.dependants)
-        .set({ ...body, updatedAt: new Date() })
-        .where(eq(schema.dependants.id, dependantId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to dependants returned no row.');
-      }
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.dependants)
+          .set({ ...body, updatedAt: new Date() })
+          .where(eq(schema.dependants.id, dependantId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to dependants returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'dependant.update',
+          entityType: 'dependant',
+          entityId: dependantId,
+          metadata: changedFields(
+            existing,
+            row,
+            [
+              'fullName',
+              'gender',
+              'homeAddressText',
+              'primaryConditionSummary',
+              'county',
+              'constituency',
+              'ward',
+              'geofenceRadiusMeters',
+              'cognitiveMonitoringEnabled',
+              'status',
+            ],
+            // Geofence coordinates are GPS data - never copied into the log verbatim.
+            ['geofenceLat', 'geofenceLng'],
+          ),
+        });
+        return row;
+      });
 
-      // Best-effort, after the update above has already committed - see
-      // db/biometricOffboarding.ts's header comment for why this isn't inside a transaction.
+      // Best-effort, after the transaction above has already committed - see
+      // db/biometricOffboarding.ts's header comment for why this isn't inside it.
       if (body.status === 'deactivated' && faceCollection) {
         await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
       }
@@ -1115,6 +1161,17 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         if (!row) {
           throw new Error('Insert into dependant_family_members returned no row.');
         }
+        await recordAudit(tx, {
+          actorUserId: callerRowId,
+          action: 'family_member.add',
+          entityType: 'family_member',
+          entityId: familyMemberUserId,
+          metadata: {
+            dependantId,
+            relationship: body.relationship ?? null,
+            isPrimaryContact: body.isPrimaryContact,
+          },
+        });
         return row;
       });
 
@@ -1190,17 +1247,30 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         });
         return;
       }
-      const [link] = await db
-        .insert(schema.dependantFamilyMembers)
-        .values({
-          dependantId,
-          familyMemberUserId: member.id,
-          relationship: body.relationship ?? null,
-          isPrimaryContact: false,
-          addedBy: found.callerRow.id,
-        })
-        .onConflictDoNothing()
-        .returning();
+      const link = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.dependantFamilyMembers)
+          .values({
+            dependantId,
+            familyMemberUserId: member.id,
+            relationship: body.relationship ?? null,
+            isPrimaryContact: false,
+            addedBy: found.callerRow.id,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (!inserted) {
+          return undefined;
+        }
+        await recordAudit(tx, {
+          actorUserId: found.callerRow.id,
+          action: 'family_member.link',
+          entityType: 'family_member',
+          entityId: member.id,
+          metadata: { dependantId, relationship: body.relationship ?? null },
+        });
+        return inserted;
+      });
       if (!link) {
         sendProblem(res, {
           type: 'about:blank',
@@ -1282,6 +1352,11 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!db) {
         return;
       }
+      const caller = req.auth;
+      if (!caller) {
+        sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+        return;
+      }
 
       try {
         const [existing] = await db
@@ -1297,6 +1372,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
           return;
         }
+        // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
 
         const updated = await db.transaction(async (tx) => {
           if (body.isPrimaryContact) {
@@ -1320,6 +1397,16 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               ),
             )
             .returning();
+          if (!row) {
+            return undefined;
+          }
+          await recordAudit(tx, {
+            actorUserId: actorRow?.id ?? null,
+            action: 'family_member.update',
+            entityType: 'family_member',
+            entityId: familyMemberUserId,
+            metadata: changedFields(existing, row, ['relationship', 'isPrimaryContact']),
+          });
           return row;
         });
         if (!updated) {
@@ -1373,21 +1460,36 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
 
-      const [row] = await db
-        .insert(schema.dependantCareTasks)
-        .values({
-          id: uuidv7(),
-          dependantId,
-          title: body.title,
-          description: body.description,
-          category: body.category,
-          required: body.required,
-          createdBy: callerRow.id,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into dependant_care_tasks returned no row.');
-      }
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.dependantCareTasks)
+          .values({
+            id: uuidv7(),
+            dependantId,
+            title: body.title,
+            description: body.description,
+            category: body.category,
+            required: body.required,
+            createdBy: callerRow.id,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into dependant_care_tasks returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'care_task.create',
+          entityType: 'care_task',
+          entityId: inserted.id,
+          metadata: {
+            dependantId,
+            title: inserted.title,
+            category: inserted.category,
+            required: inserted.required,
+          },
+        });
+        return inserted;
+      });
       res.status(201).json(toCareTaskResponse(row));
     } catch (err) {
       next(err);
@@ -1465,18 +1567,58 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!db) {
         return;
       }
+      const caller = req.auth;
+      if (!caller) {
+        sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+        return;
+      }
 
       try {
-        const [row] = await db
-          .update(schema.dependantCareTasks)
-          .set(body)
+        const [existing] = await db
+          .select()
+          .from(schema.dependantCareTasks)
           .where(
             and(
               eq(schema.dependantCareTasks.id, careTaskId),
               eq(schema.dependantCareTasks.dependantId, dependantId),
             ),
-          )
-          .returning();
+          );
+        if (!existing) {
+          sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+          return;
+        }
+        // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
+
+        const row = await db.transaction(async (tx) => {
+          const [updated] = await tx
+            .update(schema.dependantCareTasks)
+            .set(body)
+            .where(
+              and(
+                eq(schema.dependantCareTasks.id, careTaskId),
+                eq(schema.dependantCareTasks.dependantId, dependantId),
+              ),
+            )
+            .returning();
+          if (!updated) {
+            return undefined;
+          }
+          await recordAudit(tx, {
+            actorUserId: actorRow?.id ?? null,
+            action: 'care_task.update',
+            entityType: 'care_task',
+            entityId: careTaskId,
+            metadata: changedFields(existing, updated, [
+              'title',
+              'description',
+              'category',
+              'required',
+              'active',
+            ]),
+          });
+          return updated;
+        });
         if (!row) {
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
           return;

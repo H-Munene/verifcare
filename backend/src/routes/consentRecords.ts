@@ -28,6 +28,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/verifier.js';
 import { requireRole } from '../auth/middleware.js';
+import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
@@ -176,20 +177,34 @@ export function createConsentRecordsRouter(dependencies: ConsentRecordsRouterDep
         throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
 
-      const [row] = await db
-        .insert(schema.consentRecords)
-        .values({
-          id: uuidv7(),
-          subjectType: body.subjectType,
-          caregiverId: body.subjectType === 'caregiver' ? body.subjectId : null,
-          dependantId: body.subjectType === 'dependant' ? body.subjectId : null,
-          consentType: body.consentType,
-          grantedBy: callerRow.id,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into consent_records returned no row.');
-      }
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.consentRecords)
+          .values({
+            id: uuidv7(),
+            subjectType: body.subjectType,
+            caregiverId: body.subjectType === 'caregiver' ? body.subjectId : null,
+            dependantId: body.subjectType === 'dependant' ? body.subjectId : null,
+            consentType: body.consentType,
+            grantedBy: callerRow.id,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into consent_records returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'consent.grant',
+          entityType: 'consent_record',
+          entityId: inserted.id,
+          metadata: {
+            subjectType: body.subjectType,
+            subjectId: body.subjectId,
+            consentType: body.consentType,
+          },
+        });
+        return inserted;
+      });
       res.status(201).json(toResponse(row));
     } catch (err) {
       next(err);
@@ -282,14 +297,33 @@ export function createConsentRecordsRouter(dependencies: ConsentRecordsRouterDep
         return;
       }
 
-      const [updated] = await db
-        .update(schema.consentRecords)
-        .set({ revokedAt: new Date() })
-        .where(eq(schema.consentRecords.id, consentRecordId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to consent_records returned no row.');
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+      if (!callerRow) {
+        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
+
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.consentRecords)
+          .set({ revokedAt: new Date(), revokedBy: callerRow.id })
+          .where(eq(schema.consentRecords.id, consentRecordId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to consent_records returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'consent.revoke',
+          entityType: 'consent_record',
+          entityId: consentRecordId,
+          metadata: {
+            consentType: existing.consentType,
+            subjectType: existing.subjectType,
+            subjectId,
+          },
+        });
+        return row;
+      });
       res.status(200).json(toResponse(updated));
     } catch (err) {
       next(err);

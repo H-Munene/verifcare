@@ -294,6 +294,14 @@ describe.skipIf(!hasTestDb)(
           status: 'scheduled',
           createdBy: supervisor.id,
         });
+
+        const [audit] = await getDb().select().from(schema.auditLog);
+        expect(audit).toMatchObject({
+          action: 'visit_schedule.create',
+          entityType: 'visit_schedule',
+          entityId: visitBody(response).id,
+          actorUserId: supervisor.id,
+        });
       });
 
       it('refuses to schedule until both people have an active photo (422)', async () => {
@@ -453,6 +461,11 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(409);
         expect(problemBody(response).detail).toMatch(/caregiver/i);
+
+        // The rolled-back second attempt leaves no audit row of its own - only the first,
+        // successful create's.
+        const audit = await getDb().select().from(schema.auditLog);
+        expect(audit).toHaveLength(1);
       });
     });
 
@@ -574,6 +587,17 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(visitBody(response).status).toBe('cancelled');
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'visit_schedule.update'));
+        expect(audit).toMatchObject({
+          entityType: 'visit_schedule',
+          entityId: visitBody(created).id,
+          actorUserId: supervisor.id,
+          metadata: { status: { from: 'scheduled', to: 'cancelled' } },
+        });
       });
 
       it('refuses to reschedule once a photo is gone, but still lets the visit be cancelled', async () => {
@@ -752,6 +776,17 @@ describe.skipIf(!hasTestDb)(
           checkoutGpsLng: atHome.gpsLng,
         });
         expect(event?.checkoutDistanceFromGeofenceMeters).toBe(0);
+
+        const [audit] = await db
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'visit.checkout'));
+        expect(audit).toMatchObject({
+          entityType: 'visit_schedule',
+          entityId: visit.id,
+          actorUserId: caregiver.userId,
+          metadata: { distanceMeters: 0 },
+        });
       });
 
       it('checks out from inside the radius, short of its edge', async () => {
@@ -983,7 +1018,24 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
 
         expect(response.status).toBe(200);
-        expect(response.body).toEqual({ event: null, attempts: [] });
+        // A supervisor also gets the Compliance fields: nothing to resolve yet.
+        expect(response.body).toEqual({
+          event: null,
+          attempts: [],
+          exceptionKinds: [],
+          resolutions: [],
+        });
+
+        // Sensitive read (the Compliance tab's audit log) - a supervisor viewing it is audited.
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'verification.view'));
+        expect(audit).toMatchObject({
+          entityType: 'visit_schedule',
+          entityId: visitBody(created).id,
+          actorUserId: supervisor.id,
+        });
       });
 
       it('returns the event and its attempts for an in-progress visit', async () => {
@@ -1022,6 +1074,13 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'));
 
         expect(response.status).toBe(200);
+        // A caregiver reading their own visit's trail is not audited - only supervisor/family_member.
+        expect(
+          await getDb()
+            .select()
+            .from(schema.auditLog)
+            .where(eq(schema.auditLog.action, 'verification.view')),
+        ).toHaveLength(0);
       });
 
       it("rejects a caregiver viewing another caregiver's visit with 403", async () => {

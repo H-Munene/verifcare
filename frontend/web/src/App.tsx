@@ -3,6 +3,7 @@ import { useAuth } from './auth/AuthContext';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppShell } from './components/AppShell';
 import { CarePlanPage } from './pages/CarePlanPage';
+import { CompliancePage } from './pages/CompliancePage';
 import { CaregiverDetailPage } from './pages/CaregiverDetailPage';
 import { CaregiversListPage } from './pages/CaregiversListPage';
 import { DependantDetailPage } from './pages/DependantDetailPage';
@@ -51,6 +52,7 @@ export function App() {
                 {/* The visit page was replaced by the side panel; old links open it there. */}
                 <Route path="/visits/:visitId" element={<VisitLinkRedirect />} />
                 <Route path="/reviews" element={<FlaggedEnrollmentsPage />} />
+                <Route path="/compliance" element={<CompliancePage />} />
                 {/* The page's address before it became the Reviews section. */}
                 <Route path="/flagged-enrollments" element={<Navigate to="/reviews" replace />} />
               </Routes>

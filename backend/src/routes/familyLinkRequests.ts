@@ -20,6 +20,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-
 import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
+import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
@@ -154,15 +155,29 @@ export function createFamilyLinkRequestsRouter(
         );
 
       // Asking again while a request is open keeps the one request rather than adding another.
-      await db
-        .insert(schema.familyLinkRequests)
-        .values({
-          requesterUserId: requester.id,
-          targetContact,
-          primaryContactUserId: target?.id ?? null,
-          relationship: body.relationship ?? null,
-        })
-        .onConflictDoNothing();
+      await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.familyLinkRequests)
+          .values({
+            requesterUserId: requester.id,
+            targetContact,
+            primaryContactUserId: target?.id ?? null,
+            relationship: body.relationship ?? null,
+          })
+          .onConflictDoNothing()
+          .returning();
+        // onConflictDoNothing means a request to the same contact is already open - a genuine
+        // no-op, so no audit row for it.
+        if (inserted) {
+          await recordAudit(tx, {
+            actorUserId: requester.id,
+            action: 'family_link_request.create',
+            entityType: 'family_link_request',
+            entityId: inserted.id,
+            // targetContact is an email/phone number - never copied into the log verbatim.
+          });
+        }
+      });
 
       // The same answer whatever happened above.
       res.status(202).json({
@@ -355,6 +370,13 @@ export function createFamilyLinkRequestsRouter(
           .update(schema.familyLinkRequests)
           .set({ status: 'approved', linkedDependantIds: dependantIds, decidedAt: new Date() })
           .where(eq(schema.familyLinkRequests.id, request.id));
+        await recordAudit(tx, {
+          actorUserId: me.id,
+          action: 'family_link_request.approve',
+          entityType: 'family_link_request',
+          entityId: request.id,
+          metadata: { requesterUserId: request.requesterUserId, dependantIds },
+        });
       });
       res
         .status(200)
@@ -382,10 +404,19 @@ export function createFamilyLinkRequestsRouter(
       if (!request) {
         return;
       }
-      await db
-        .update(schema.familyLinkRequests)
-        .set({ status: 'rejected', decidedAt: new Date() })
-        .where(eq(schema.familyLinkRequests.id, request.id));
+      await db.transaction(async (tx) => {
+        await tx
+          .update(schema.familyLinkRequests)
+          .set({ status: 'rejected', decidedAt: new Date() })
+          .where(eq(schema.familyLinkRequests.id, request.id));
+        await recordAudit(tx, {
+          actorUserId: me.id,
+          action: 'family_link_request.reject',
+          entityType: 'family_link_request',
+          entityId: request.id,
+          metadata: { requesterUserId: request.requesterUserId },
+        });
+      });
       res.status(200).json({ id: request.id, status: 'rejected' });
     } catch (err) {
       next(err);

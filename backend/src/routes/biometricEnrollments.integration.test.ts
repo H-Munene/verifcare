@@ -368,6 +368,14 @@ describe.skipIf(!hasTestDb)(
         expect(body.qualityScore).toBe(72.5);
         expect(body.status).toBe('active');
         expect(body.caregiverId).toBe(subjectId);
+
+        const [audit] = await getDb().select().from(schema.auditLog);
+        expect(audit).toMatchObject({
+          action: 'biometric_enrollment.create',
+          entityType: 'biometric_enrollment',
+          entityId: body.id,
+          metadata: { subjectType: 'caregiver', subjectId, imageOrder: 1, status: 'active' },
+        });
       });
 
       it('rejects with 400 when s3Key does not match the subject/imageOrder prefix', async () => {
@@ -428,6 +436,7 @@ describe.skipIf(!hasTestDb)(
           .from(schema.biometricEnrollments)
           .where(eq(schema.biometricEnrollments.caregiverId, subjectId));
         expect(rows).toHaveLength(0);
+        expect(await getDb().select().from(schema.auditLog)).toHaveLength(0);
       });
 
       it('rejects with 422 when multiple faces are detected', async () => {
@@ -636,6 +645,17 @@ describe.skipIf(!hasTestDb)(
           ['superseded', 90],
           ['superseded', 70],
         ]);
+
+        // Sensitive read (returns photo URLs) - one row for the request, not per photo returned.
+        const viewAudit = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.view'));
+        expect(viewAudit).toHaveLength(1);
+        expect(viewAudit[0]).toMatchObject({
+          entityType: 'biometric_enrollment',
+          entityId: caregiver.id,
+        });
       });
 
       it('forbids a family member from listing a dependant they are not linked to', async () => {
@@ -762,6 +782,14 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentPageBody(res).items).toHaveLength(1);
         expect(enrollmentPageBody(res).items[0]?.status).toBe('flagged');
+
+        // Sensitive read (returns photo URLs, cross-subject) - one row per request, no single
+        // entityId since it's a listing, not one record.
+        const [viewAudit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.view'));
+        expect(viewAudit).toMatchObject({ entityType: 'biometric_enrollment', entityId: null });
       });
 
       it("names both people and links the matched person's best active photo", async () => {
@@ -916,6 +944,12 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentBody(res).status).toBe('active');
         expect(faceCollection.indexFace).toHaveBeenCalledOnce();
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.approve'));
+        expect(audit).toMatchObject({ entityType: 'biometric_enrollment', entityId: id });
       });
 
       it('approving a flagged replacement supersedes the photo it replaces', async () => {
@@ -985,6 +1019,12 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentBody(res).status).toBe('deleted');
         expect(faceCollection.indexFace).not.toHaveBeenCalled();
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.reject'));
+        expect(audit).toMatchObject({ entityType: 'biometric_enrollment', entityId: id });
       });
 
       it('rejects re-rejecting a row that is not flagged', async () => {
