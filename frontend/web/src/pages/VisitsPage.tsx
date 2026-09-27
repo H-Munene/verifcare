@@ -19,6 +19,7 @@ import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Label } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
+import { TimeSelect } from '../design-system/TimeSelect';
 import type { ListVisitSchedulesParams, VisitSchedule, VisitStatus } from '../api/visitSchedules';
 import { FilterBar, FilterMenu } from '../design-system/FilterMenu';
 import { sortState } from '../design-system/sortState';
@@ -364,14 +365,26 @@ export function VisitsPage() {
   );
 }
 
-// Local datetime, not UTC - `<input type="datetime-local">` reads/writes the wall-clock value the
-// supervisor actually sees, so this uses the Date object's local getters (getHours, not
-// getUTCHours), unlike toISOString() (always UTC) which would silently shift the displayed time
-// by the browser's UTC offset.
-function toDatetimeLocalValue(iso: string): string {
+// The visit's local date (YYYY-MM-DD) and time (HH:MM), for the form's date field and time
+// pickers - the wall-clock values the supervisor sees, so the Date's local getters, not UTC ones.
+function localParts(iso: string): { date: string; time: string } {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  };
+}
+
+function todayLocal(): string {
+  return localParts(new Date().toISOString()).date;
+}
+
+/** An hour after [time] ("HH:MM"), capped at 23:55 so it stays on the same day. */
+function anHourAfter(time: string): string {
+  const [h = 0, m = 0] = time.split(':').map(Number);
+  const total = Math.min(h * 60 + m + 60, 23 * 60 + 55);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
 interface ScheduleVisitModalProps {
@@ -397,13 +410,23 @@ function ScheduleVisitModal({
   const queryClient = useQueryClient();
   const [caregiverId, setCaregiverId] = useState(existing?.caregiverId ?? '');
   const [dependantId, setDependantId] = useState(existing?.dependantId ?? '');
-  const [start, setStart] = useState(existing ? toDatetimeLocalValue(existing.scheduledStart) : '');
-  const [end, setEnd] = useState(existing ? toDatetimeLocalValue(existing.scheduledEnd) : '');
+  // A date and separate check-in and check-out times (user request, 2026-09-27), rather than two
+  // date-and-time fields: a visit starts and ends on the same day.
+  const [date, setDate] = useState(
+    existing ? localParts(existing.scheduledStart).date : todayLocal(),
+  );
+  const [checkIn, setCheckIn] = useState(
+    existing ? localParts(existing.scheduledStart).time : '09:00',
+  );
+  const [checkOut, setCheckOut] = useState(
+    existing ? localParts(existing.scheduledEnd).time : '10:00',
+  );
+  const timesValid = checkOut > checkIn;
 
   const mutation = useMutation({
     mutationFn: () => {
-      const scheduledStart = new Date(start).toISOString();
-      const scheduledEnd = new Date(end).toISOString();
+      const scheduledStart = new Date(`${date}T${checkIn}`).toISOString();
+      const scheduledEnd = new Date(`${date}T${checkOut}`).toISOString();
       if (mode === 'create') {
         return visitSchedules.createVisitSchedule({
           caregiverId,
@@ -470,34 +493,43 @@ function ScheduleVisitModal({
             </div>
           </>
         ) : null}
-        <div className="visits-page__modal-row">
-          <div>
-            <Label htmlFor="scheduleStart" required>
-              Start time
-            </Label>
-            <input
-              id="scheduleStart"
-              type="datetime-local"
-              className="ds-input"
-              required
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="scheduleEnd" required>
-              End time
-            </Label>
-            <input
-              id="scheduleEnd"
-              type="datetime-local"
-              className="ds-input"
-              required
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
-            />
-          </div>
+        <div>
+          <Label htmlFor="scheduleDate" required>
+            Date
+          </Label>
+          <input
+            id="scheduleDate"
+            type="date"
+            className="ds-input"
+            required
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
         </div>
+        {/* One time per row: each picker needs the form's full width. */}
+        <div>
+          <span className="ds-label">Check-in</span>
+          <TimeSelect
+            label="Check-in time"
+            value={checkIn}
+            onChange={(value) => {
+              setCheckIn(value);
+              // Keep the visit at least a moment long: push check-out along with check-in.
+              if (checkOut <= value) {
+                setCheckOut(anHourAfter(value));
+              }
+            }}
+          />
+        </div>
+        <div>
+          <span className="ds-label">Check-out</span>
+          <TimeSelect label="Check-out time" value={checkOut} onChange={setCheckOut} />
+        </div>
+        {!timesValid ? (
+          <div className="visits-page__modal-error" role="alert">
+            Check-out must be after check-in.
+          </div>
+        ) : null}
         {mutation.error ? (
           <div className="visits-page__modal-error">
             {mutation.error instanceof ApiError
@@ -509,7 +541,7 @@ function ScheduleVisitModal({
           <Button type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={mutation.isPending}>
+          <Button type="submit" variant="primary" disabled={mutation.isPending || !timesValid}>
             {mutation.isPending ? 'Saving...' : mode === 'create' ? 'Create' : 'Save'}
           </Button>
         </div>

@@ -901,6 +901,103 @@
   color: var(--color-ink-muted);
 }
 
+/* ---------- Time select ----------
+   Hour and minute as small bordered pickers with a chevron, a colon between, and AM/PM as text
+   buttons with the chosen one in the accent colour (temp_images/check_in_check_out_select_time_ui.PNG). */
+
+.ds-time-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control-height);
+}
+
+.ds-time-select__field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ds-time-select__field select {
+  height: 34px;
+  padding: 0 28px 0 12px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-default);
+  background: var(--color-page-background);
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-primary);
+  appearance: none;
+  cursor: pointer;
+}
+
+.ds-time-select__field select:hover {
+  border-color: #cfcfcf;
+}
+
+/* The picker being worked on is tinted, as in the reference. */
+.ds-time-select__field select:focus {
+  border-color: transparent;
+  background: var(--color-accent-tint-bg);
+  color: var(--color-accent-tint-text);
+  outline: none;
+}
+
+.ds-time-select__field select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.ds-time-select__field svg {
+  position: absolute;
+  right: 9px;
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+}
+
+.ds-time-select__field select:focus + svg {
+  color: var(--color-accent-tint-text);
+}
+
+.ds-time-select__colon {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
+}
+
+.ds-time-select__period {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.ds-time-select__period-button {
+  padding: 4px 4px;
+  border: 0;
+  border-radius: var(--radius-tag);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+}
+
+.ds-time-select__period-button:hover {
+  color: var(--color-ink-subtle);
+}
+
+.ds-time-select__period-button--selected,
+.ds-time-select__period-button--selected:hover {
+  color: var(--color-accent);
+}
+
+.ds-time-select__period-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 /* ---------- Skeleton ----------
    Loading placeholders: a light grey block with a slow sheen passing over it. */
 
