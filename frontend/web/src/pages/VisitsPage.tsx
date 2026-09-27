@@ -15,6 +15,7 @@ import type { Dependant } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
 import { ActionMenu } from '../design-system/ActionMenu';
+import { ConfirmDialog } from '../design-system/ConfirmDialog';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Label } from '../design-system/Input';
@@ -166,10 +167,15 @@ export function VisitsPage() {
     enabled: isSupervisor,
   });
 
+  // The visit waiting on "Cancel visit"'s confirmation (cancelling can't be undone from here).
+  const [cancelling, setCancelling] = useState<VisitSchedule | null>(null);
   const cancelMutation = useMutation({
     mutationFn: (visitScheduleId: string) =>
       visitSchedules.updateVisitSchedule(visitScheduleId, { status: 'cancelled' }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['visit-schedules'] }),
+    onSuccess: () => {
+      setCancelling(null);
+      void queryClient.invalidateQueries({ queryKey: ['visit-schedules'] });
+    },
   });
 
   if (!isSupervisor) {
@@ -300,7 +306,10 @@ export function VisitsPage() {
                             label: 'Cancel visit',
                             icon: Delete02Icon,
                             disabled: visit.status !== 'scheduled' || cancelMutation.isPending,
-                            onSelect: () => cancelMutation.mutate(visit.id),
+                            onSelect: () => {
+                              cancelMutation.reset();
+                              setCancelling(visit);
+                            },
                           },
                         ]}
                       />
@@ -317,14 +326,6 @@ export function VisitsPage() {
               </tbody>
             </table>
           </TableFrame>
-
-          {cancelMutation.error ? (
-            <div className="visits-page__error">
-              {cancelMutation.error instanceof ApiError
-                ? (cancelMutation.error.problem.detail ?? cancelMutation.error.problem.title)
-                : 'Something went wrong.'}
-            </div>
-          ) : null}
 
           <div className="visits-page__pagination">
             <Button disabled={!pages.canGoBack} onClick={pages.back}>
@@ -349,6 +350,30 @@ export function VisitsPage() {
           visitId={panelVisitId}
           visit={clickedVisit?.id === panelVisitId ? clickedVisit : undefined}
           onClose={() => params.set('visit', '')}
+        />
+      ) : null}
+
+      {cancelling ? (
+        <ConfirmDialog
+          destructive
+          title="Cancel this visit?"
+          message={`${cancelling.caregiverDisplayName}'s visit to ${cancelling.dependantDisplayName} on ${formatWindow(
+            cancelling.scheduledStart,
+            cancelling.scheduledEnd,
+          )} will be cancelled. It stays in the visit history as cancelled.`}
+          confirmLabel="Cancel visit"
+          cancelLabel="Keep visit"
+          pending={cancelMutation.isPending}
+          pendingLabel="Cancelling..."
+          error={
+            cancelMutation.error
+              ? cancelMutation.error instanceof ApiError
+                ? (cancelMutation.error.problem.detail ?? cancelMutation.error.problem.title)
+                : 'Something went wrong.'
+              : undefined
+          }
+          onConfirm={() => cancelMutation.mutate(cancelling.id)}
+          onCancel={() => setCancelling(null)}
         />
       ) : null}
 

@@ -77,9 +77,6 @@ export function FlaggedEnrollmentsPage() {
 
   return (
     <div>
-      <div className="flagged-enrollments-page__toolbar">
-        <h1 className="flagged-enrollments-page__title">Photo reviews</h1>
-      </div>
       <p className="flagged-enrollments-page__intro">
         Each photo here looked like someone already enrolled when it was uploaded, so check-in
         isn&rsquo;t using it yet. Open one to compare the two faces, then approve it if
