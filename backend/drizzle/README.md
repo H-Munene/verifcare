@@ -56,6 +56,8 @@ functions) already existing.
 - **Two `trg_*_append_only` triggers** (`verification_attempts`, `audit_log`):
   `BEFORE UPDATE OR DELETE ... EXECUTE FUNCTION forbid_update_delete()`. Enforces at the database
   level that these two audit-trail tables can only ever be inserted into, never modified.
+  `0012` adds the same trigger to `terms_acceptances`, and `0016` to `visit_resolutions`
+  (compliance records: a later resolution supersedes an earlier one rather than rewriting it).
 
 ## Verifying these objects still work
 

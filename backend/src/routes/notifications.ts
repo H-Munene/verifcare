@@ -40,7 +40,8 @@ interface NotificationResponse {
   type: 'missed_visit' | 'cognitive_risk';
   visitScheduleId: string | null;
   audioRecordId: string | null;
-  recipientUserId: string;
+  // null: a shared missed-visit alert, addressed to every supervisor (0016).
+  recipientUserId: string | null;
   channel: string | null;
   sentAt: string | null;
   acknowledgedAt: string | null;

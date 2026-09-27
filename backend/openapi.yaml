@@ -3160,8 +3160,9 @@ components:
           type: [string, 'null']
           format: uuid
         recipientUserId:
-          type: string
+          type: [string, 'null']
           format: uuid
+          description: Null for a missed-visit alert, which is shared by every supervisor; any supervisor may acknowledge it.
         channel:
           type: [string, 'null']
         sentAt:

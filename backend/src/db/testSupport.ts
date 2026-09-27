@@ -25,6 +25,7 @@ const allTableNames = [
   'visit_task_completions',
   'verification_events',
   'verification_attempts',
+  'visit_resolutions',
   'audio_records',
   'consent_records',
   'terms_acceptances',
