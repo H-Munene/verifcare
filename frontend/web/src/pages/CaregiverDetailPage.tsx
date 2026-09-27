@@ -5,6 +5,7 @@ import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
 import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Tabs } from '../design-system/Tabs';
@@ -33,6 +34,11 @@ export function CaregiverDetailPage() {
   const caregiverQuery = useQuery({
     queryKey: ['caregiver', caregiverId],
     queryFn: () => caregivers.getCaregiver(caregiverId!),
+  });
+
+  const statsQuery = useQuery({
+    queryKey: ['caregiver', caregiverId, 'stats'],
+    queryFn: () => caregivers.getCaregiverStats(caregiverId!),
   });
 
   // The backend runs biometric-enrollment offboarding cleanup on active:false itself - nothing
@@ -77,6 +83,13 @@ export function CaregiverDetailPage() {
           Edit Caregiver
         </Button>
       </div>
+
+      <VisitStatsTiles
+        stats={statsQuery.data}
+        isLoading={statsQuery.isLoading}
+        isError={statsQuery.isError}
+        perspective="caregiver"
+      />
 
       <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 

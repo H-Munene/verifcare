@@ -11,6 +11,7 @@ import {
   type FamilyMemberSelection,
 } from '../components/FamilyMemberResolver';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Input } from '../design-system/Input';
@@ -47,6 +48,10 @@ export function DependantDetailPage() {
   const dependantQuery = useQuery({
     queryKey: ['dependant', dependantId],
     queryFn: () => dependants.getDependant(dependantId!),
+  });
+  const statsQuery = useQuery({
+    queryKey: ['dependant', dependantId, 'stats'],
+    queryFn: () => dependants.getDependantStats(dependantId!),
   });
   const familyMembersQuery = useQuery({
     queryKey: ['dependant', dependantId, 'family-members'],
@@ -95,6 +100,13 @@ export function DependantDetailPage() {
           </Button>
         </div>
       </div>
+
+      <VisitStatsTiles
+        stats={statsQuery.data}
+        isLoading={statsQuery.isLoading}
+        isError={statsQuery.isError}
+        perspective="dependant"
+      />
 
       <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 

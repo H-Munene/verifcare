@@ -282,6 +282,30 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /caregivers/{caregiverId}/stats:
+    parameters:
+      - $ref: '#/components/parameters/CaregiverId'
+    get:
+      tags: [Caregivers]
+      summary: Visit statistics for a caregiver
+      description: |
+        What the caregiver's page shows at a glance: their visits over the last 30 days by outcome,
+        their completion rate, and their next and most recent visits, across every dependant they
+        visit. Outcomes follow the same rules as `GET /dashboard/overview`'s trend. Supervisor-only,
+        like every `/caregivers` route.
+      operationId: getCaregiverStats
+      responses:
+        '200':
+          description: The caregiver's visit statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitStats'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
   /dependants:
     post:
       tags: [Dependants]
@@ -380,6 +404,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Dependant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /dependants/{dependantId}/stats:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    get:
+      tags: [Dependants]
+      summary: Visit statistics for a dependant
+      description: |
+        What the dependant's page shows at a glance: their visits over the last 30 days by outcome,
+        the completion rate, and the next and most recent visits. Outcomes follow the same rules as
+        `GET /dashboard/overview`'s trend. The same access as `GET /dependants/{dependantId}`: a
+        supervisor, or a family member linked to this dependant (403 otherwise).
+      operationId: getDependantStats
+      responses:
+        '200':
+          description: The dependant's visit statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitStats'
         '404':
           $ref: '#/components/responses/NotFound'
         default:
@@ -1733,6 +1781,63 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
+    VisitStats:
+      type: object
+      required: [windowDays, visits, completionRate, lastMissedVisitStart, nextVisit, lastVisit]
+      properties:
+        windowDays:
+          type: integer
+          description: How many days back `visits` covers (30), ending now.
+        visits:
+          type: object
+          description: |
+            Visits that started in the window, by outcome. `missed` includes a visit whose end
+            passed with no check-in even before the missed-visit sweep marks it; `open` is one
+            under way or checked in but not yet checked out.
+          required: [total, completed, missed, cancelled, open]
+          properties:
+            total: { type: integer }
+            completed: { type: integer }
+            missed: { type: integer }
+            cancelled: { type: integer }
+            open: { type: integer }
+        completionRate:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+          description: completed / (completed + missed); null when neither happened in the window.
+        lastMissedVisitStart:
+          type: [string, 'null']
+          format: date-time
+          description: When the most recent missed visit in the window was due to start.
+        nextVisit:
+          description: The next scheduled visit still to come.
+          oneOf:
+            - $ref: '#/components/schemas/VisitStatsVisit'
+            - type: 'null'
+        lastVisit:
+          description: The most recent visit someone checked in to, however long ago.
+          oneOf:
+            - allOf:
+                - $ref: '#/components/schemas/VisitStatsVisit'
+                - type: object
+                  required: [checkinAt, checkoutAt]
+                  properties:
+                    checkinAt: { type: string, format: date-time }
+                    checkoutAt: { type: [string, 'null'], format: date-time }
+            - type: 'null'
+    VisitStatsVisit:
+      type: object
+      required:
+        [id, scheduledStart, scheduledEnd, caregiverId, caregiverName, dependantId, dependantName]
+      properties:
+        id: { type: string, format: uuid }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        caregiverId: { type: string, format: uuid }
+        caregiverName: { type: string }
+        dependantId: { type: string, format: uuid }
+        dependantName: { type: string }
     DashboardOverview:
       type: object
       required: [date, timeZone, generatedAt, visits, trend, previousPeriod, attention]

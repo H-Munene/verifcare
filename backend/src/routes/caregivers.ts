@@ -29,6 +29,7 @@ import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboardin
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
+import { visitStatsFor } from '../db/visitStats.js';
 import { sendProblem } from '../errors.js';
 import {
   decodeCursor,
@@ -367,6 +368,32 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         return;
       }
       res.status(200).json(toCaregiverResponse(row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Visit statistics for the caregiver's page (2026-09-27) - see db/visitStats.ts. Supervisor-
+  // only like every route here (the router-level gate above).
+  router.get('/:caregiverId/stats', async (req, res, next) => {
+    const caregiverId = parseOrSendProblem(caregiverIdParamSchema, req.params.caregiverId, res);
+    if (!caregiverId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    try {
+      const [row] = await db
+        .select({ userId: schema.caregivers.userId })
+        .from(schema.caregivers)
+        .where(eq(schema.caregivers.userId, caregiverId));
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      res.status(200).json(await visitStatsFor(db, { caregiverId }, new Date()));
     } catch (err) {
       next(err);
     }
