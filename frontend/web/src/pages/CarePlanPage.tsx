@@ -18,6 +18,7 @@ import { Input, Label } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
 import { Switch } from '../design-system/Switch';
 import './CarePlanPage.css';
+import { TableSkeleton } from '../design-system/Skeleton';
 
 // docs/visit-task-checklist-plan.md section 4: a dedicated Care Plan screen, separate from
 // dependant registration, per the user's own explicit choice - supervisor-authored tasks that the
@@ -79,7 +80,7 @@ export function CarePlanPage() {
         </Button>
       </div>
 
-      {tasksQuery.isLoading ? <p>Loading...</p> : null}
+      {tasksQuery.isLoading ? <TableSkeleton columns={5} /> : null}
       {tasksQuery.isError ? <p>Failed to load this dependant's care plan.</p> : null}
 
       {tasksQuery.data ? (

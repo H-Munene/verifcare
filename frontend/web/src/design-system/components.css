@@ -825,6 +825,47 @@
   }
 }
 
+/* ---------- Skeleton ----------
+   Loading placeholders: a light grey block with a slow sheen passing over it. */
+
+.ds-skeleton {
+  display: block;
+  max-width: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #efefee 0%, #f7f7f6 40%, #efefee 80%);
+  background-size: 300% 100%;
+  animation: ds-skeleton-sheen 1.6s ease-in-out infinite;
+}
+
+@keyframes ds-skeleton-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-skeleton {
+    animation: none;
+  }
+}
+
+.ds-skeleton-detail__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 28px;
+  max-width: 560px;
+}
+
+.ds-skeleton-detail__row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* ---------- Side panel ----------
    Slides in from the right over a dimmed page (temp_images/sidepanel.png). */
 

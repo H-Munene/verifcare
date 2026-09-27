@@ -17,6 +17,7 @@ import { Card } from '../design-system/Card';
 import { Input } from '../design-system/Input';
 import { Stepper } from '../design-system/Stepper';
 import './RegisterCaregiverPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
 
 // Replaces the earlier single-section form (2026-09-22) - caregivers are professional individuals
 // needing more identity/professional detail than Full Name/Phone alone, and the backend contract
@@ -60,7 +61,7 @@ export function RegisterCaregiverPage() {
     return <p>Only supervisors can register or edit caregivers.</p>;
   }
   if (isEdit && existing.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (isEdit && (existing.isError || !existing.data)) {
     return <p>Failed to load this caregiver.</p>;

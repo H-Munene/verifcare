@@ -17,6 +17,7 @@ import { SortableTh, TableFrame, Th } from '../design-system/Table';
 import { useCursorPages } from '../hooks/useCursorPages';
 import { useListParams } from '../hooks/useListParams';
 import './DependantsListPage.css';
+import { TableSkeleton } from '../design-system/Skeleton';
 
 type DependantSort = NonNullable<ListDependantsParams['sort']>;
 
@@ -95,7 +96,7 @@ export function DependantsListPage() {
         />
       </FilterBar>
 
-      {query.isLoading ? <p>Loading...</p> : null}
+      {query.isLoading ? <TableSkeleton columns={5} /> : null}
       {query.isError ? <p>Failed to load dependants.</p> : null}
 
       {query.data ? (

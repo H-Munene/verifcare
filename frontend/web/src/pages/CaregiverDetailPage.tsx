@@ -9,6 +9,7 @@ import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Tabs } from '../design-system/Tabs';
 import './CaregiverDetailPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
 
 type DetailTab = 'enrollment' | 'visits';
 
@@ -45,7 +46,7 @@ export function CaregiverDetailPage() {
   });
 
   if (caregiverQuery.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (caregiverQuery.isError || !caregiverQuery.data) {
     return <p>Failed to load this caregiver.</p>;

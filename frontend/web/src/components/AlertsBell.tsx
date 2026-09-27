@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useApi } from '../api/useApi';
 import { SidePanel } from '../design-system/SidePanel';
+import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 import { AttentionList } from './AttentionList';
 import { todayInNairobi } from './visitStates';
 import './AlertsBell.css';
@@ -53,7 +54,12 @@ export function AlertsBell() {
           ) : query.isError ? (
             <p className="alerts-bell__message">Alerts couldn't be loaded. Try again shortly.</p>
           ) : (
-            <p className="alerts-bell__message">Loading alerts...</p>
+            <SkeletonRegion label="Loading alerts">
+              <Skeleton height={36} radius="var(--radius-button)" />
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} height={52} style={{ marginTop: 14 }} />
+              ))}
+            </SkeletonRegion>
           )}
         </SidePanel>
       ) : null}

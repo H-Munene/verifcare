@@ -12,6 +12,7 @@ import { useAuth } from '../auth/AuthContext';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import './FlaggedEnrollmentsPage.css';
+import { TableSkeleton } from '../design-system/Skeleton';
 
 // New page (not part of the original wireframe's 7 sections - see components/AppShell.tsx's own
 // note on that), reachable via a link from DependantDetailPage/DependantsListPage rather than a
@@ -55,7 +56,7 @@ export function FlaggedEnrollmentsPage() {
         genuine duplicate.
       </p>
 
-      {query.isLoading ? <p>Loading...</p> : null}
+      {query.isLoading ? <TableSkeleton columns={5} /> : null}
       {query.isError ? <p>Failed to load flagged enrollments.</p> : null}
 
       {query.data ? (

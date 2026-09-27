@@ -20,6 +20,7 @@ import { Input } from '../design-system/Input';
 import { Stepper } from '../design-system/Stepper';
 import { Switch } from '../design-system/Switch';
 import './RegisterDependantPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
 
 // Handles both registration (no :dependantId in the route) and editing (wireframe page 5 combines
 // both into one form, and PATCH /dependants/{id} already existed from HEZ-30, so this costs
@@ -74,7 +75,7 @@ export function RegisterDependantPage() {
   });
 
   if (isEdit && existing.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (isEdit && (existing.isError || !existing.data)) {
     return <p>Failed to load this dependant.</p>;

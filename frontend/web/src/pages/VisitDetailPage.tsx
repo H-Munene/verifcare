@@ -7,6 +7,7 @@ import type { BadgeTone } from '../design-system/Badge';
 import { Card } from '../design-system/Card';
 import { Timeline, type TimelineStep } from '../design-system/Timeline';
 import './VisitDetailPage.css';
+import { DetailSkeleton, Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 
 // Tapping a row on VisitsPage lands here (2026-09-23, user request): the same four milestones the
 // user described - check-in, each side's photo verification, checkout - read off
@@ -69,7 +70,7 @@ export function VisitDetailPage() {
   });
 
   if (visitQuery.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (visitQuery.isError || !visitQuery.data) {
     return <p>Failed to load this visit.</p>;
@@ -108,7 +109,17 @@ export function VisitDetailPage() {
 
       <Card className="visit-detail-page__timeline-card">
         <div className="visit-detail-page__section-title">Visit Timeline</div>
-        {verificationQuery.isLoading ? <p>Loading...</p> : <Timeline steps={steps} />}
+        {verificationQuery.isLoading ? (
+          <SkeletonRegion label="Loading the timeline">
+            <div className="visit-detail-page__timeline-skeleton">
+              {[70, 55, 62, 48].map((width, i) => (
+                <Skeleton key={i} width={`${width}%`} height={14} />
+              ))}
+            </div>
+          </SkeletonRegion>
+        ) : (
+          <Timeline steps={steps} />
+        )}
       </Card>
     </div>
   );

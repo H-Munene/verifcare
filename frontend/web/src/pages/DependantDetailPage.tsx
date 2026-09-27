@@ -19,6 +19,7 @@ import { Switch } from '../design-system/Switch';
 import { Tabs } from '../design-system/Tabs';
 import { Tag } from '../design-system/Tag';
 import './DependantDetailPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
 
 type DetailTab = 'family' | 'enrollment' | 'visits' | 'cognitive';
 
@@ -54,7 +55,7 @@ export function DependantDetailPage() {
   });
 
   if (dependantQuery.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (dependantQuery.isError || !dependantQuery.data) {
     return <p>Failed to load this dependant.</p>;

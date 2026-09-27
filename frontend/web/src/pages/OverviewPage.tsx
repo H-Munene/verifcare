@@ -20,6 +20,7 @@ import { VisitsMap } from '../components/VisitsMap';
 import { STATE_META, VISIT_STATES, formatTime, todayInNairobi } from '../components/visitStates';
 import { Button } from '../design-system/Button';
 import './OverviewPage.css';
+import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 
 const TIME_ZONE = 'Africa/Nairobi';
 const USE_GOOGLE_MAP = import.meta.env.VITE_OVERVIEW_MAP === 'google';
@@ -135,18 +136,16 @@ export function OverviewPage() {
     return (
       <div className="overview">
         {header}
-        <div className="overview__message">
-          {overviewQuery.isError ? (
-            <>
-              <p>The overview couldn't be loaded. Check your connection and try again.</p>
-              <Button type="button" onClick={() => void overviewQuery.refetch()}>
-                Try again
-              </Button>
-            </>
-          ) : (
-            <p>Loading the overview...</p>
-          )}
-        </div>
+        {overviewQuery.isError ? (
+          <div className="overview__message">
+            <p>The overview couldn't be loaded. Check your connection and try again.</p>
+            <Button type="button" onClick={() => void overviewQuery.refetch()}>
+              Try again
+            </Button>
+          </div>
+        ) : (
+          <OverviewSkeleton />
+        )}
       </div>
     );
   }
@@ -334,5 +333,66 @@ export function OverviewPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+/** The Overview's own grid, with placeholders where its tiles, map, lists and chart will be. */
+function OverviewSkeleton() {
+  return (
+    <SkeletonRegion label="Loading the overview">
+      <div className="overview__grid">
+        <div className="overview__tiles">
+          {VISIT_STATES.map((state) => (
+            <div key={state} className="overview__tile">
+              <Skeleton width={110} height={13} />
+              <Skeleton width={44} height={30} />
+              <Skeleton width={90} height={11} />
+            </div>
+          ))}
+        </div>
+        <div className="overview__map">
+          <div className="overview__section-head">
+            <Skeleton width={40} height={14} />
+          </div>
+          <div className="overview__map-frame">
+            <Skeleton height="100%" radius={0} />
+          </div>
+        </div>
+        <div className="overview__panel overview__visits">
+          <div className="overview__section-head">
+            <Skeleton width={80} height={14} />
+          </div>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="overview__visit">
+              <Skeleton width={40} height={12} />
+              <span className="overview__visit-names">
+                <Skeleton width="70%" height={13} />
+                <Skeleton width="45%" height={11} style={{ marginTop: 5 }} />
+              </span>
+              <Skeleton width={70} height={12} />
+            </div>
+          ))}
+        </div>
+        <div className="overview__panel overview__trend">
+          <div className="overview__section-head">
+            <Skeleton width={110} height={14} />
+          </div>
+          <div className="overview__panel-body">
+            <Skeleton height={260} radius={0} />
+          </div>
+        </div>
+        <div className="overview__panel overview__attention">
+          <div className="overview__section-head">
+            <Skeleton width={140} height={14} />
+          </div>
+          <div className="overview__panel-body">
+            <Skeleton height={36} radius="var(--radius-button)" />
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} height={44} style={{ marginTop: 14 }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </SkeletonRegion>
   );
 }

@@ -33,3 +33,10 @@
   color: var(--color-ink-primary);
   margin-bottom: 16px;
 }
+
+.visit-detail-page__timeline-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px 0;
+}

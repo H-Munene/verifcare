@@ -20,6 +20,7 @@ import { HomeSummary } from './HomeSummary';
 import { groupByHome } from './homes';
 import { STATE_HEX, STATE_META, mostUrgent } from './visitStates';
 import './VisitsMap.css';
+import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 
 export interface VisitsMapProps {
   apiKey: string;
@@ -80,7 +81,11 @@ export function VisitsMap({ apiKey, visits, timeZone, activeId, onActiveChange }
     return <Badge tone="danger">Could not load Google Maps - check the API key.</Badge>;
   }
   if (!isLoaded) {
-    return <div className="visits-map visits-map--loading">Loading map...</div>;
+    return (
+      <SkeletonRegion label="Loading the map" className="visits-map">
+        <Skeleton height="100%" radius={0} style={{ position: 'absolute', inset: 0 }} />
+      </SkeletonRegion>
+    );
   }
 
   const active = homes.find((h) => h.dependantId === activeId);

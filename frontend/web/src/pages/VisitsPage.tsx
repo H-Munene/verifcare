@@ -24,6 +24,7 @@ import { SortableTh, TableFrame, Th } from '../design-system/Table';
 import { useCursorPages } from '../hooks/useCursorPages';
 import { useListParams } from '../hooks/useListParams';
 import './VisitsPage.css';
+import { TableSkeleton } from '../design-system/Skeleton';
 
 // Unifies the former Scheduling and Visits nav entries into one page (2026-09-23, user request):
 // a "Schedule Visit" action plus a live table of every visit, the table's own status column doing
@@ -244,7 +245,7 @@ export function VisitsPage() {
         />
       </FilterBar>
 
-      {schedulesQuery.isLoading ? <p>Loading...</p> : null}
+      {schedulesQuery.isLoading ? <TableSkeleton columns={5} /> : null}
       {schedulesQuery.isError ? <p>Failed to load visits.</p> : null}
 
       {schedulesQuery.data ? (

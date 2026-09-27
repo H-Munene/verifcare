@@ -12,6 +12,7 @@ import type { VisitStatus } from '../api/visitSchedules';
 import type { BadgeTone } from '../design-system/Badge';
 import { Badge } from '../design-system/Badge';
 import './VisitHistoryList.css';
+import { TableSkeleton } from '../design-system/Skeleton';
 
 // Shared by DependantDetailPage's and CaregiverDetailPage's own Visit History tab (2026-09-23,
 // user request) - GET /visit-schedules already supports filtering by exactly one of
@@ -63,7 +64,7 @@ export function VisitHistoryList({ caregiverId, dependantId }: VisitHistoryListP
   });
 
   if (query.isLoading) {
-    return <p>Loading...</p>;
+    return <TableSkeleton columns={4} rows={4} />;
   }
   if (query.isError) {
     return <p>Failed to load visit history.</p>;
