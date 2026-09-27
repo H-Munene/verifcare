@@ -1,7 +1,9 @@
 import {
   Calendar03Icon,
   CheckmarkBadge01Icon,
+  Delete02Icon,
   HandHeartIcon,
+  PencilEdit02Icon,
   UserIcon,
 } from '@hugeicons/core-free-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,6 +14,7 @@ import type { Caregiver } from '../api/caregivers';
 import type { Dependant } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { ActionMenu } from '../design-system/ActionMenu';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Label } from '../design-system/Input';
@@ -281,25 +284,26 @@ export function VisitsPage() {
                     <td>
                       <Badge tone={statusTone(visit.status)}>{statusLabel(visit.status)}</Badge>
                     </td>
+                    {/* Edit and Cancel behind a vertical ellipsis (user request). "Cancel visit",
+                        not "Delete": the API cancels a visit and keeps its record. */}
                     <td className="visits-page__row-actions">
-                      <Button
-                        disabled={visit.status !== 'scheduled'}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setModalState({ mode: 'edit', visit });
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        disabled={visit.status !== 'scheduled' || cancelMutation.isPending}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cancelMutation.mutate(visit.id);
-                        }}
-                      >
-                        Cancel
-                      </Button>
+                      <ActionMenu
+                        label={`Actions for the visit to ${visit.dependantDisplayName}`}
+                        items={[
+                          {
+                            label: 'Edit',
+                            icon: PencilEdit02Icon,
+                            disabled: visit.status !== 'scheduled',
+                            onSelect: () => setModalState({ mode: 'edit', visit }),
+                          },
+                          {
+                            label: 'Cancel visit',
+                            icon: Delete02Icon,
+                            disabled: visit.status !== 'scheduled' || cancelMutation.isPending,
+                            onSelect: () => cancelMutation.mutate(visit.id),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}

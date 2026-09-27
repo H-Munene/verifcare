@@ -14,9 +14,9 @@
 }
 
 .visits-page__row-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .visits-page__pagination {
