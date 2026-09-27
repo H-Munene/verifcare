@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppShell } from './components/AppShell';
@@ -12,7 +12,6 @@ import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { RegisterCaregiverPage } from './pages/RegisterCaregiverPage';
 import { RegisterDependantPage } from './pages/RegisterDependantPage';
-import { VisitDetailPage } from './pages/VisitDetailPage';
 import { VisitsPage } from './pages/VisitsPage';
 
 // The Overview is the supervisor console's landing page (as in the admin wireframes), and its data
@@ -20,6 +19,11 @@ import { VisitsPage } from './pages/VisitsPage';
 function SupervisorOverview() {
   const { identity } = useAuth();
   return identity?.role === 'supervisor' ? <OverviewPage /> : <Navigate to="/dependants" replace />;
+}
+
+function VisitLinkRedirect() {
+  const { visitId } = useParams<{ visitId: string }>();
+  return <Navigate to={`/visits?visit=${visitId}`} replace />;
 }
 
 export function App() {
@@ -44,7 +48,8 @@ export function App() {
                 <Route path="/caregivers/:caregiverId" element={<CaregiverDetailPage />} />
                 <Route path="/caregivers/:caregiverId/edit" element={<RegisterCaregiverPage />} />
                 <Route path="/visits" element={<VisitsPage />} />
-                <Route path="/visits/:visitId" element={<VisitDetailPage />} />
+                {/* The visit page was replaced by the side panel; old links open it there. */}
+                <Route path="/visits/:visitId" element={<VisitLinkRedirect />} />
                 <Route path="/reviews" element={<FlaggedEnrollmentsPage />} />
                 {/* The page's address before it became the Reviews section. */}
                 <Route path="/flagged-enrollments" element={<Navigate to="/reviews" replace />} />

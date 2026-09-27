@@ -68,12 +68,3 @@
   gap: 8px;
   margin-top: 4px;
 }
-
-.visits-page__arrow {
-  color: var(--color-ink-muted);
-}
-
-.visits-page__panel-link {
-  font-size: 13px;
-  font-weight: 500;
-}

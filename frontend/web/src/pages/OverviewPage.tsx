@@ -9,12 +9,13 @@ import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { DashboardOverview, OverviewVisit, VisitState } from '../api/dashboard';
 import { useApi } from '../api/useApi';
 import { AttentionList } from '../components/AttentionList';
 import { OsmVisitsMap } from '../components/OsmVisitsMap';
 import { OutcomeSummary } from '../components/OutcomeSummary';
+import { VisitPanel } from '../components/VisitPanel';
 import { OutcomeTrendChart } from '../components/OutcomeTrendChart';
 import { VisitsMap } from '../components/VisitsMap';
 import { STATE_META, VISIT_STATES, formatTime, todayInNairobi } from '../components/visitStates';
@@ -68,7 +69,6 @@ function tileDetail(state: VisitState, visits: OverviewVisit[], overview: Dashbo
 
 export function OverviewPage() {
   const { dashboard } = useApi();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const todayDate = todayInNairobi();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('date') ?? '')
@@ -77,6 +77,8 @@ export function OverviewPage() {
   const isToday = date === todayDate;
   const [focusState, setFocusState] = useState<VisitState | null>(null);
   const [activeHome, setActiveHome] = useState<string | null>(null);
+  // A visit opened from the day's list, shown in the side panel over the Overview.
+  const [openVisitId, setOpenVisitId] = useState<string | null>(null);
 
   const overviewQuery = useQuery({
     queryKey: ['dashboard-overview', date],
@@ -263,7 +265,7 @@ export function OverviewPage() {
                     onMouseLeave={() => setActiveHome(null)}
                     onFocus={() => setActiveHome(visit.dependant.id)}
                     onBlur={() => setActiveHome(null)}
-                    onClick={() => void navigate(`/visits/${visit.id}`)}
+                    onClick={() => setOpenVisitId(visit.id)}
                   >
                     <span className="overview__visit-time">
                       {formatTime(visit.scheduledStart, overview.timeZone)}
@@ -332,6 +334,9 @@ export function OverviewPage() {
           </div>
         </section>
       </div>
+      {openVisitId ? (
+        <VisitPanel visitId={openVisitId} onClose={() => setOpenVisitId(null)} />
+      ) : null}
     </div>
   );
 }

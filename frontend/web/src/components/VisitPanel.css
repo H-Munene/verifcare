@@ -1,0 +1,9 @@
+.visit-panel__arrow {
+  color: var(--color-ink-muted);
+}
+
+.visit-panel__message {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}

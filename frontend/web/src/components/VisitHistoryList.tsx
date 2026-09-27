@@ -6,12 +6,15 @@ import {
 } from '@hugeicons/core-free-icons';
 import { TableFrame, Th } from '../design-system/Table';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import type { VisitSchedule } from '../api/visitSchedules';
 import { Badge } from '../design-system/Badge';
 import './VisitHistoryList.css';
 import { TableSkeleton } from '../design-system/Skeleton';
 import { statusLabel, statusTone } from './visitStatus';
+import { VisitPanel } from './VisitPanel';
 
 // Shared by DependantDetailPage's and CaregiverDetailPage's own Visit History tab (2026-09-23,
 // user request) - GET /visit-schedules already supports filtering by exactly one of
@@ -33,7 +36,7 @@ export interface VisitHistoryListProps {
 
 export function VisitHistoryList({ caregiverId, dependantId }: VisitHistoryListProps) {
   const { visitSchedules } = useApi();
-  const navigate = useNavigate();
+  const [open, setOpen] = useState<VisitSchedule | null>(null);
 
   const query = useQuery({
     queryKey: ['visit-schedules', 'for-subject', caregiverId ?? dependantId],
@@ -68,16 +71,19 @@ export function VisitHistoryList({ caregiverId, dependantId }: VisitHistoryListP
         </thead>
         <tbody>
           {rows.map((visit) => (
-            <tr
-              key={visit.id}
-              className="ds-table__row--link"
-              onClick={() => void navigate(`/visits/${visit.id}`)}
-            >
+            <tr key={visit.id} className="ds-table__row--link" onClick={() => setOpen(visit)}>
               <td>
+                {/* A real link for new tabs; a plain click opens the panel here (user request). */}
                 <Link
-                  to={`/visits/${visit.id}`}
+                  to={`/visits?visit=${visit.id}`}
                   className="ds-table__link"
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
+                      event.preventDefault();
+                      setOpen(visit);
+                    }
+                  }}
                 >
                   {visit.caregiverDisplayName}
                 </Link>
@@ -91,6 +97,7 @@ export function VisitHistoryList({ caregiverId, dependantId }: VisitHistoryListP
           ))}
         </tbody>
       </table>
+      {open ? <VisitPanel visitId={open.id} visit={open} onClose={() => setOpen(null)} /> : null}
     </TableFrame>
   );
 }

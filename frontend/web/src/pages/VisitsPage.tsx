@@ -25,8 +25,7 @@ import { useListParams } from '../hooks/useListParams';
 import './VisitsPage.css';
 import { TableSkeleton } from '../design-system/Skeleton';
 import { statusLabel, statusTone } from '../components/visitStatus';
-import { SidePanel } from '../design-system/SidePanel';
-import { VisitDetails } from '../components/VisitDetails';
+import { VisitPanel } from '../components/VisitPanel';
 
 // Unifies the former Scheduling and Visits nav entries into one page (2026-09-23, user request):
 // a "Schedule Visit" action plus a live table of every visit, the table's own status column doing
@@ -108,8 +107,14 @@ export function VisitsPage() {
   const sort = params.oneOf('sort', SORTS, '-scheduledStart');
   const pages = useCursorPages(`${status}|${caregiverId}|${dependantId}|${date}|${sort}`);
   const { directionOf, toggled } = sortState<'scheduledStart'>(sort);
-  // The visit shown in the side panel (2026-09-27, user request: rows open a panel, not a page).
-  const [panelVisit, setPanelVisit] = useState<VisitSchedule | null>(null);
+  // The visit in the side panel follows ?visit=<id> (2026-09-27: rows open a panel, not a page),
+  // so any link to a visit opens it here. The row's visit is kept to show the panel at once.
+  const panelVisitId = params.get('visit');
+  const [clickedVisit, setClickedVisit] = useState<VisitSchedule | undefined>(undefined);
+  function openVisit(visit: VisitSchedule) {
+    setClickedVisit(visit);
+    params.set('visit', visit.id);
+  }
   const [modalState, setModalState] = useState<
     { mode: 'create' } | { mode: 'edit'; visit: VisitSchedule } | null
   >(null);
@@ -252,19 +257,19 @@ export function VisitsPage() {
                   <tr
                     key={visit.id}
                     className="ds-table__row--link"
-                    onClick={() => setPanelVisit(visit)}
+                    onClick={() => openVisit(visit)}
                   >
                     <td>
                       {/* A real link, so the keyboard reaches it and a new tab still opens the
                           full page; a plain click opens the panel. */}
                       <Link
-                        to={`/visits/${visit.id}`}
+                        to={`/visits?visit=${visit.id}`}
                         className="ds-table__link"
                         onClick={(event) => {
                           event.stopPropagation();
                           if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
                             event.preventDefault();
-                            setPanelVisit(visit);
+                            openVisit(visit);
                           }
                         }}
                       >
@@ -335,24 +340,12 @@ export function VisitsPage() {
         </>
       ) : null}
 
-      {panelVisit ? (
-        <SidePanel
-          eyebrow="Visit"
-          title={
-            <>
-              {panelVisit.caregiverDisplayName} <span className="visits-page__arrow">→</span>{' '}
-              {panelVisit.dependantDisplayName}
-            </>
-          }
-          onClose={() => setPanelVisit(null)}
-          footer={
-            <Link to={`/visits/${panelVisit.id}`} className="visits-page__panel-link">
-              Open the full page
-            </Link>
-          }
-        >
-          <VisitDetails visit={panelVisit} />
-        </SidePanel>
+      {panelVisitId ? (
+        <VisitPanel
+          visitId={panelVisitId}
+          visit={clickedVisit?.id === panelVisitId ? clickedVisit : undefined}
+          onClose={() => params.set('visit', '')}
+        />
       ) : null}
 
       {modalState ? (

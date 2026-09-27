@@ -7,6 +7,7 @@ import { Notification03Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import { SidePanel } from '../design-system/SidePanel';
 import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
@@ -18,7 +19,13 @@ const REFRESH_MS = 60_000;
 
 export function AlertsBell() {
   const { dashboard } = useApi();
-  const [open, setOpen] = useState(false);
+  // The address the panel was opened on: it counts as open only while we're still there, so a
+  // link inside it (e.g. Open visit) navigating away closes it behind.
+  const location = useLocation();
+  const here = location.pathname + location.search;
+  const [openedAt, setOpenedAt] = useState<string | null>(null);
+  const open = openedAt === here;
+  const setOpen = (value: boolean) => setOpenedAt(value ? here : null);
   const today = todayInNairobi();
   const query = useQuery({
     queryKey: ['dashboard-overview', today],

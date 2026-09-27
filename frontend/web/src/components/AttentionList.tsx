@@ -136,7 +136,7 @@ export function AttentionList({
                         </span>
                       </p>
                       <div className="attention__actions">
-                        <Link to={`/visits/${alert.visitScheduleId}`}>Open visit</Link>
+                        <Link to={`/visits?visit=${alert.visitScheduleId}`}>Open visit</Link>
                       </div>
                     </div>
                     <Button
