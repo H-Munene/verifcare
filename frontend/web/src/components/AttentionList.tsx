@@ -202,7 +202,12 @@ export function AttentionList({
                   {withoutPhoto.map((d) => (
                     <li key={d.id}>
                       <Link to={`/dependants/${d.id}`} className="attention__row">
-                        <span className="attention__title">{d.fullName}</span>
+                        {/* The dependant's first initial in a circle, beside their name (user
+                            request), so the list reads as people at a glance. */}
+                        <span className="attention__avatar" aria-hidden>
+                          {d.fullName.trim().charAt(0).toUpperCase() || '?'}
+                        </span>
+                        <span className="attention__title attention__name">{d.fullName}</span>
                         <HugeiconsIcon
                           icon={ArrowRight01Icon}
                           size={16}

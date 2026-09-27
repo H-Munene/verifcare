@@ -90,7 +90,8 @@ export function SegmentedControl({
               .join(' ')}
             onClick={() => onChange(segment.id)}
           >
-            {segment.icon ? (
+            {/* The tabs appearance is text only (user request for the alerts panel). */}
+            {segment.icon && appearance !== 'tabs' ? (
               <HugeiconsIcon
                 icon={segment.icon}
                 size={16}

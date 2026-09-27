@@ -149,3 +149,24 @@ a.attention__row:focus-visible {
   font-size: 12px;
   color: var(--color-danger-text);
 }
+
+.attention__avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-structural);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink-default);
+}
+
+/* The name takes the space between the avatar and the chevron. */
+.attention__name {
+  flex: 1;
+  min-width: 0;
+}

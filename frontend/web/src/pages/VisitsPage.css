@@ -31,7 +31,13 @@
 .visits-page__modal-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
+}
+
+/* Room between each label and its field (user request: let the form breathe). */
+.visits-page__modal-form .ds-label {
+  display: block;
+  margin-bottom: 8px;
 }
 
 .visits-page__modal-row {
