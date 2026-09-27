@@ -608,7 +608,12 @@ paths:
     post:
       tags: [Biometric Enrollments]
       summary: Confirm an uploaded biometric image and record it
-      description: Called after the client has PUT the image to the presigned URL from `/biometric-enrollments/upload-url`.
+      description: |
+        Called after the client has PUT the image to the presigned URL from
+        `/biometric-enrollments/upload-url`. A photo that activates supersedes every other active
+        row for the subject, whatever its `imageOrder` (one photo per person); a photo flagged as a
+        likely duplicate supersedes nothing until a supervisor approves it, so the current photo
+        stays in use meanwhile.
       operationId: createBiometricEnrollment
       requestBody:
         required: true
@@ -683,7 +688,7 @@ paths:
       description: |
         Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
         until now, since it wasn't indexed while flagged) and promotes the row to `active`,
-        superseding any existing active row for the same subject/imageOrder.
+        superseding every other active row for the subject (one photo per person).
       operationId: approveBiometricEnrollment
       parameters:
         - name: id

@@ -95,7 +95,11 @@ export function CaregiverDetailPage() {
 
       <div className="caregiver-detail__tab-panel">
         {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection subjectType="caregiver" subjectId={caregiver.userId} />
+          <BiometricEnrollmentSection
+            subjectType="caregiver"
+            subjectId={caregiver.userId}
+            subjectName={caregiver.fullName}
+          />
         ) : null}
         {activeTab === 'visits' ? <VisitHistoryList caregiverId={caregiver.userId} /> : null}
       </div>

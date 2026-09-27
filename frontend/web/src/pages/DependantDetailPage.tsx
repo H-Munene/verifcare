@@ -126,7 +126,11 @@ export function DependantDetailPage() {
         ) : null}
 
         {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection subjectType="dependant" subjectId={dependant.id} />
+          <BiometricEnrollmentSection
+            subjectType="dependant"
+            subjectId={dependant.id}
+            subjectName={dependant.fullName}
+          />
         ) : null}
 
         {activeTab === 'visits' ? <VisitHistoryList dependantId={dependant.id} /> : null}

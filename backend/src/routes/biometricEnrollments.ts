@@ -11,10 +11,13 @@
 // quality_score computation (Rekognition DetectFaces, synchronous, at confirm time) lives in
 // db/biometricStorage.ts, not here - see that file's header comment for the full reasoning.
 //
-// Re-enrollment (a new image confirmed for a subject/imageOrder that already has an active row):
-// the previous active row is marked 'superseded' in the same transaction as the new insert - the
-// natural reading of the active/superseded/deleted/flagged status column, which the schema defines
-// but no code path used before HEZ-31.
+// Re-enrollment: activating a new photo (confirm, or a supervisor approving a flagged one) marks
+// every other active row for that subject 'superseded' in the same transaction - the natural
+// reading of the active/superseded/deleted/flagged status column. Since 2026-09-27 this is per
+// subject, not per imageOrder slot: the POC keeps one photo per person (user decision), and
+// check-in matches against every active row, so a photo left active in another slot (the seed and
+// the old three-slot web UI both made them) would keep matching after it had been "replaced".
+// A flagged upload supersedes nothing until approved, so a person is never left without a photo.
 //
 // Uniqueness (HEZ-85): after DetectFaces' quality check passes, db/biometricFaceCollection.ts's
 // checkDuplicate() searches every previously enrolled face (across both caregivers and dependants -
@@ -338,7 +341,6 @@ export function createBiometricEnrollmentsRouter(
             .where(
               and(
                 subjectCondition(body.subjectType, body.subjectId),
-                eq(schema.biometricEnrollments.imageOrder, body.imageOrder),
                 eq(schema.biometricEnrollments.status, 'active'),
               ),
             );
@@ -523,7 +525,6 @@ export function createBiometricEnrollmentsRouter(
           .where(
             and(
               subjectCondition(subjectType, subjectId),
-              eq(schema.biometricEnrollments.imageOrder, existing.imageOrder),
               eq(schema.biometricEnrollments.status, 'active'),
             ),
           );
