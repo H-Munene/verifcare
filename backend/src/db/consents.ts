@@ -3,8 +3,9 @@ import type { Db } from './client.js';
 import * as schema from './schema.js';
 
 // Where every "has consent" and "record consent" rule lives (2026-09-27), so the consent screen's
-// grant (routes/terms.ts) and dependant registration (routes/dependants.ts) can never disagree
-// about what counts - the same role db/checkinPhotos.ts plays for "has a photo".
+// grant (routes/terms.ts), dependant registration (routes/dependants.ts) and the scheduling guard
+// (routes/visitSchedules.ts) can never disagree about what counts - the same role
+// db/checkinPhotos.ts plays for "has a photo".
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -33,6 +34,34 @@ function subjectCondition(subjects: ConsentSubject[]) {
     caregiverIds.length > 0 ? inArray(schema.consentRecords.caregiverId, caregiverIds) : undefined,
     dependantIds.length > 0 ? inArray(schema.consentRecords.dependantId, dependantIds) : undefined,
   );
+}
+
+/**
+ * The subjects (of those given) holding an active consent of [consentType], as a set of ids.
+ * One query however many subjects.
+ */
+export async function subjectsWithActiveConsent(
+  db: Db | Tx,
+  subjects: ConsentSubject[],
+  consentType: ConsentType,
+): Promise<Set<string>> {
+  if (subjects.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .select({
+      caregiverId: schema.consentRecords.caregiverId,
+      dependantId: schema.consentRecords.dependantId,
+    })
+    .from(schema.consentRecords)
+    .where(
+      and(
+        isActiveConsent,
+        eq(schema.consentRecords.consentType, consentType),
+        subjectCondition(subjects),
+      ),
+    );
+  return new Set(rows.map((row) => (row.caregiverId ?? row.dependantId)!));
 }
 
 /**

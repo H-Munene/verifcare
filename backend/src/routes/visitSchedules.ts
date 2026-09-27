@@ -50,6 +50,7 @@ import type { AuthenticatedUser } from '../auth/verifier.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import { isCheckinPhoto } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
+import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
@@ -285,7 +286,38 @@ async function missingPhotoDetail(
   return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} a photo for check-in. Add the photo first (a photo awaiting review doesn't count yet).`;
 }
 
-function sendMissingPhoto(res: Response, detail: string): void {
+// Consent guardrail (2026-09-27, user request): a visit can't be scheduled or rescheduled until
+// both the caregiver and the dependant have an active (unrevoked) biometric_verification consent -
+// check-in photographs both of them, so a visit without that consent could only be carried out by
+// processing someone's biometric data without their consent. Same structure as the photo guardrail
+// above; "has consent" is db/consents.ts's rule, shared with the consent screen that grants it.
+// Returns the Problem detail, or null when both have consented.
+async function missingConsentDetail(
+  db: Db,
+  caregiverId: string,
+  dependantId: string,
+): Promise<string | null> {
+  const consented = await subjectsWithActiveConsent(
+    db,
+    [
+      { subjectType: 'caregiver', id: caregiverId },
+      { subjectType: 'dependant', id: dependantId },
+    ],
+    'biometric_verification',
+  );
+  const missing = [
+    consented.has(caregiverId) ? null : 'the caregiver',
+    consented.has(dependantId) ? null : "the dependant (through their family's primary contact)",
+  ].filter((who): who is string => who !== null);
+  if (missing.length === 0) {
+    return null;
+  }
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to photo identity verification. Consent is given by accepting the terms in the Mzazi Care app.`;
+}
+
+// Shared by both guardrails: each means "this visit can't go ahead as scheduled", not a malformed
+// request.
+function sendUnschedulable(res: Response, detail: string): void {
   sendProblem(res, { type: 'about:blank', title: 'Unprocessable Entity', status: 422, detail });
 }
 
@@ -398,7 +430,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
 
       const photoDetail = await missingPhotoDetail(db, body.caregiverId, body.dependantId);
       if (photoDetail) {
-        sendMissingPhoto(res, photoDetail);
+        sendUnschedulable(res, photoDetail);
+        return;
+      }
+      const consentDetail = await missingConsentDetail(db, body.caregiverId, body.dependantId);
+      if (consentDetail) {
+        sendUnschedulable(res, consentDetail);
         return;
       }
 
@@ -758,8 +795,9 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
-      // Moving a visit is scheduling it again, so the photo guardrail applies; a status-only change
-      // (e.g. cancelling) doesn't, so an existing visit can always be cancelled.
+      // Moving a visit is scheduling it again, so the photo and consent guardrails apply; a
+      // status-only change (e.g. cancelling) doesn't, so an existing visit can always be cancelled
+      // - including after a consent is withdrawn, which is exactly when cancelling is needed.
       if (body.scheduledStart !== undefined || body.scheduledEnd !== undefined) {
         const photoDetail = await missingPhotoDetail(
           db,
@@ -767,7 +805,16 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           existing.dependantId,
         );
         if (photoDetail) {
-          sendMissingPhoto(res, photoDetail);
+          sendUnschedulable(res, photoDetail);
+          return;
+        }
+        const consentDetail = await missingConsentDetail(
+          db,
+          existing.caregiverId,
+          existing.dependantId,
+        );
+        if (consentDetail) {
+          sendUnschedulable(res, consentDetail);
           return;
         }
       }

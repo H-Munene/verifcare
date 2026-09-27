@@ -124,10 +124,27 @@ async function enrollPhoto(
   });
 }
 
+// Scheduling also needs an active biometric_verification consent for both people (the consent
+// guardrail), so test caregivers and dependants get one too unless a test is about its absence.
+async function grantBiometricConsent(
+  subject: { caregiverId: string } | { dependantId: string },
+  grantedBy: string,
+): Promise<void> {
+  await getDb()
+    .insert(schema.consentRecords)
+    .values({
+      ...('caregiverId' in subject
+        ? { subjectType: 'caregiver' as const, caregiverId: subject.caregiverId }
+        : { subjectType: 'dependant' as const, dependantId: subject.dependantId }),
+      consentType: 'biometric_verification',
+      grantedBy,
+    });
+}
+
 async function createTestCaregiver(
   sub: string,
   phoneNumber: string,
-  { withPhoto = true }: { withPhoto?: boolean } = {},
+  { withPhoto = true, withConsent = true }: { withPhoto?: boolean; withConsent?: boolean } = {},
 ): Promise<typeof schema.caregivers.$inferSelect> {
   const user = await createTestUser(sub, 'caregiver', phoneNumber);
   const db = getDb();
@@ -138,12 +155,15 @@ async function createTestCaregiver(
   if (withPhoto) {
     await enrollPhoto({ caregiverId: row.userId }, user.id);
   }
+  if (withConsent) {
+    await grantBiometricConsent({ caregiverId: row.userId }, user.id);
+  }
   return row;
 }
 
 async function createTestDependant(
   registeredById: string,
-  { withPhoto = true }: { withPhoto?: boolean } = {},
+  { withPhoto = true, withConsent = true }: { withPhoto?: boolean; withConsent?: boolean } = {},
 ): Promise<typeof schema.dependants.$inferSelect> {
   const db = getDb();
   const [row] = await db
@@ -162,6 +182,9 @@ async function createTestDependant(
   }
   if (withPhoto) {
     await enrollPhoto({ dependantId: row.id }, registeredById);
+  }
+  if (withConsent) {
+    await grantBiometricConsent({ dependantId: row.id }, registeredById);
   }
   return row;
 }
@@ -296,6 +319,55 @@ describe.skipIf(!hasTestDb)(
         expect(problemBody(response).detail).toContain('until the dependant has a photo');
 
         await enrollPhoto({ dependantId: dependant.id }, supervisor.id);
+        expect((await schedule()).status).toBe(201);
+      });
+
+      it('refuses to schedule until both people have active photo-verification consent (422)', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002', {
+          withConsent: false,
+        });
+        const dependant = await createTestDependant(supervisor.id, { withConsent: false });
+        const schedule = () =>
+          request(app)
+            .post('/visit-schedules')
+            .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+            .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
+
+        let response = await schedule();
+        expect(response.status).toBe(422);
+        expect(problemBody(response).detail).toContain('the caregiver and the dependant');
+        expect(problemBody(response).detail).toContain('consented to photo identity verification');
+
+        // Audio consent alone doesn't cover the photo check, and a revoked consent doesn't count.
+        await getDb()
+          .insert(schema.consentRecords)
+          .values([
+            {
+              subjectType: 'caregiver',
+              caregiverId: caregiver.userId,
+              consentType: 'audio_cognitive_monitoring',
+              grantedBy: supervisor.id,
+            },
+            {
+              subjectType: 'caregiver',
+              caregiverId: caregiver.userId,
+              consentType: 'biometric_verification',
+              grantedBy: supervisor.id,
+              revokedAt: new Date('2026-09-20T08:00:00Z'),
+            },
+          ]);
+        response = await schedule();
+        expect(response.status).toBe(422);
+        expect(problemBody(response).detail).toContain('until the caregiver and the dependant');
+
+        await grantBiometricConsent({ caregiverId: caregiver.userId }, supervisor.id);
+        response = await schedule();
+        expect(response.status).toBe(422);
+        expect(problemBody(response).detail).toContain('until the dependant');
+        expect(problemBody(response).detail).not.toContain('the caregiver');
+
+        await grantBiometricConsent({ dependantId: dependant.id }, supervisor.id);
         expect((await schedule()).status).toBe(201);
       });
 
@@ -517,6 +589,34 @@ describe.skipIf(!hasTestDb)(
           .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
           .send({ scheduledStart: '2026-10-02T09:00:00Z', scheduledEnd: '2026-10-02T10:00:00Z' });
         expect(moved.status).toBe(422);
+
+        const cancelled = await request(app)
+          .patch(`/visit-schedules/${visitBody(created).id}`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+          .send({ status: 'cancelled' });
+        expect(cancelled.status).toBe(200);
+      });
+
+      it('refuses to reschedule once a consent is revoked, but still lets the visit be cancelled', async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const dependant = await createTestDependant(supervisor.id);
+        const created = await request(app)
+          .post('/visit-schedules')
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
+        expect(created.status).toBe(201);
+        await getDb()
+          .update(schema.consentRecords)
+          .set({ revokedAt: new Date() })
+          .where(eq(schema.consentRecords.dependantId, dependant.id));
+
+        const moved = await request(app)
+          .patch(`/visit-schedules/${visitBody(created).id}`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
+          .send({ scheduledStart: '2026-10-02T09:00:00Z', scheduledEnd: '2026-10-02T10:00:00Z' });
+        expect(moved.status).toBe(422);
+        expect(problemBody(moved).detail).toContain('until the dependant');
 
         const cancelled = await request(app)
           .patch(`/visit-schedules/${visitBody(created).id}`)
