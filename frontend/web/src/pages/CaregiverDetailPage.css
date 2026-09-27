@@ -21,12 +21,6 @@
   margin: 0;
 }
 
-.caregiver-detail__meta {
-  font-size: 13px;
-  color: var(--color-ink-subtle);
-  margin-top: 4px;
-}
-
 .caregiver-detail__tab-panel {
   margin-top: 20px;
   margin-bottom: 24px;

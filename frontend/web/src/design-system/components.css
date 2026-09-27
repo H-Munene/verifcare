@@ -1003,6 +1003,32 @@
   outline-offset: 1px;
 }
 
+/* ---------- Meta list ----------
+   A record's key facts under its name: small muted icons, spaced out, wrapping when narrow. */
+
+.ds-meta-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--color-ink-default);
+}
+
+.ds-meta-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-meta-list svg {
+  flex: none;
+  color: var(--color-ink-muted);
+}
+
 /* ---------- Skeleton ----------
    Loading placeholders: a light grey block with a slow sheen passing over it. */
 

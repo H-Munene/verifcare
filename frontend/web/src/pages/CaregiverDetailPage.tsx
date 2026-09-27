@@ -11,6 +11,8 @@ import { Button } from '../design-system/Button';
 import { Tabs } from '../design-system/Tabs';
 import './CaregiverDetailPage.css';
 import { DetailSkeleton } from '../design-system/Skeleton';
+import { Calendar03Icon, Call02Icon, IdIcon } from '@hugeicons/core-free-icons';
+import { MetaList } from '../design-system/MetaList';
 
 type DetailTab = 'enrollment' | 'visits';
 
@@ -24,6 +26,16 @@ const TABS = [
 // whole page. Visit History is new here: this page had none at all before (matches the wireframe
 // and HEZ-54's own stated scope at the time, since there was no real visit data to show), now
 // backed by the same VisitHistoryList DependantDetailPage's own identical tab uses.
+/** A calendar date (YYYY-MM-DD) as e.g. "22 Sep 2026"; noon UTC keeps the day in every zone. */
+function readableDate(date: string): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function CaregiverDetailPage() {
   const { caregiverId } = useParams<{ caregiverId: string }>();
   const { caregivers } = useApi();
@@ -69,10 +81,18 @@ export function CaregiverDetailPage() {
               {caregiver.active ? 'Active' : 'Inactive'}
             </Badge>
           </div>
-          <div className="caregiver-detail__meta">
-            {caregiver.employeeNumber ?? 'No employee #'} · {caregiver.phoneNumber ?? 'No phone'} ·
-            Hired {caregiver.hireDate ?? 'unknown'}
-          </div>
+          <MetaList
+            items={[
+              { icon: IdIcon, children: caregiver.employeeNumber ?? 'No employee number' },
+              { icon: Call02Icon, children: caregiver.phoneNumber ?? 'No phone number' },
+              {
+                icon: Calendar03Icon,
+                children: caregiver.hireDate
+                  ? `Hired ${readableDate(caregiver.hireDate)}`
+                  : 'Hire date not recorded',
+              },
+            ]}
+          />
         </div>
         <Button
           variant="primary"

@@ -19,6 +19,8 @@ import { Switch } from '../design-system/Switch';
 import { Tabs } from '../design-system/Tabs';
 import './DependantDetailPage.css';
 import { DetailSkeleton } from '../design-system/Skeleton';
+import { BirthdayCakeIcon, Location01Icon, UserIcon } from '@hugeicons/core-free-icons';
+import { MetaList } from '../design-system/MetaList';
 
 type DetailTab = 'family' | 'enrollment' | 'visits' | 'cognitive';
 
@@ -36,6 +38,24 @@ const TABS = [
 // nothing to show there; Visit History is real now (VisitHistoryList, shared with
 // CaregiverDetailPage's identical tab), since HEZ-32/HEZ-42's visit-schedule/verification-audit
 // endpoints exist and are already consumed by VisitsPage/VisitDetailPage.
+/** A calendar date (YYYY-MM-DD) as e.g. "22 Sep 2026"; noon UTC keeps the day in every zone. */
+function readableDate(date: string): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** Whole years since a YYYY-MM-DD birth date. */
+function ageInYears(dob: string): number {
+  const [y = 0, m = 1, d = 1] = dob.split('-').map(Number);
+  const now = new Date();
+  const hadBirthday = now.getMonth() + 1 > m || (now.getMonth() + 1 === m && now.getDate() >= d);
+  return now.getFullYear() - y - (hadBirthday ? 0 : 1);
+}
+
 export function DependantDetailPage() {
   const { dependantId } = useParams<{ dependantId: string }>();
   const { dependants } = useApi();
@@ -75,10 +95,25 @@ export function DependantDetailPage() {
               {dependant.status}
             </Badge>
           </div>
-          <div className="dependant-detail__meta">
-            {dependant.gender ?? 'Unspecified'} · DOB {dependant.dob} · Geofence radius{' '}
-            {dependant.geofenceRadiusMeters}m
-          </div>
+          <MetaList
+            items={[
+              {
+                icon: UserIcon,
+                children: dependant.gender
+                  ? dependant.gender.charAt(0).toUpperCase() + dependant.gender.slice(1)
+                  : 'Gender not recorded',
+              },
+              {
+                icon: BirthdayCakeIcon,
+                children: `Born ${readableDate(dependant.dob)} (${ageInYears(dependant.dob)} years)`,
+              },
+              {
+                icon: Location01Icon,
+                children: `${dependant.geofenceRadiusMeters} m check-in radius`,
+                title: 'How close to the home a caregiver must be to check in or out',
+              },
+            ]}
+          />
         </div>
         <div className="dependant-detail__header-actions">
           <Button

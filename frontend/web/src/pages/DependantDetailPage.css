@@ -26,12 +26,6 @@
   margin: 0;
 }
 
-.dependant-detail__meta {
-  font-size: 13px;
-  color: var(--color-ink-subtle);
-  margin-top: 4px;
-}
-
 .dependant-detail__tab-panel {
   margin-top: 20px;
 }
