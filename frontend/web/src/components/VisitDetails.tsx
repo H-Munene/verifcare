@@ -44,7 +44,7 @@ function visitOutcome(visit: VisitSchedule, checkedIn: boolean, now: number): Ho
   if (visit.status === 'missed' || visit.status === 'investigated' || (over && !checkedIn)) {
     return 'missed';
   }
-  return 'none';
+  return 'scheduled';
 }
 
 /** A step's time is its first passing attempt; failures before it become the step's detail. */

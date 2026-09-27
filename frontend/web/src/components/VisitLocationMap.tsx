@@ -1,7 +1,8 @@
 // A small OpenStreetMap for one visit (2026-09-27, the visit side panel): the dependant's home,
 // with the area check-in accepts drawn around it. The home pin shows how the visit went (user
 // request): red with a white cross for missed, green with a white tick for completed, yellow with
-// a white ellipsis while it's ongoing, grey with a white cross for cancelled, plain grey otherwise.
+// a white ellipsis while it's ongoing, grey with a white cross for cancelled, and grey with a white
+// dash while it's still scheduled.
 // It is the map's only pin (user request, 2026-09-27): a separate blue check-in pin sat on top of
 // it, since a caregiver checks in inside the home's radius, and hid the state; the check-in
 // distance is in the panel's facts instead. The pin names itself on hover, and is drawn with HTML
@@ -15,7 +16,7 @@ import './VisitLocationMap.css';
 
 type Point = { lat: number; lng: number };
 
-export type HomeState = 'missed' | 'completed' | 'ongoing' | 'cancelled' | 'none';
+export type HomeState = 'missed' | 'completed' | 'ongoing' | 'cancelled' | 'scheduled';
 
 // White glyphs on the coloured pin, as small inline SVG (14px, 2px strokes).
 const GLYPHS: Record<HomeState, string> = {
@@ -24,7 +25,7 @@ const GLYPHS: Record<HomeState, string> = {
   completed: '<path d="M3.5 7.5l2.5 2.5 4.5-5" />',
   ongoing:
     '<circle cx="3.5" cy="7" r="0.9" fill="#fff" /><circle cx="7" cy="7" r="0.9" fill="#fff" /><circle cx="10.5" cy="7" r="0.9" fill="#fff" />',
-  none: '',
+  scheduled: '<path d="M3.5 7h7" />',
 };
 
 function pin(className: string, glyph = ''): ReturnType<typeof divIcon> {
@@ -45,7 +46,7 @@ const STATE_TITLES: Record<HomeState, string> = {
   completed: 'visit completed',
   ongoing: 'visit in progress',
   cancelled: 'visit cancelled',
-  none: '',
+  scheduled: 'visit scheduled',
 };
 
 /** Frames the home's whole accepted area. */
