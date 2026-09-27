@@ -1,10 +1,11 @@
 // A small OpenStreetMap for one visit (2026-09-27, the visit side panel): the dependant's home,
-// with the area check-in accepts drawn around it, and where the caregiver actually checked in,
-// framed so both show. The home pin shows how the visit went (user request): red with a white
-// cross for missed, green with a white tick for completed, yellow with a white ellipsis while it's
-// ongoing, plain grey otherwise; the check-in pin is plain blue. Each pin names itself on hover.
-// The pins are drawn with HTML and SVG rather than Leaflet's default marker images, which don't
-// survive bundling.
+// with the area check-in accepts drawn around it. The home pin shows how the visit went (user
+// request): red with a white cross for missed, green with a white tick for completed, yellow with
+// a white ellipsis while it's ongoing, grey with a white cross for cancelled, plain grey otherwise.
+// It is the map's only pin (user request, 2026-09-27): a separate blue check-in pin sat on top of
+// it, since a caregiver checks in inside the home's radius, and hid the state; the check-in
+// distance is in the panel's facts instead. The pin names itself on hover, and is drawn with HTML
+// and SVG rather than Leaflet's default marker images, which don't survive bundling.
 
 import 'leaflet/dist/leaflet.css';
 import { divIcon, latLng } from 'leaflet';
@@ -14,11 +15,12 @@ import './VisitLocationMap.css';
 
 type Point = { lat: number; lng: number };
 
-export type HomeState = 'missed' | 'completed' | 'ongoing' | 'none';
+export type HomeState = 'missed' | 'completed' | 'ongoing' | 'cancelled' | 'none';
 
 // White glyphs on the coloured pin, as small inline SVG (14px, 2px strokes).
 const GLYPHS: Record<HomeState, string> = {
   missed: '<path d="M4 4l6 6M10 4l-6 6" />',
+  cancelled: '<path d="M4 4l6 6M10 4l-6 6" />',
   completed: '<path d="M3.5 7.5l2.5 2.5 4.5-5" />',
   ongoing:
     '<circle cx="3.5" cy="7" r="0.9" fill="#fff" /><circle cx="7" cy="7" r="0.9" fill="#fff" /><circle cx="10.5" cy="7" r="0.9" fill="#fff" />',
@@ -38,28 +40,23 @@ function pin(className: string, glyph = ''): ReturnType<typeof divIcon> {
   });
 }
 
-const checkinIcon = pin('visit-map__pin--checkin');
-
 const STATE_TITLES: Record<HomeState, string> = {
   missed: 'missed visit',
   completed: 'visit completed',
   ongoing: 'visit in progress',
+  cancelled: 'visit cancelled',
   none: '',
 };
 
-/** Frames the home's whole accepted area, and the check-in point when there is one. */
-function Frame({ home, checkin, radius }: { home: Point; checkin: Point | null; radius: number }) {
+/** Frames the home's whole accepted area. */
+function Frame({ home, radius }: { home: Point; radius: number }) {
   const map = useMap();
-  // Keyed on the coordinates, not the point objects, so a re-render doesn't refit the map.
-  const checkinLat = checkin?.lat;
-  const checkinLng = checkin?.lng;
   useEffect(() => {
-    const bounds = latLng(home.lat, home.lng).toBounds(radius * 2);
-    if (checkinLat !== undefined && checkinLng !== undefined) {
-      bounds.extend([checkinLat, checkinLng]);
-    }
-    map.fitBounds(bounds, { padding: [32, 32], maxZoom: 17 });
-  }, [map, home.lat, home.lng, checkinLat, checkinLng, radius]);
+    map.fitBounds(latLng(home.lat, home.lng).toBounds(radius * 2), {
+      padding: [32, 32],
+      maxZoom: 17,
+    });
+  }, [map, home.lat, home.lng, radius]);
   return null;
 }
 
@@ -68,15 +65,12 @@ export function VisitLocationMap({
   homeLabel,
   homeState,
   radiusMeters,
-  checkin,
 }: {
   home: Point;
   /** Names the home pin on hover, e.g. "Wanjiku's home". */
   homeLabel: string;
   homeState: HomeState;
   radiusMeters: number;
-  /** Where the caregiver checked in, if they have. */
-  checkin: Point | null;
 }) {
   const homeIcon = useMemo(
     () => pin(`visit-map__pin--${homeState}`, GLYPHS[homeState]),
@@ -109,15 +103,7 @@ export function VisitLocationMap({
           title={homeTitle}
           keyboard={false}
         />
-        {checkin ? (
-          <Marker
-            position={[checkin.lat, checkin.lng]}
-            icon={checkinIcon}
-            title="Where the caregiver checked in"
-            keyboard={false}
-          />
-        ) : null}
-        <Frame home={home} checkin={checkin} radius={radiusMeters} />
+        <Frame home={home} radius={radiusMeters} />
       </MapContainer>
     </div>
   );

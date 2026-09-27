@@ -1,6 +1,5 @@
 // One visit's details in the side panel (2026-09-27): its key facts, a small map with the
-// dependant's home (its pin showing how the visit went) and where the caregiver checked in, and
-// the check-in timeline. VisitPanel shows it wherever a visit is opened.
+// dependant's home (its pin showing how the visit went), and the check-in timeline. VisitPanel shows it wherever a visit is opened.
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -38,7 +37,7 @@ function visitOutcome(visit: VisitSchedule, checkedIn: boolean, now: number): Ho
     return 'ongoing';
   }
   if (visit.status === 'cancelled') {
-    return 'none';
+    return 'cancelled';
   }
   // Marked missed, or its end has passed with no check-in (the Overview's rule), is missed.
   const over = now > Date.parse(visit.scheduledEnd);
@@ -90,10 +89,6 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
   const resolutions = verificationQuery.data?.resolutions ?? [];
   const exceptionKinds = verificationQuery.data?.exceptionKinds ?? [];
   const dependant = dependantQuery.data;
-  const checkin =
-    event?.checkinGpsLat != null && event.checkinGpsLng != null
-      ? { lat: event.checkinGpsLat, lng: event.checkinGpsLng }
-      : null;
   const outcome = visitOutcome(visit, Boolean(event?.checkinAt), now);
   // Over: nothing more will happen, so a step without a time now won't happen.
   const over =
@@ -202,7 +197,6 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
             homeLabel={`${dependant.fullName}'s home`}
             homeState={outcome}
             radiusMeters={dependant.geofenceRadiusMeters}
-            checkin={checkin}
           />
         ) : dependantQuery.isError ? (
           <p className="visit-details__message">The home location couldn't be loaded.</p>
