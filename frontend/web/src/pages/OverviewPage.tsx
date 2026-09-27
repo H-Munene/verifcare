@@ -517,7 +517,7 @@ function AttentionList({
                     {flaggedPhotos === 1 ? 'it' : 'them'}.
                   </p>
                   <div className="overview__attention-actions">
-                    <Link to="/flagged-enrollments">Review photos</Link>
+                    <Link to="/reviews">Review photos</Link>
                   </div>
                 </div>
               </div>

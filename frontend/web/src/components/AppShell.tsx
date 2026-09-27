@@ -5,9 +5,9 @@ import {
   CalendarCheckIn01Icon,
   DashboardSquare01Icon,
   HandHeartIcon,
-  Notification03Icon,
   SecurityCheckIcon,
   UserGroupIcon,
+  UserSearch01Icon,
 } from '@hugeicons/core-free-icons';
 import { NavItem } from '../design-system/NavItem';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -20,12 +20,15 @@ import './AppShell.css';
 // shell matches the design without claiming functionality that doesn't exist yet.
 // Icons are Hugeicons, stroke style (2026-09-26): caregivers are the staff (a group), dependants
 // the people cared for (a hand holding a heart).
+// Order and sections per the user (2026-09-27): Reviews - photos flagged as possible duplicates,
+// formerly "Flagged Enrollments" behind a button on Dependants - is its own section, and alerts
+// moved from here to the top bar's bell.
 const NAV_SECTIONS = [
   { label: 'Overview', path: '/overview', icon: DashboardSquare01Icon },
+  { label: 'Visits', path: '/visits', icon: CalendarCheckIn01Icon },
   { label: 'Caregivers', path: '/caregivers', icon: UserGroupIcon },
   { label: 'Dependants', path: '/dependants', icon: HandHeartIcon },
-  { label: 'Visits', path: '/visits', icon: CalendarCheckIn01Icon },
-  { label: 'Alerts', path: undefined, icon: Notification03Icon },
+  { label: 'Reviews', path: '/reviews', icon: UserSearch01Icon },
   { label: 'Compliance', path: undefined, icon: SecurityCheckIcon },
 ] as const;
 
@@ -36,13 +39,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Every /caregivers route is supervisor-only on the backend (requireRole('supervisor') covers
   // the whole router, not just registration - a caregiver can never self-register, confirmed with
   // the user) - disabled here too for a signed-in non-supervisor, rather than only finding out via
-  // a failed request, the same "hide what you can't use" treatment Flagged Enrollments/Make
+  // a failed request, the same "hide what you can't use" treatment Reviews/Make
   // Primary/the dependant status field already get elsewhere in this app. Visits gets the same
   // treatment: GET /visit-schedules is open to all three roles, but this app is the Supervisor
   // Console (confirmed with the user, not widened to a read-only view for other roles) - every
   // main page here stays supervisor-only, Visits included.
   const isSupervisor = identity?.role === 'supervisor';
-  const supervisorOnlySections = new Set(['Overview', 'Caregivers', 'Visits']);
+  const supervisorOnlySections = new Set(['Overview', 'Visits', 'Caregivers', 'Reviews']);
   const navSections = NAV_SECTIONS.map((section) =>
     supervisorOnlySections.has(section.label) && !isSupervisor
       ? { ...section, path: undefined }

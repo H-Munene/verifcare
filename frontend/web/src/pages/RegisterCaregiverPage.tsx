@@ -343,7 +343,7 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
               <>
                 <p>
                   {photoResult.status === 'flagged'
-                    ? `This photo matched an already-enrolled ${photoResult.matchedSubjectType} at ${photoResult.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a supervisor to review on the Flagged Enrollments page, and hasn't been activated.`
+                    ? `This photo matched an already-enrolled ${photoResult.matchedSubjectType} at ${photoResult.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a supervisor to review on the Reviews page, and hasn't been activated.`
                     : `Uploaded and activated - quality score ${photoResult.qualityScore?.toFixed(1) ?? 'n/a'}.`}
                 </p>
                 <div className="register-caregiver-page__step-actions">

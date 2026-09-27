@@ -9,7 +9,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { CheckinPhotoStatus, DependantStatus, ListDependantsParams } from '../api/dependants';
 import { useApi } from '../api/useApi';
-import { useAuth } from '../auth/AuthContext';
 import { Badge, type BadgeTone } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { FilterBar, FilterMenu } from '../design-system/FilterMenu';
@@ -40,7 +39,6 @@ const SORTS: readonly DependantSort[] = ['name', '-name', 'dob', '-dob'];
 // link keeps them, and the server applies them, so they cover the whole list, not just a page.
 export function DependantsListPage() {
   const { dependants } = useApi();
-  const { identity } = useAuth();
   const navigate = useNavigate();
   const params = useListParams();
   const status = params.get('status') as DependantStatus | '';
@@ -67,15 +65,6 @@ export function DependantsListPage() {
       <div className="dependants-page__toolbar">
         <h1 className="dependants-page__title">Dependants</h1>
         <div className="dependants-page__toolbar-actions">
-          {identity?.role === 'supervisor' ? (
-            <Button
-              onClick={() => {
-                void navigate('/flagged-enrollments');
-              }}
-            >
-              Flagged Enrollments
-            </Button>
-          ) : null}
           <Button
             variant="cta-pill"
             onClick={() => {

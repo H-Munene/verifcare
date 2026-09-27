@@ -47,7 +47,7 @@ export function FlaggedEnrollmentsPage() {
   return (
     <div>
       <div className="flagged-enrollments-page__toolbar">
-        <h1 className="flagged-enrollments-page__title">Flagged Enrollments</h1>
+        <h1 className="flagged-enrollments-page__title">Photo reviews</h1>
       </div>
       <p className="flagged-enrollments-page__intro">
         Each row's face matched an already-enrolled subject above the duplicate-detection threshold

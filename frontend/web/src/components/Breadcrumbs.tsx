@@ -63,9 +63,6 @@ function buildCrumbs(
     }
     return crumbs;
   }
-  if (root === 'flagged-enrollments') {
-    return [{ label: 'Flagged Enrollments' }];
-  }
 
   return [];
 }

@@ -723,7 +723,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
               <>
                 <p>
                   {photoResult.status === 'flagged'
-                    ? `This photo matched an already-enrolled ${photoResult.matchedSubjectType} at ${photoResult.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a supervisor to review on the Flagged Enrollments page, and hasn't been activated.`
+                    ? `This photo matched an already-enrolled ${photoResult.matchedSubjectType} at ${photoResult.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a supervisor to review on the Reviews page, and hasn't been activated.`
                     : `Uploaded and activated - quality score ${photoResult.qualityScore?.toFixed(1) ?? 'n/a'}.`}
                 </p>
                 <div className="register-dependant-page__step-actions">
@@ -741,7 +741,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                 {existingEnrollment ? (
                   <p className="register-dependant-page__resolution-hint">
                     {existingEnrollment.status === 'flagged'
-                      ? 'The current photo is flagged for a supervisor to review on the Flagged Enrollments page.'
+                      ? 'The current photo is flagged for a supervisor to review on the Reviews page.'
                       : `Already enrolled - quality score ${existingEnrollment.qualityScore?.toFixed(1) ?? 'n/a'}. Uploading a new photo replaces it.`}
                   </p>
                 ) : null}

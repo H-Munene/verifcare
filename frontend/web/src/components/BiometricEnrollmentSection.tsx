@@ -63,8 +63,8 @@ export function BiometricEnrollmentSection({
         ))}
       </div>
       <p className="biometric-enrollment-section__empty">
-        A face flagged as a possible duplicate is reviewed on the{' '}
-        <Link to="/flagged-enrollments">Flagged Enrollments</Link> page, not here.
+        A face flagged as a possible duplicate is reviewed on the <Link to="/reviews">Reviews</Link>{' '}
+        page, not here.
       </p>
       {uploadingImageOrder ? (
         <UploadEnrollmentModal
@@ -195,8 +195,8 @@ function UploadEnrollmentModal({
             <p>
               This photo matched an already-enrolled {result.matchedSubjectType} at{' '}
               {result.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a
-              supervisor to review on the <Link to="/flagged-enrollments">Flagged Enrollments</Link>{' '}
-              page, and hasn't been activated.
+              supervisor to review on the <Link to="/reviews">Reviews</Link> page, and hasn't been
+              activated.
             </p>
           ) : (
             <p>
