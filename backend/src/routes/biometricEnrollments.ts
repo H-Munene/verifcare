@@ -36,6 +36,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/verifier.js';
 import { requireRole } from '../auth/middleware.js';
+import { recordAudit } from '../audit.js';
 import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { biometricKeyPrefix, type BiometricStorage } from '../db/biometricStorage.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
@@ -399,27 +400,41 @@ export function createBiometricEnrollmentsRouter(
       if (duplicate.duplicate) {
         // Flagged, not hard-rejected (see file header) - written with no rekognitionFaceId, since
         // indexing is deferred until a supervisor approves it via POST /{id}/approve.
-        const [inserted] = await db
-          .insert(schema.biometricEnrollments)
-          .values({
-            id: uuidv7(),
-            subjectType: body.subjectType,
-            caregiverId: body.subjectType === 'caregiver' ? body.subjectId : undefined,
-            dependantId: body.subjectType === 'dependant' ? body.subjectId : undefined,
-            s3Key: body.s3Key,
-            imageOrder: body.imageOrder,
-            qualityScore: assessment.qualityScore,
-            status: 'flagged',
-            matchedSubjectType: duplicate.matchedSubjectType,
-            matchedSubjectId: duplicate.matchedSubjectId,
-            matchedSimilarity: duplicate.similarity,
-            enrolledBy: callerRow.id,
-          })
-          .returning();
-        if (!inserted) {
-          throw new Error('Insert into biometric_enrollments returned no row.');
-        }
-        row = inserted;
+        row = await db.transaction(async (tx) => {
+          const [inserted] = await tx
+            .insert(schema.biometricEnrollments)
+            .values({
+              id: uuidv7(),
+              subjectType: body.subjectType,
+              caregiverId: body.subjectType === 'caregiver' ? body.subjectId : undefined,
+              dependantId: body.subjectType === 'dependant' ? body.subjectId : undefined,
+              s3Key: body.s3Key,
+              imageOrder: body.imageOrder,
+              qualityScore: assessment.qualityScore,
+              status: 'flagged',
+              matchedSubjectType: duplicate.matchedSubjectType,
+              matchedSubjectId: duplicate.matchedSubjectId,
+              matchedSimilarity: duplicate.similarity,
+              enrolledBy: callerRow.id,
+            })
+            .returning();
+          if (!inserted) {
+            throw new Error('Insert into biometric_enrollments returned no row.');
+          }
+          await recordAudit(tx, {
+            actorUserId: callerRow.id,
+            action: 'biometric_enrollment.create',
+            entityType: 'biometric_enrollment',
+            entityId: inserted.id,
+            metadata: {
+              subjectType: body.subjectType,
+              subjectId: body.subjectId,
+              imageOrder: body.imageOrder,
+              status: inserted.status,
+            },
+          });
+          return inserted;
+        });
       } else {
         const faceId = await faceCollection.indexFace({
           s3Key: body.s3Key,
@@ -456,6 +471,18 @@ export function createBiometricEnrollmentsRouter(
           if (!inserted) {
             throw new Error('Insert into biometric_enrollments returned no row.');
           }
+          await recordAudit(tx, {
+            actorUserId: callerRow.id,
+            action: 'biometric_enrollment.create',
+            entityType: 'biometric_enrollment',
+            entityId: inserted.id,
+            metadata: {
+              subjectType: body.subjectType,
+              subjectId: body.subjectId,
+              imageOrder: body.imageOrder,
+              status: inserted.status,
+            },
+          });
           return inserted;
         });
       }
@@ -516,6 +543,17 @@ export function createBiometricEnrollmentsRouter(
           sql`${schema.biometricEnrollments.qualityScore} DESC NULLS LAST`,
         );
 
+      // Sensitive read (the Compliance tab's audit log, per the product owner) - this returns
+      // presigned photo URLs. One row per request, not per photo returned.
+      const actorRow = await getUserByCognitoSub(db, caller.sub);
+      await recordAudit(db, {
+        actorUserId: actorRow?.id ?? null,
+        action: 'biometric_enrollment.view',
+        entityType: 'biometric_enrollment',
+        entityId: query.subjectId,
+        metadata: { subjectType: query.subjectType },
+      });
+
       res.status(200).json(await Promise.all(rows.map((row) => toResponse(row, storage))));
     } catch (err) {
       next(err);
@@ -531,6 +569,11 @@ export function createBiometricEnrollmentsRouter(
     }
     const db = getDb(res);
     if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
       return;
     }
 
@@ -560,6 +603,18 @@ export function createBiometricEnrollmentsRouter(
         .limit(query.limit + 1);
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
+
+      // Sensitive read - returns both the subject's and the matched person's photo URLs. No single
+      // entityId (it's a cross-subject listing, not one record), one row per request either way.
+      const actorRow = await getUserByCognitoSub(db, caller.sub);
+      await recordAudit(db, {
+        actorUserId: actorRow?.id ?? null,
+        action: 'biometric_enrollment.view',
+        entityType: 'biometric_enrollment',
+        entityId: null,
+        metadata: { count: items.length },
+      });
+
       res.status(200).json({
         items: await toFlaggedResponses(db, items, storage),
         nextCursor,
@@ -578,6 +633,11 @@ export function createBiometricEnrollmentsRouter(
     }
     const db = getDb(res);
     if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
       return;
     }
 
@@ -611,6 +671,9 @@ export function createBiometricEnrollmentsRouter(
         subjectId,
       });
 
+      // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+
       const updated = await db.transaction(async (tx) => {
         await tx
           .update(schema.biometricEnrollments)
@@ -627,6 +690,16 @@ export function createBiometricEnrollmentsRouter(
           .set({ status: 'active', rekognitionFaceId: faceId, updatedAt: new Date() })
           .where(eq(schema.biometricEnrollments.id, id))
           .returning();
+        if (!row) {
+          return undefined;
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow?.id ?? null,
+          action: 'biometric_enrollment.approve',
+          entityType: 'biometric_enrollment',
+          entityId: id,
+          metadata: { subjectType, subjectId },
+        });
         return row;
       });
       if (!updated) {
@@ -650,6 +723,11 @@ export function createBiometricEnrollmentsRouter(
     if (!db) {
       return;
     }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
 
     try {
       const [existing] = await db
@@ -670,11 +748,30 @@ export function createBiometricEnrollmentsRouter(
         return;
       }
 
-      const [updated] = await db
-        .update(schema.biometricEnrollments)
-        .set({ status: 'deleted', updatedAt: new Date() })
-        .where(eq(schema.biometricEnrollments.id, id))
-        .returning();
+      // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.biometricEnrollments)
+          .set({ status: 'deleted', updatedAt: new Date() })
+          .where(eq(schema.biometricEnrollments.id, id))
+          .returning();
+        if (!row) {
+          return undefined;
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow?.id ?? null,
+          action: 'biometric_enrollment.reject',
+          entityType: 'biometric_enrollment',
+          entityId: id,
+          metadata: {
+            subjectType: existing.subjectType,
+            subjectId: existing.caregiverId ?? existing.dependantId,
+          },
+        });
+        return row;
+      });
       if (!updated) {
         throw new Error('Update to biometric_enrollments returned no row.');
       }

@@ -3,6 +3,7 @@
 // users.integration.test.ts's header comment for why (real ownership/RBAC behavior, not a faked
 // query builder) and for the test-auth-header pattern used here too.
 
+import { eq } from 'drizzle-orm';
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -165,6 +166,14 @@ describe.skipIf(!hasTestDb)(
           consentType: 'biometric_verification',
           grantedBy: supervisor.id,
           revokedAt: null,
+        });
+
+        const [audit] = await getDb().select().from(schema.auditLog);
+        expect(audit).toMatchObject({
+          action: 'consent.grant',
+          entityType: 'consent_record',
+          entityId: consentBody(response).id,
+          actorUserId: supervisor.id,
         });
       });
 
@@ -339,6 +348,23 @@ describe.skipIf(!hasTestDb)(
 
         expect(response.status).toBe(200);
         expect(consentBody(response).revokedAt).not.toBeNull();
+
+        const db = getDb();
+        const [row] = await db
+          .select()
+          .from(schema.consentRecords)
+          .where(eq(schema.consentRecords.id, consentBody(created).id));
+        expect(row?.revokedBy).toBe(familyMember.id);
+
+        const [audit] = await db
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'consent.revoke'));
+        expect(audit).toMatchObject({
+          entityType: 'consent_record',
+          entityId: consentBody(created).id,
+          actorUserId: familyMember.id,
+        });
       });
 
       it("rejects a family member revoking another dependant's consent with 403", async () => {
@@ -383,6 +409,13 @@ describe.skipIf(!hasTestDb)(
 
         expect(second.status).toBe(200);
         expect(consentBody(second).revokedAt).toBe(consentBody(first).revokedAt);
+
+        // The no-op second call writes no audit row of its own - only the first revoke's.
+        const audit = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'consent.revoke'));
+        expect(audit).toHaveLength(1);
       });
 
       it('returns 404 for a nonexistent consent record', async () => {

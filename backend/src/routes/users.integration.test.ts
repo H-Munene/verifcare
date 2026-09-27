@@ -8,11 +8,13 @@
 // already covered by auth/middleware.test.ts; these tests are about the route handlers' own
 // business logic (ownership, role rules, pagination, conflict handling), not token verification.
 
+import { and, eq } from 'drizzle-orm';
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, VerifiedIdentity } from '../auth/verifier.js';
+import * as schema from '../db/schema.js';
 import {
   getDb,
   getTestDatabaseUrl,
@@ -118,6 +120,14 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
       expect(response.status).toBe(201);
       expect(response.body).toMatchObject({ fullName: 'Ada Lovelace', role: 'family_member' });
       expect(cognitoAdmin.assignRole).toHaveBeenCalledWith('new-sub-1', 'family_member');
+
+      const audit = await getDb().select().from(schema.auditLog);
+      expect(audit).toHaveLength(1);
+      expect(audit[0]).toMatchObject({
+        action: 'user.create',
+        entityId: userBody(response).id,
+        actorUserId: userBody(response).id,
+      });
     });
 
     it('rejects a brand-new self-signup trying to self-assign role: supervisor', async () => {
@@ -405,9 +415,22 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
       const nameUpdate = await request(app)
         .patch(`/users/${targetId}`)
         .set('x-test-auth', auth)
-        .send({ fullName: 'After' });
+        .send({ fullName: 'After', phoneNumber: '+254700000099' });
       expect(nameUpdate.status).toBe(200);
       expect(userBody(nameUpdate).fullName).toBe('After');
+
+      const [audit] = await getDb()
+        .select()
+        .from(schema.auditLog)
+        .where(
+          and(eq(schema.auditLog.entityId, targetId), eq(schema.auditLog.action, 'user.update')),
+        );
+      expect(audit).toMatchObject({ action: 'user.update', actorUserId: targetId });
+      // phoneNumber is redacted - only that it changed, never the raw new value.
+      const metadata = audit?.metadata as Record<string, unknown>;
+      expect(metadata.fullName).toEqual({ from: 'Before', to: 'After' });
+      expect(metadata.phoneNumber).toBe('changed');
+      expect(JSON.stringify(metadata)).not.toContain('+254700000099');
 
       const statusUpdate = await request(app)
         .patch(`/users/${targetId}`)

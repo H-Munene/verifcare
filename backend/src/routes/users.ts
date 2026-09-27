@@ -24,6 +24,7 @@ import { z } from 'zod';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import type { UserRole } from '../auth/verifier.js';
+import { changedFields, recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
@@ -180,20 +181,36 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
       // grant them.
       await cognitoAdmin.assignRole(body.cognitoSub, body.role);
 
-      const [row] = await db
-        .insert(schema.users)
-        .values({
-          id: uuidv7(),
-          cognitoSub: body.cognitoSub,
-          email: body.email,
-          phoneNumber: body.phoneNumber,
-          fullName: body.fullName,
-          role: body.role,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into users returned no row.');
-      }
+      // Self-registration (the only non-supervisor path, see the isSelf check above) has no prior
+      // users row for the caller - resolved below from the row the transaction is about to create
+      // instead. A supervisor creating someone else's row already has their own, looked up here
+      // (before the transaction - getUserByCognitoSub only reads, so it needn't be inside it).
+      const supervisorRow = isSelf ? undefined : await getUserByCognitoSub(db, caller.sub);
+
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.users)
+          .values({
+            id: uuidv7(),
+            cognitoSub: body.cognitoSub,
+            email: body.email,
+            phoneNumber: body.phoneNumber,
+            fullName: body.fullName,
+            role: body.role,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into users returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: isSelf ? inserted.id : (supervisorRow?.id ?? null),
+          action: 'user.create',
+          entityType: 'user',
+          entityId: inserted.id,
+          metadata: { role: body.role },
+        });
+        return inserted;
+      });
       res.status(201).json(toUserResponse(row));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
@@ -364,14 +381,29 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
         return;
       }
 
-      const [updated] = await db
-        .update(schema.users)
-        .set({ ...body, updatedAt: new Date() })
-        .where(eq(schema.users.id, userId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to users returned no row.');
-      }
+      // The actor is existing itself when self-editing; otherwise a supervisor's own row, looked
+      // up before the transaction (a read, so it needn't be inside it).
+      const actorRow = isSelf ? existing : await getUserByCognitoSub(db, caller.sub);
+
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.users)
+          .set({ ...body, updatedAt: new Date() })
+          .where(eq(schema.users.id, userId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to users returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'user.update',
+          entityType: 'user',
+          entityId: userId,
+          // email/phoneNumber are never copied into the log verbatim - only that they changed.
+          metadata: changedFields(existing, row, ['fullName', 'status'], ['email', 'phoneNumber']),
+        });
+        return row;
+      });
       res.status(200).json(toUserResponse(updated));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {

@@ -3,6 +3,7 @@
 // point is the real routing (only a primary contact's contact resolves), the no-leak answer, and
 // the link rows approval creates.
 
+import { eq } from 'drizzle-orm';
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -178,9 +179,29 @@ describe.skipIf(!hasTestDb)('family link requests (real Postgres)', () => {
     });
     expect((await list('fm-other')).incoming).toHaveLength(0);
 
-    // Asking again while it's open doesn't add another.
+    const asker = await getDb()
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.cognitoSub, 'fm-asker'));
+    const createAudit = await getDb()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'family_link_request.create'));
+    expect(createAudit).toHaveLength(3);
+    expect(createAudit[0]).toMatchObject({
+      entityType: 'family_link_request',
+      actorUserId: asker[0]?.id,
+    });
+
+    // Asking again while it's open doesn't add another - a genuine no-op, no new audit row either.
     await ask('fm-asker', 'ACHIENG@example.com');
     expect((await list('fm-primary')).incoming).toHaveLength(1);
+    expect(
+      await getDb()
+        .select()
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.action, 'family_link_request.create')),
+    ).toHaveLength(3);
   });
 
   it('matches a primary contact by phone too', async () => {
@@ -224,6 +245,19 @@ describe.skipIf(!hasTestDb)('family link requests (real Postgres)', () => {
       .send({ dependantIds: [wanjiku.id] });
     expect(approved.status).toBe(200);
 
+    // The refused (403) and stranger (404) attempts above left no audit row - only this one did.
+    const approveAudit = await getDb()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'family_link_request.approve'));
+    expect(approveAudit).toHaveLength(1);
+    expect(approveAudit[0]).toMatchObject({
+      entityType: 'family_link_request',
+      entityId: incoming!.id,
+      actorUserId: primary.id,
+      metadata: { requesterUserId: asker.id, dependantIds: [wanjiku.id] },
+    });
+
     const links = await getDb().select().from(schema.dependantFamilyMembers);
     expect(links).toContainEqual(
       expect.objectContaining({
@@ -243,6 +277,12 @@ describe.skipIf(!hasTestDb)('family link requests (real Postgres)', () => {
       .post(`/family-link-requests/${incoming!.id}/reject`)
       .set('x-test-auth', auth('fm-primary'));
     expect(again.status).toBe(409);
+    expect(
+      await getDb()
+        .select()
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.action, 'family_link_request.reject')),
+    ).toHaveLength(0);
 
     // The requester's outcome is unread until they've seen it.
     let [outcome] = (await list('fm-asker')).outgoing;
@@ -278,6 +318,16 @@ describe.skipIf(!hasTestDb)('family link requests (real Postgres)', () => {
       unread: true,
       linkedDependants: [],
     });
+
+    const [audit] = await getDb()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'family_link_request.reject'));
+    expect(audit).toMatchObject({
+      entityType: 'family_link_request',
+      entityId: incoming!.id,
+      actorUserId: primary.id,
+    });
   });
 
   it('is for family members only', async () => {
@@ -308,7 +358,7 @@ describe.skipIf(!hasTestDb)('POST /dependants/{id}/family-members/link (real Pos
   it('lets the primary contact link an existing account by email, and no one else', async () => {
     const primary = await user('fm-primary', '+254700000001', 'achieng@example.com');
     const member = await user('fm-member', '+254700000002', 'member@example.com');
-    await user('fm-brian', '+254700000003', 'Brian@Example.com');
+    const brian = await user('fm-brian', '+254700000003', 'Brian@Example.com');
     const wanjiku = await dependant('Wanjiku Kamau', primary.id);
     await link(wanjiku.id, primary.id, true);
     await link(wanjiku.id, member.id, false);
@@ -335,5 +385,15 @@ describe.skipIf(!hasTestDb)('POST /dependants/{id}/family-members/link (real Pos
     expect(linked.body).not.toHaveProperty('idNumber');
 
     expect((await linkBy('fm-primary', 'brian@example.com')).status).toBe(409);
+
+    // The forbidden, not-found and duplicate attempts wrote nothing - only the one real link did.
+    const audit = await getDb().select().from(schema.auditLog);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      action: 'family_member.link',
+      entityType: 'family_member',
+      entityId: brian.id,
+      actorUserId: primary.id,
+    });
   });
 });

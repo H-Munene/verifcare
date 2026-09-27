@@ -25,6 +25,7 @@
 import { and, eq } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
+import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { grantConsents, type ConsentSubject } from '../db/consents.js';
@@ -207,7 +208,7 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
       // append-only, so the first record stands). One transaction, so an acceptance is never
       // recorded without the consent records it promises, or the other way round.
       await db.transaction(async (tx) => {
-        await tx
+        const [inserted] = await tx
           .insert(schema.termsAcceptances)
           .values({
             userId,
@@ -216,8 +217,24 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             biometricConsent: body.biometricConsent,
             audioConsent: body.audioConsent,
           })
-          .onConflictDoNothing();
+          .onConflictDoNothing()
+          .returning();
         await grantConsents(tx, await consentSubjectsOf(tx, userId, terms.document), userId);
+        // onConflictDoNothing means this exact version was already accepted (the table is
+        // append-only) - a genuine no-op, so no audit row for it.
+        if (inserted) {
+          await recordAudit(tx, {
+            actorUserId: userId,
+            action: 'terms.accept',
+            entityType: 'terms_acceptance',
+            entityId: inserted.id,
+            metadata: {
+              document: terms.document,
+              version: terms.version,
+              consentTypesGranted: ['biometric_verification', 'audio_cognitive_monitoring'],
+            },
+          });
+        }
       });
       const acceptedAt = await acceptanceOf(db, userId, terms);
       res.status(200).json({

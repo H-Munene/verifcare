@@ -185,6 +185,25 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(termsBody(again).acceptedAt).toBe(firstAcceptedAt);
     expect(await getDb().select().from(schema.termsAcceptances)).toHaveLength(1);
 
+    // Exactly one audit row - the second, no-op accept-again leaves no row of its own.
+    const [familyMember] = await getDb()
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.cognitoSub, 'fm-1'));
+    const audit = await getDb()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'terms.accept'));
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      entityType: 'terms_acceptance',
+      actorUserId: familyMember?.id,
+      metadata: {
+        document: 'family_member',
+        version: CURRENT_TERMS.family_member.version,
+      },
+    });
+
     // The caregiver's own status is unaffected.
     const caregiverAfter = termsBody(
       await request(app)
