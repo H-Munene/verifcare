@@ -35,6 +35,9 @@ export function useDialogLayer({
     const layer = Symbol('dialog-layer');
     openLayers.push(layer);
     const opener = document.activeElement as HTMLElement | null;
+    // If the opener is gone by the time this closes (e.g. "Make primary contact" disappears once
+    // it has worked), focus lands in the dialog it lived in rather than falling out to <body>.
+    const openerDialog = opener?.closest<HTMLElement>('[role="dialog"], [role="alertdialog"]');
     const container = containerRef.current;
     (initialFocusRef?.current ?? container?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
 
@@ -69,7 +72,11 @@ export function useDialogLayer({
     return () => {
       window.removeEventListener('keydown', onKeyDown, true);
       openLayers.splice(openLayers.indexOf(layer), 1);
-      opener?.focus();
+      if (opener?.isConnected) {
+        opener.focus();
+      } else if (openerDialog?.isConnected) {
+        openerDialog.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+      }
     };
     // Mount/unmount only: the refs are stable and onDismiss is read through dismissRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
