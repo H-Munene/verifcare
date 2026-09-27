@@ -50,9 +50,11 @@ import type { AuthenticatedUser } from '../auth/verifier.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import { isCheckinPhoto } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
+import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
+import { haversineDistanceMeters } from '../geo.js';
 import {
   decodeCursor,
   keysetCondition,
@@ -71,6 +73,9 @@ interface VerificationEventResponse {
   checkinGpsLat: number | null;
   checkinGpsLng: number | null;
   distanceFromGeofenceMeters: number | null;
+  checkoutGpsLat: number | null;
+  checkoutGpsLng: number | null;
+  checkoutDistanceFromGeofenceMeters: number | null;
   caregiverMatchConfidence: number | null;
   dependantMatchConfidence: number | null;
   caregiverLivenessPassed: boolean | null;
@@ -87,6 +92,9 @@ function toVerificationEventResponse(
     checkinGpsLat: row.checkinGpsLat,
     checkinGpsLng: row.checkinGpsLng,
     distanceFromGeofenceMeters: row.distanceFromGeofenceMeters,
+    checkoutGpsLat: row.checkoutGpsLat,
+    checkoutGpsLng: row.checkoutGpsLng,
+    checkoutDistanceFromGeofenceMeters: row.checkoutDistanceFromGeofenceMeters,
     caregiverMatchConfidence:
       row.caregiverMatchConfidence === null ? null : Number(row.caregiverMatchConfidence),
     dependantMatchConfidence:
@@ -252,6 +260,13 @@ const listVisitSchedulesQuerySchema = z.object({
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
 const visitScheduleIdParamSchema = z.string().uuid();
 
+// The caregiver's GPS fix at checkout. Named and bounded exactly like check-in's geofence request
+// (routes/checkin.ts), so the app sends the same shape for both ends of a visit.
+const checkoutRequestSchema = z.object({
+  gpsLat: z.number().min(-90).max(90),
+  gpsLng: z.number().min(-180).max(180),
+});
+
 // Scheduling guardrail (2026-09-26, user request): a visit can't be scheduled or rescheduled until
 // both the caregiver and the dependant have a photo check-in can verify against - otherwise the
 // visit is bound to fail at the door with 'not_enrolled'. "Has a photo" is db/checkinPhotos.ts's
@@ -285,7 +300,38 @@ async function missingPhotoDetail(
   return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} a photo for check-in. Add the photo first (a photo awaiting review doesn't count yet).`;
 }
 
-function sendMissingPhoto(res: Response, detail: string): void {
+// Consent guardrail (2026-09-27, user request): a visit can't be scheduled or rescheduled until
+// both the caregiver and the dependant have an active (unrevoked) biometric_verification consent -
+// check-in photographs both of them, so a visit without that consent could only be carried out by
+// processing someone's biometric data without their consent. Same structure as the photo guardrail
+// above; "has consent" is db/consents.ts's rule, shared with the consent screen that grants it.
+// Returns the Problem detail, or null when both have consented.
+async function missingConsentDetail(
+  db: Db,
+  caregiverId: string,
+  dependantId: string,
+): Promise<string | null> {
+  const consented = await subjectsWithActiveConsent(
+    db,
+    [
+      { subjectType: 'caregiver', id: caregiverId },
+      { subjectType: 'dependant', id: dependantId },
+    ],
+    'biometric_verification',
+  );
+  const missing = [
+    consented.has(caregiverId) ? null : 'the caregiver',
+    consented.has(dependantId) ? null : "the dependant (through their family's primary contact)",
+  ].filter((who): who is string => who !== null);
+  if (missing.length === 0) {
+    return null;
+  }
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to photo identity verification. Consent is given by accepting the terms in the Mzazi Care app.`;
+}
+
+// Shared by both guardrails: each means "this visit can't go ahead as scheduled", not a malformed
+// request.
+function sendUnschedulable(res: Response, detail: string): void {
   sendProblem(res, { type: 'about:blank', title: 'Unprocessable Entity', status: 422, detail });
 }
 
@@ -398,7 +444,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
 
       const photoDetail = await missingPhotoDetail(db, body.caregiverId, body.dependantId);
       if (photoDetail) {
-        sendMissingPhoto(res, photoDetail);
+        sendUnschedulable(res, photoDetail);
+        return;
+      }
+      const consentDetail = await missingConsentDetail(db, body.caregiverId, body.dependantId);
+      if (consentDetail) {
+        sendUnschedulable(res, consentDetail);
         return;
       }
 
@@ -758,8 +809,9 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
-      // Moving a visit is scheduling it again, so the photo guardrail applies; a status-only change
-      // (e.g. cancelling) doesn't, so an existing visit can always be cancelled.
+      // Moving a visit is scheduling it again, so the photo and consent guardrails apply; a
+      // status-only change (e.g. cancelling) doesn't, so an existing visit can always be cancelled
+      // - including after a consent is withdrawn, which is exactly when cancelling is needed.
       if (body.scheduledStart !== undefined || body.scheduledEnd !== undefined) {
         const photoDetail = await missingPhotoDetail(
           db,
@@ -767,7 +819,16 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           existing.dependantId,
         );
         if (photoDetail) {
-          sendMissingPhoto(res, photoDetail);
+          sendUnschedulable(res, photoDetail);
+          return;
+        }
+        const consentDetail = await missingConsentDetail(
+          db,
+          existing.caregiverId,
+          existing.dependantId,
+        );
+        if (consentDetail) {
+          sendUnschedulable(res, consentDetail);
           return;
         }
       }
@@ -803,6 +864,13 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
 
   // POST /{id}/checkout (HEZ-39): the final step of the check-in flow (architecture.md step 5) -
   // sets verification_events.checkout_at and flips visit_schedules.status to 'completed'.
+  //
+  // Checkout must happen inside the dependant's geofence radius (2026-09-27, user request), measured
+  // with the same distance function and radius check-in uses: otherwise a caregiver could check in,
+  // leave, and check out later from anywhere, and the recorded visit length would say nothing about
+  // time actually spent at the home. The fix and its distance are stored on verification_events
+  // as the record of where checkout happened. Accuracy and mock-location aren't checked here
+  // (check-in checks them); only the position was asked for.
   // Deliberately does not depend on HEZ-38 (audio upload + acoustic-model call), which is
   // separately deferred (milestone 4) - nothing here checks for an audio_records row.
   router.post('/:visitScheduleId/checkout', async (req, res, next) => {
@@ -812,6 +880,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       res,
     );
     if (!visitScheduleId) {
+      return;
+    }
+    const body = parseOrSendProblem(checkoutRequestSchema, req.body, res);
+    if (!body) {
       return;
     }
     const db = getDb(res);
@@ -861,6 +933,33 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
+      const [dependant] = await db
+        .select({
+          geofenceLat: schema.dependants.geofenceLat,
+          geofenceLng: schema.dependants.geofenceLng,
+          geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
+        })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, visit.dependantId));
+      if (!dependant) {
+        throw new Error(`visit_schedules ${visitScheduleId} references a nonexistent dependant.`);
+      }
+      const distanceMeters = haversineDistanceMeters(
+        body.gpsLat,
+        body.gpsLng,
+        dependant.geofenceLat,
+        dependant.geofenceLng,
+      );
+      if (distanceMeters > dependant.geofenceRadiusMeters) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: `You're ${Math.round(distanceMeters)} m from the dependant's home, outside its ${dependant.geofenceRadiusMeters} m check-out radius. Check out from the home.`,
+        });
+        return;
+      }
+
       // Visit task checklist (docs/visit-task-checklist-plan.md): a required, active task with no
       // visit_task_completions row for this visit blocks checkout outright, per the user's own
       // explicit choice (not just a warning) - "addressed" means any status was recorded
@@ -897,7 +996,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       const [updated] = await db.transaction(async (tx) => {
         await tx
           .update(schema.verificationEvents)
-          .set({ checkoutAt: now })
+          .set({
+            checkoutAt: now,
+            checkoutGpsLat: body.gpsLat,
+            checkoutGpsLng: body.gpsLng,
+            checkoutDistanceFromGeofenceMeters: distanceMeters,
+          })
           .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
         return tx
           .update(schema.visitSchedules)

@@ -454,6 +454,12 @@ export const verificationEvents = pgTable(
     checkinGpsLat: doublePrecision(),
     checkinGpsLng: doublePrecision(),
     distanceFromGeofenceMeters: doublePrecision(),
+    // Where the caregiver was when they checked out, and how far that was from the geofence
+    // centre (migration 0015): checkout must happen inside the home's radius, like check-in, and
+    // this is the record that it did. Null for visits checked out before the rule existed.
+    checkoutGpsLat: doublePrecision(),
+    checkoutGpsLng: doublePrecision(),
+    checkoutDistanceFromGeofenceMeters: doublePrecision(),
     caregiverMatchConfidence: numeric({ precision: 5, scale: 2 }),
     dependantMatchConfidence: numeric({ precision: 5, scale: 2 }),
     caregiverLivenessPassed: boolean(),
@@ -601,6 +607,13 @@ export const termsAcceptances = pgTable(
     document: text().notNull(),
     version: text().notNull(),
     acceptedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    // The consent screen's two checkboxes (migration 0014, terms v2): consent to photos being
+    // used to verify identity at visits, and to audio being recorded during visits. Kept on the
+    // acceptance as the append-only proof of what the person ticked, alongside the
+    // consent_records rows the same acceptance creates (which can later be revoked). Null on v1
+    // acceptances, which didn't ask - null means "not asked", not "refused".
+    biometricConsent: boolean(),
+    audioConsent: boolean(),
   },
   (table) => [
     check(

@@ -9,12 +9,25 @@
 // has no consent screen (not requested). The caller must already have a users row (a family
 // member finishes self-registration before reaching the app's home, where the screen is shown),
 // since an acceptance is recorded against that row.
+//
+// Consent checkboxes (2026-09-27, terms v2): accepting also means ticking two required boxes -
+// photos used to verify identity at visits, and audio recorded during visits - and this endpoint
+// refuses an acceptance without both, so no app (or stale build) can record agreement to terms
+// whose consents weren't given. Each acceptance then creates the matching consent_records rows,
+// which is what the rest of the system checks (e.g. scheduling): for a caregiver, their own
+// consent; for a family member, consent on behalf of every active dependant they're the primary
+// contact of (proof of that authority is assumed for the POC - a user decision, to be refined
+// with leadership). Dependants they register later get the same consent at registration
+// (routes/dependants.ts). The primary contact, not every linked relative, because the primary
+// contact is the one person answerable for the dependant (the same reason only they approve link
+// requests in routes/familyLinkRequests.ts).
 
 import { and, eq } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
+import { grantConsents, type ConsentSubject } from '../db/consents.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { CURRENT_TERMS, type TermsDocument, type TermsDocumentType } from '../terms.js';
@@ -28,6 +41,14 @@ const acceptTermsRequestSchema = z.object({
   // The version the user was actually shown - checked against the current one so an app holding
   // stale text can't record agreement to wording the user never saw.
   version: z.string().min(1),
+  // The consent screen's two required checkboxes - literal true, so a missing or false value is a
+  // 400 rather than an acceptance without consent.
+  biometricConsent: z.literal(true, {
+    error: 'Consent to photo identity verification is required to accept the terms.',
+  }),
+  audioConsent: z.literal(true, {
+    error: 'Consent to audio recording during visits is required to accept the terms.',
+  }),
 });
 
 function getDb(res: Response): Db | undefined {
@@ -64,6 +85,39 @@ async function acceptanceOf(db: Db, userId: string, terms: TermsDocument): Promi
       ),
     );
   return row?.acceptedAt ?? null;
+}
+
+// Who a user's acceptance consents for: a caregiver consents for themselves; a family member for
+// the active dependants they're the primary contact of (see the header). A caregiver user with no
+// caregivers row (not registered as a caregiver yet) has no subject, since consent_records points
+// at the caregivers row.
+async function consentSubjectsOf(
+  db: Pick<Db, 'select'>,
+  userId: string,
+  document: TermsDocumentType,
+): Promise<ConsentSubject[]> {
+  if (document === 'caregiver') {
+    const rows = await db
+      .select({ id: schema.caregivers.userId })
+      .from(schema.caregivers)
+      .where(eq(schema.caregivers.userId, userId));
+    return rows.map((row) => ({ subjectType: 'caregiver', id: row.id }));
+  }
+  const rows = await db
+    .select({ id: schema.dependants.id })
+    .from(schema.dependantFamilyMembers)
+    .innerJoin(
+      schema.dependants,
+      eq(schema.dependants.id, schema.dependantFamilyMembers.dependantId),
+    )
+    .where(
+      and(
+        eq(schema.dependantFamilyMembers.familyMemberUserId, userId),
+        eq(schema.dependantFamilyMembers.isPrimaryContact, true),
+        eq(schema.dependants.status, 'active'),
+      ),
+    );
+  return rows.map((row) => ({ subjectType: 'dependant', id: row.id }));
 }
 
 export function createTermsRouter(dependencies: TermsRouterDependencies): Router {
@@ -150,11 +204,21 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
         return;
       }
       // Accepting again is harmless and keeps the original acceptance time (the table is
-      // append-only, so the first record stands).
-      await db
-        .insert(schema.termsAcceptances)
-        .values({ userId, document: terms.document, version: terms.version })
-        .onConflictDoNothing();
+      // append-only, so the first record stands). One transaction, so an acceptance is never
+      // recorded without the consent records it promises, or the other way round.
+      await db.transaction(async (tx) => {
+        await tx
+          .insert(schema.termsAcceptances)
+          .values({
+            userId,
+            document: terms.document,
+            version: terms.version,
+            biometricConsent: body.biometricConsent,
+            audioConsent: body.audioConsent,
+          })
+          .onConflictDoNothing();
+        await grantConsents(tx, await consentSubjectsOf(tx, userId, terms.document), userId);
+      });
       const acceptedAt = await acceptanceOf(db, userId, terms);
       res.status(200).json({
         document: terms.document,

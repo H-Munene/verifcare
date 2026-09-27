@@ -290,6 +290,10 @@ paths:
         Atomically creates the `dependants` row and its first `dependant_family_members` link
         (`primaryFamilyMember`, marked `isPrimaryContact: true`), per architecture.md's
         atomic-first-family-member-at-registration requirement.
+
+        If the primary family member has given both consents on the family app's consent screen
+        (`POST /terms/current/accept`), the same transaction records `biometric_verification` and
+        `audio_cognitive_monitoring` consent for the new dependant, granted by them.
       operationId: createDependant
       requestBody:
         required: true
@@ -712,7 +716,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '422':
-          $ref: '#/components/responses/MissingCheckinPhoto'
+          $ref: '#/components/responses/Unschedulable'
         default:
           $ref: '#/components/responses/Problem'
     get:
@@ -809,7 +813,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '422':
-          $ref: '#/components/responses/MissingCheckinPhoto'
+          $ref: '#/components/responses/Unschedulable'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -1099,7 +1103,30 @@ paths:
         `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
         dependant_care_tasks row has no matching visit_task_completions row for this visit -
         "addressed" means any status was recorded, not necessarily `completed`.
+
+        Must happen inside the dependant's geofence radius, measured from the caregiver's current
+        GPS fix with the same distance calculation as check-in; the fix and its distance are stored
+        on `verification_events` (`checkoutGpsLat`, `checkoutGpsLng`,
+        `checkoutDistanceFromGeofenceMeters`).
       operationId: checkoutVisit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gpsLat, gpsLng]
+              properties:
+                gpsLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                gpsLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
       responses:
         '200':
           description: Checked out.
@@ -1107,6 +1134,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VisitSchedule'
+        '400':
+          description: The location is missing or invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The caregiver is outside the dependant's geofence radius; `detail` gives the distance and the radius.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
           content:
@@ -1535,8 +1574,15 @@ paths:
       tags: [Terms]
       summary: Accept the current terms
       description: |
-        Records the caller's acceptance of the version they were shown. Idempotent: accepting again
-        keeps the original acceptance time (acceptances are append-only).
+        Records the caller's acceptance of the version they were shown, with the consent screen's two
+        required consents. Idempotent: accepting again keeps the original acceptance time
+        (acceptances are append-only).
+
+        Also records the matching consent records (`biometric_verification` and
+        `audio_cognitive_monitoring`), skipping any already active: for a caregiver, for
+        themselves; for a family member, for each active dependant they are the primary contact
+        of. Dependants a consenting family member registers later get the same consent at
+        registration.
       operationId: acceptCurrentTerms
       requestBody:
         required: true
@@ -1544,11 +1590,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [version]
+              required: [version, biometricConsent, audioConsent]
               properties:
                 version:
                   type: string
                   description: The version the user was shown; must be the current one.
+                biometricConsent:
+                  type: boolean
+                  enum: [true]
+                  description: Consent to photos being used to verify identity at each visit. Must be true.
+                audioConsent:
+                  type: boolean
+                  enum: [true]
+                  description: Consent to audio being recorded during visits. Must be true.
       responses:
         '200':
           description: Accepted.
@@ -1566,6 +1620,12 @@ paths:
                   acceptedAt:
                     type: string
                     format: date-time
+        '400':
+          description: A consent was missing or not true, or the body was otherwise invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: The terms were updated since the app loaded them - the user must review the current version.
           content:
@@ -1709,12 +1769,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-    MissingCheckinPhoto:
+    Unschedulable:
       description: |
-        The caregiver or the dependant (or both) has no active photo, so check-in couldn't verify
-        them and the visit can't be scheduled, or moved to a new time, until one is added. A photo
-        still awaiting a supervisor's review doesn't count. Status-only updates (e.g. cancelling)
-        are never blocked by this.
+        The visit can't be scheduled, or moved to a new time, and `detail` says who is missing
+        what. Either the caregiver or the dependant (or both) has no active photo, so check-in
+        couldn't verify them (a photo still awaiting a supervisor's review doesn't count); or one
+        of them has no active (unrevoked) `biometric_verification` consent record, given by
+        accepting the terms in the mobile app. Status-only updates (e.g. cancelling) are never
+        blocked by this.
       content:
         application/problem+json:
           schema:
@@ -2739,6 +2801,16 @@ components:
           type: [number, 'null']
           format: double
         distanceFromGeofenceMeters:
+          type: [number, 'null']
+          format: double
+        checkoutGpsLat:
+          type: [number, 'null']
+          format: double
+          description: Where the caregiver checked out. Null before checkout, and for visits checked out before checkout locations were recorded.
+        checkoutGpsLng:
+          type: [number, 'null']
+          format: double
+        checkoutDistanceFromGeofenceMeters:
           type: [number, 'null']
           format: double
         caregiverMatchConfidence:

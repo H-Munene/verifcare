@@ -8,6 +8,11 @@
 // does - each factual statement below matches the implementation (hosting region, retention,
 // who sees what). Before production, the data protection contact below must be replaced with a
 // real address, and the text reviewed by a qualified advisor.
+//
+// Version 2 (2026-09-27) adds the consent screen's two required checkboxes - photo identity
+// verification and audio recording during visits - and a section explaining them. The bump is what
+// makes every existing user see the screen again and give those consents, since v1 acceptances
+// never asked for them.
 
 export type TermsDocumentType = 'caregiver' | 'family_member';
 
@@ -48,9 +53,9 @@ const contact: TermsSection = {
 
 const caregiverTerms: TermsDocument = {
   document: 'caregiver',
-  version: '1',
+  version: '2',
   title: 'Terms of Use and Privacy Notice',
-  effectiveDate: '2026-09-26',
+  effectiveDate: '2026-09-27',
   sections: [
     {
       heading: 'About this app',
@@ -86,13 +91,20 @@ const caregiverTerms: TermsDocument = {
         'Your check-in photos are deleted as soon as they have been compared with your registered photo. Your registered photo is kept while you work with Mzazi Care and deleted when your account is deactivated. Visit audio is deleted after 90 days. Visit records are kept as part of the care history.',
       ],
     },
+    {
+      heading: 'Your consent to photos and audio',
+      paragraphs: [
+        'Below these terms we ask for two separate consents, each with its own checkbox: to your photo being taken and used to confirm your identity at each visit, and to audio being recorded during your visits. You need to give both to use the app.',
+        'Visits can only be scheduled for a caregiver who has consented to photo identity verification. To withdraw either consent later, ask your supervisor.',
+      ],
+    },
     hosting,
     rights,
     contact,
     {
       heading: 'Accepting these terms',
       paragraphs: [
-        'By tapping Accept you confirm that you have read this notice and agree to these terms, including the use of your photo and location described above. If you decline, the app will close and you will be asked again the next time you open it.',
+        'By ticking both boxes and tapping Accept you confirm that you have read this notice and agree to these terms, including the use of your photo, location and visit audio described above. If you decline, the app will close and you will be asked again the next time you open it.',
       ],
     },
   ],
@@ -100,9 +112,9 @@ const caregiverTerms: TermsDocument = {
 
 const familyMemberTerms: TermsDocument = {
   document: 'family_member',
-  version: '1',
+  version: '2',
   title: 'Terms of Use and Privacy Notice',
-  effectiveDate: '2026-09-26',
+  effectiveDate: '2026-09-27',
   sections: [
     {
       heading: 'About this app',
@@ -142,13 +154,20 @@ const familyMemberTerms: TermsDocument = {
         "A dependant's photo is kept while they receive care and deleted when they are deactivated. Visit audio is deleted after 90 days. Visit records are kept as part of the care history.",
       ],
     },
+    {
+      heading: 'Your consent for photos and audio',
+      paragraphs: [
+        'Below these terms we ask for two separate consents, each with its own checkbox, given on behalf of every dependant you register or are the primary contact for: to their photo being used to confirm their identity at each visit, and to audio being recorded during their visits for cognitive monitoring. You need to give both to use the app.',
+        'Visits can only be scheduled for a dependant whose photo consent is in place. To withdraw either consent for a dependant later, contact your Mzazi Care supervisor.',
+      ],
+    },
     hosting,
     rights,
     contact,
     {
       heading: 'Accepting these terms',
       paragraphs: [
-        'By tapping Accept you confirm that you have read this notice and agree to these terms. If you decline, the app will close and you will be asked again the next time you open it.',
+        'By ticking both boxes and tapping Accept you confirm that you have read this notice, agree to these terms, and give both consents above. If you decline, the app will close and you will be asked again the next time you open it.',
       ],
     },
   ],

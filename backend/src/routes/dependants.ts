@@ -64,6 +64,7 @@ import {
   type CheckinPhotoStatus,
 } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
+import { grantConsents, hasGivenTermsConsents } from '../db/consents.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
@@ -723,6 +724,19 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           isPrimaryContact: true,
           addedBy: callerRow.id,
         });
+
+        // A primary contact who ticked the consent boxes when accepting the family app's terms
+        // consented for the dependants they register or are the primary contact for (see
+        // routes/terms.ts's header), so this new dependant gets the same consent now, granted by
+        // them - otherwise it couldn't be scheduled until they accepted the terms again. Applies
+        // when a supervisor registers the dependant for them too, since the consent is theirs.
+        if (await hasGivenTermsConsents(tx, familyMemberUserId)) {
+          await grantConsents(
+            tx,
+            [{ subjectType: 'dependant', id: dependant.id }],
+            familyMemberUserId,
+          );
+        }
 
         return dependant;
       });

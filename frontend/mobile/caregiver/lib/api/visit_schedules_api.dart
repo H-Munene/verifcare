@@ -197,10 +197,18 @@ class VisitSchedulesApi {
     });
   }
 
-  Future<VisitSchedule> checkout(String visitScheduleId) async =>
-      VisitSchedule.fromJson(
-        await _client.post('/visit-schedules/$visitScheduleId/checkout', {}),
-      );
+  /// Checks out from where the caregiver is now: the server refuses (422, with the distance and
+  /// radius in its detail) unless [gpsLat]/[gpsLng] are inside the dependant's home radius.
+  Future<VisitSchedule> checkout(
+    String visitScheduleId, {
+    required double gpsLat,
+    required double gpsLng,
+  }) async => VisitSchedule.fromJson(
+    await _client.post('/visit-schedules/$visitScheduleId/checkout', {
+      'gpsLat': gpsLat,
+      'gpsLng': gpsLng,
+    }),
+  );
 }
 
 /// One care-plan task as seen from a visit (GET .../tasks) - status is null until recorded.
