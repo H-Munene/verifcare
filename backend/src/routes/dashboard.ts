@@ -12,6 +12,7 @@ import { checkinPhotoStatuses } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
+import { addDays, dayStart, nairobiDate, TIME_ZONE } from '../nairobiTime.js';
 import { parseOrSendProblem } from '../validation.js';
 import { trendOutcome, visitState } from '../visitOutcome.js';
 
@@ -21,29 +22,10 @@ export interface DashboardRouterDependencies {
   now?: () => Date;
 }
 
-// Mzazi Care operates in Kenya (county/ward locations, +254 numbers), so a "day" is a Nairobi day
-// whoever's browser asks. Kenya has no daylight saving, so the offset is fixed.
-const TIME_ZONE = 'Africa/Nairobi';
-const UTC_OFFSET = '+03:00';
 const TREND_DAYS = 14;
 // The Overview lists every item needing attention in a scrolling panel (user request,
 // 2026-09-26); the cap only bounds the response, and `total` still says how many there are.
 const ATTENTION_LIST_LIMIT = 100;
-
-/** YYYY-MM-DD for the Nairobi calendar day that [instant] falls in. */
-function nairobiDate(instant: Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(instant);
-}
-
-function dayStart(date: string): Date {
-  return new Date(`${date}T00:00:00${UTC_OFFSET}`);
-}
-
-function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 const overviewQuerySchema = z.object({
   date: z.iso.date().optional().describe('Nairobi calendar day, YYYY-MM-DD; defaults to today'),
