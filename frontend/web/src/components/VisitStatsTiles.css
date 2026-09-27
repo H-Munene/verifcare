@@ -6,9 +6,9 @@
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1px;
   margin-bottom: 24px;
-  overflow: hidden;
   border: 1px solid var(--color-border-structural);
-  border-radius: 12px;
+  /* Sharp corners, as on the Overview (user request). */
+  border-radius: 0;
   background: var(--color-border-structural);
 }
 
@@ -24,6 +24,18 @@
   min-width: 0;
   padding: 16px 20px 18px;
   background: var(--color-page-background);
+  transition: background-color 120ms ease;
+}
+
+/* The Overview tiles' hover: the same light grey (user request). */
+.visit-stats__tile:hover {
+  background: #fafafa;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .visit-stats__tile {
+    transition: none;
+  }
 }
 
 .visit-stats__label {
