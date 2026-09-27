@@ -48,7 +48,6 @@ export function CaregiversListPage() {
   return (
     <div>
       <div className="caregivers-page__toolbar">
-        <h1 className="caregivers-page__title">Caregivers</h1>
         {identity?.role === 'supervisor' ? (
           <Button
             variant="cta-pill"

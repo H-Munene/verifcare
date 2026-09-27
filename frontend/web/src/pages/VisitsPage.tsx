@@ -182,7 +182,6 @@ export function VisitsPage() {
   return (
     <div>
       <div className="visits-page__toolbar">
-        <h1 className="visits-page__title">Visits</h1>
         <Button variant="cta-pill" onClick={() => setModalState({ mode: 'create' })}>
           + Schedule Visit
         </Button>

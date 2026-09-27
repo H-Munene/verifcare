@@ -64,7 +64,6 @@ export function DependantsListPage() {
   return (
     <div>
       <div className="dependants-page__toolbar">
-        <h1 className="dependants-page__title">Dependants</h1>
         <div className="dependants-page__toolbar-actions">
           <Button
             variant="cta-pill"

@@ -98,7 +98,6 @@ export function OverviewPage() {
   const header = (
     <header className="overview__header">
       <div>
-        <h1 className="overview__title">Overview</h1>
         <p className="overview__subtitle">
           {longDate(date)}
           {isToday ? ', today' : ''}. Times are Nairobi time.

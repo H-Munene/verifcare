@@ -47,6 +47,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Console (confirmed with the user, not widened to a read-only view for other roles) - every
   // main page here stays supervisor-only, Visits included.
   const isSupervisor = identity?.role === 'supervisor';
+  const segments = location.pathname.split('/').filter(Boolean);
+  const topLevelTitle =
+    segments.length === 1
+      ? NAV_SECTIONS.find((section) => section.path === `/${segments[0]}`)?.label
+      : undefined;
   const supervisorOnlySections = new Set(['Overview', 'Visits', 'Caregivers', 'Reviews']);
   const navSections = NAV_SECTIONS.map((section) =>
     supervisorOnlySections.has(section.label) && !isSupervisor
@@ -84,6 +89,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="app-shell__main">
         <header className="app-shell__topbar">
           <div className="app-shell__topbar-left">
+            {/* A top-level page's title lives here, level with the alerts bell (user request,
+                2026-09-27), still the page's main heading; deeper pages show breadcrumbs. */}
+            {topLevelTitle ? <h1 className="app-shell__title">{topLevelTitle}</h1> : null}
             <Breadcrumbs />
           </div>
           <div className="app-shell__topbar-right">{isSupervisor ? <AlertsBell /> : null}</div>
