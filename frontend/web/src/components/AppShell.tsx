@@ -12,6 +12,7 @@ import {
 import { NavItem } from '../design-system/NavItem';
 import { Breadcrumbs } from './Breadcrumbs';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ProfileMenu } from './ProfileMenu';
 import './AppShell.css';
 
 // Matches the wireframe's global chrome (temp_images's design prompt): left sidebar nav with all
@@ -33,7 +34,7 @@ const NAV_SECTIONS = [
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { identity, signOut } = useAuth();
+  const { identity } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   // Every /caregivers route is supervisor-only on the backend (requireRole('supervisor') covers
@@ -77,18 +78,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             />
           ))}
         </nav>
+        <ProfileMenu />
       </aside>
       <div className="app-shell__main">
         <header className="app-shell__topbar">
           <div className="app-shell__topbar-left">
             <Breadcrumbs />
           </div>
-          <div className="app-shell__topbar-right">
-            <span className="app-shell__user">{identity?.email ?? identity?.sub}</span>
-            <button type="button" className="app-shell__sign-out" onClick={signOut}>
-              Sign out
-            </button>
-          </div>
+          <div className="app-shell__topbar-right" />
         </header>
         <main className="app-shell__content">
           {/* A page that fails to render shows a message here instead of blanking the app; keyed

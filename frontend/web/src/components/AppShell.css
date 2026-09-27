@@ -83,24 +83,6 @@
   flex-shrink: 0;
 }
 
-.app-shell__user {
-  font-size: 13px;
-  color: var(--color-ink-default);
-}
-
-.app-shell__sign-out {
-  background: none;
-  border: none;
-  color: var(--color-accent);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-}
-
-.app-shell__sign-out:hover {
-  color: var(--color-accent-hover);
-}
-
 .app-shell__content {
   flex: 1;
   padding: 24px;
