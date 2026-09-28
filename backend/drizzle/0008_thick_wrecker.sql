@@ -1,1 +1,0 @@
-ALTER TABLE "dependants" ADD COLUMN "primary_condition_summary" text;

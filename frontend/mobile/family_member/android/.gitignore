@@ -12,7 +12,3 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
-
-# Kotlin Gradle plugin's local cache (compiler-daemon sessions, error logs) - machine-specific,
-# recreated on every build, never needed in the repo.
-.kotlin/
