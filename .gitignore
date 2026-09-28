@@ -1,4 +1,6 @@
 /docs
+# graphify knowledge graph of the repo, rebuilt locally by git hooks (developer decision 2026-09-28)
+/graphify-out
 
 # Node.js / TypeScript (applies to any package in this repo: backend/, infra/, frontend/web/)
 node_modules/
