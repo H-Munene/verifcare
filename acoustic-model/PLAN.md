@@ -297,7 +297,8 @@ The project report (Chapter 3.2.3) names **Random Forest, Support Vector Machine
 5. **Selection rule (pre-registered, written before any results):**
    - Primary: ROC-AUC, compared with fold-paired t-tests (df = 4), Bonferroni-corrected across model pairs.
      - **Changed 2026-09-28:** the plain fold-paired t-test is replaced by the **Nadeau-Bengio corrected resampled t-test**, because CV training portions overlap, which makes the plain test anti-conservative. The Bonferroni family is the **6 pairwise comparisons** among the 4 candidates, so each is tested at α = 0.05 ÷ 6.
-     - **Pending the developer's decision:** single 5-fold CV, or **5 repeats × 5 folds** (each repeat with its own seed, all stored in `cv_folds.csv`) with the corrected repeated k-fold t-test (Bouckaert & Frank 2004). With a single 5-fold run, the corrected test will rarely find a difference, so a tie is the expected outcome. The runtime estimate is in `docs/ml-dev-log.md`.
+     - **Pending the developer's decision:** single 5-fold CV, or **5 repeats × 5 folds** (each repeat with its own seed, all stored in `cv_folds.csv`) with the corrected repeated k-fold t-test (Bouckaert & Frank 2004). With a single 5-fold run, the corrected test will rarely find a difference, so a tie is the expected outcome. The runtime estimate is in `docs/ml-dev-log.md`: about 18 min (20 search configurations per model) or 39 min (50) for 5 × 5, against 4-8 min for a single 5-fold.
+     - Also pending: the search budget (20 or 50 configurations per candidate), and whether the inner-CV ROC-AUC used for tuning is person-weighted (1 ÷ clips) like training. In scikit-learn 1.9, weights reach the model only with metadata routing enabled and each step's request declared explicitly; a test will check that they arrive.
    - If tied: calibrated Brier score, same test.
    - If still tied: expected calibration error.
    - Last resort: the simplest model (fewest dependencies, smallest saved file).
