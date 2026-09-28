@@ -35,8 +35,7 @@ SEED = 42  # one global seed; every random step derives from it
 
 # ---------------------------------------------------------------- Stage 1: data collection
 
-# PROPOSED mapping from top-level folder to class label (1 = cognitive decline).
-# Pending the developer's confirmation at Checkpoint 1 (PLAN.md Stage 1 step 2).
+# Mapping from top-level folder to class label (1 = cognitive decline).
 FOLDER_TO_LABEL = {
     "dementia": 1,
     "nodementia": 0,
@@ -61,6 +60,14 @@ PROXY_BANDWIDTH_ENERGY_SHARE = 0.99
 # Listening audit: about 20 recordings, stratified by class (PLAN.md Stage 1 step 10).
 LISTENING_AUDIT_PER_CLASS = 10
 
+# Confirmed by the developer at Checkpoint 1 (2026-09-28): the mapping above is correct.
+
+# DementiaNet metadata sheet (linked from the upstream README), one tab per class. Downloaded to
+# data/ because it holds real names; used for age at recording (decision D6).
+METADATA_SHEET_ID = "1ih3FjEsiKDctS2oFhZKXah-OrzEridgUDHKu2awXSx8"
+METADATA_TABS = {"dementia": "628190327", "no_dementia": "1338555640"}
+METADATA_FILES = {name: DATA_DIR / f"dementianet_metadata_{name}.csv" for name in METADATA_TABS}
+
 # ---------------------------------------------------------------- Stage 2: data processing
 
 TARGET_SAMPLE_RATE = 16_000  # standard for speech; eGeMAPS is validated at 16 kHz
@@ -70,6 +77,11 @@ TARGET_SAMPLE_RATE = 16_000  # standard for speech; eGeMAPS is validated at 16 k
 # 180 ms, enough for a usable median pause duration. It is also a deployment requirement:
 # the app must capture at least 30 s of speech after trimming (PLAN.md Stage 2 step 3).
 MIN_DURATION_SECONDS = 30.0
+
+# Pre-registered 2026-09-28 (Checkpoint 1), before any feature extraction: keep only the first 90 s
+# after trimming, in both classes. DementiaNet clips are capped at 90 s, a cap only dementia clips
+# exceed, so without this, maximum length would differ by class (PLAN.md Stage 2 step 3).
+MAX_DURATION_SECONDS = 90.0
 
 # ---------------------------------------------------------------- Stage 3: pause detector
 # All pre-registered 2026-09-28, before any class labels were looked at.
@@ -120,3 +132,10 @@ BANDPASS_HIGH_HZ = 7000.0
 BANDPASS_ORDER = 4
 NOISE_TYPES = ("white", "pink")
 TARGET_SNRS_DB = (20.0, 10.0)
+
+# Family A degradation flag rule (PLAN.md 3.3 step 4, decided 2026-09-28). A feature is flagged when
+# its median shift under bandpass alone exceeds its own within-subject variation (the typical
+# relative difference between one person's recordings). The benchmark needs enough multi-clip
+# subjects to be stable; below this many, the fixed fallback tolerance is used instead.
+MIN_SUBJECTS_FOR_WITHIN_SUBJECT_BENCHMARK = 20
+FALLBACK_SHIFT_TOLERANCE = 0.10
