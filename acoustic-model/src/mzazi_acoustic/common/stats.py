@@ -4,10 +4,14 @@ import numpy as np
 from scipy import stats
 
 
-def bonferroni(p_values):
-    """Bonferroni-adjusted p-values (p * m, capped at 1), m = number of tests passed in."""
+def bonferroni(p_values, family_size=None):
+    """Bonferroni-adjusted p-values (p * m, capped at 1).
+
+    m = family_size if given (a pre-registered family, even when only some of its tests are run),
+    otherwise the number of p-values passed in.
+    """
     p = np.asarray(p_values, dtype=float)
-    return np.minimum(p * len(p), 1.0)
+    return np.minimum(p * (family_size or len(p)), 1.0)
 
 
 def mann_whitney(positive, negative):

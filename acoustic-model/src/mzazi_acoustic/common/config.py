@@ -180,6 +180,7 @@ EGEMAPS_COLUMNS = {
 
 # ---------------------------------------------------------------- Stage 3.3: pre-stated check rules
 REDUNDANCY_ABS_R = 0.9  # pairwise |r| >= this: keep the feature listed first
+ALPHA = 0.05  # significance level for every pre-registered test, applied after Bonferroni
 RANK_RELATIVE_TOLERANCE = 1e-8  # singular values below this x the largest count as zero
 VIF_REPORT_THRESHOLD = 10.0  # reported only, never removed
 DURATION_DEPENDENCE_ABS_R = 0.2  # per-subject |r| with trimmed duration above this is flagged
