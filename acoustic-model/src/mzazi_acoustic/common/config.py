@@ -78,6 +78,19 @@ TARGET_SAMPLE_RATE = 16_000  # standard for speech; eGeMAPS is validated at 16 k
 # the app must capture at least 30 s of speech after trimming (PLAN.md Stage 2 step 3).
 MIN_DURATION_SECONDS = 30.0
 
+# Edge trimming (PLAN.md Stage 2 step 2). Frozen 2026-09-28 and NEVER adjusted, deliberately
+# independent of the pause detector: the detector may be tuned against the developer's annotations,
+# and that must not move the 30 s minimum or the split. Rule: keep from the first to the last frame
+# whose RMS level is within TRIM_DB_BELOW_REFERENCE of the file's 99th-percentile level.
+# 30 dB is 5 dB wider than the detector's 25 dB silence rule, so trimming is the more conservative
+# of the two: it keeps weak speech onsets (often 20-25 dB below vowel peaks) and only removes clearly
+# silent edges. In noisy files nothing may fall below it, and then nothing is trimmed, which never
+# cuts speech.
+TRIM_FRAME_SECONDS = 0.025
+TRIM_HOP_SECONDS = 0.010
+TRIM_REFERENCE_PERCENTILE = 99
+TRIM_DB_BELOW_REFERENCE = 30.0
+
 # Pre-registered 2026-09-28 (Checkpoint 1), before any feature extraction: keep only the first 90 s
 # after trimming, in both classes. DementiaNet clips are capped at 90 s, a cap only dementia clips
 # exceed, so without this, maximum length would differ by class (PLAN.md Stage 2 step 3).
@@ -138,4 +151,15 @@ TARGET_SNRS_DB = (20.0, 10.0)
 # relative difference between one person's recordings). The benchmark needs enough multi-clip
 # subjects to be stable; below this many, the fixed fallback tolerance is used instead.
 MIN_SUBJECTS_FOR_WITHIN_SUBJECT_BENCHMARK = 20
+# Updated at the Stage 2 review: the flag fires if the shift exceeds the benchmark OR this value,
+# whichever is smaller, so 10 % is always a cap, not only the fallback. Flagging only.
 FALLBACK_SHIFT_TOLERANCE = 0.10
+
+# ---------------------------------------------------------------- Stage 4: model training
+# Decided 2026-09-28 (Stage 2 review). Repeated CV, because a single 5-fold run with the corrected
+# t-test would almost always call a tie; estimated ~18 min in total at this budget.
+CV_FOLDS = 5
+CV_REPEATS = 5  # each repeat uses seed SEED + repeat index
+INNER_CV_FOLDS = 3
+SEARCH_CONFIGS_PER_MODEL = 20  # equal budget for all four candidates
+N_PAIRWISE_COMPARISONS = 6  # Bonferroni family: 4 candidates, all pairs

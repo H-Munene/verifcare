@@ -51,6 +51,27 @@ def exclusion_tables(table):
     return clips, people
 
 
+def excluded_vs_kept_dementia(table):
+    """Descriptive only (developer, Stage 2 review): dementia people who lose every clip to the 30 s
+    minimum vs those who keep at least one. Compares clip counts, lengths and timing buckets, to
+    show whether the minimum removes a particular kind of dementia speaker. Nothing is changed by it.
+    """
+    dementia = table[table["label"] == 1].copy()
+    passes = dementia.groupby("subject_id")["meets_minimum"].any()
+    dementia["group"] = dementia["subject_id"].map(lambda s: "kept (>= 1 clip of 30 s+)" if passes[s]
+                                                   else "lost (every clip under 30 s)")
+    people = dementia.groupby(["group", "subject_id"]).agg(
+        clips=("file_id", "size"), median_raw_s=("raw_s", "median"), median_trimmed_s=("trimmed_s", "median"),
+        longest_trimmed_s=("trimmed_s", "max")).reset_index()
+    summary = people.groupby("group").agg(
+        people=("subject_id", "size"), clips_per_person=("clips", "mean"),
+        median_clip_trimmed_s=("median_trimmed_s", "median"), median_longest_clip_s=("longest_trimmed_s", "median"),
+        min_longest_clip_s=("longest_trimmed_s", "min")).round(2)
+    buckets = pd.crosstab(dementia["group"], dementia["bucket"].astype(str), normalize="index").round(2)
+    buckets.columns = [f"share_bucket_{c}" for c in buckets.columns]
+    return summary.join(buckets)
+
+
 def to_markdown(frame):
     frame = frame.reset_index()
     lines = ["| " + " | ".join(str(c) for c in frame.columns) + " |", "|" + "---|" * len(frame.columns)]
@@ -117,6 +138,12 @@ def main():
             of_class = table[table["label"] == label]
             gone = of_class.groupby("subject_id")["role"].apply(lambda r: (r == reason).all()).sum()
             lines.append(f"- People losing every clip to the {name} rule, {cls}: {gone} of {of_class['subject_id'].nunique()}")
+    comparison = excluded_vs_kept_dementia(table)
+    comparison.to_csv(OUT / "excluded_vs_kept_dementia.csv")
+    lines += ["", "## Dementia people lost entirely to the 30 s minimum vs kept (descriptive only)", "",
+              "Bucket shares are the share of each group's clips in each timing bucket (0 = after onset, "
+              "5/10/15 = up to that many years before onset; 2 = the one unexplained suffix).", "",
+              *to_markdown(comparison.T.map(lambda v: f"{v:g}").rename_axis("measure")), ""]
     (OUT / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 

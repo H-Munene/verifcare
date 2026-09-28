@@ -2,18 +2,19 @@
 
 Works on a single waveform, so the deployed service can reuse it unchanged.
 
-Trimming uses the pause detector's own silence rule: speech starts at the detector's first speech
-onset and ends at its last speech offset. Reason: one definition of "silence" across the whole
-pipeline. A second rule (e.g. librosa's trim at 60 dB below the peak) would disagree with the
-detector about where speech starts, and the pre-registered 30 s minimum would then be measured
-differently from the span the pause features are computed on. Internal silences are never touched.
+Trimming has its own simple energy rule with its own frozen parameters (config.TRIM_*), and is
+deliberately independent of the pause detector. The detector may later be tuned against manual
+annotations; if trimming used the detector, that tuning would move the 30 s minimum and therefore
+the split. Internal silences are never touched. A consequence: the pause features describe the
+detector's span (first to last detected speech), which can be slightly narrower than the trimmed
+audio.
 """
 
 import numpy as np
 import soxr
 
 from mzazi_acoustic.common import config
-from mzazi_acoustic.feature_engineering import pause_detector
+from mzazi_acoustic.common.audio import rms_db
 
 
 def to_16k_mono(y, sr):
@@ -24,11 +25,20 @@ def to_16k_mono(y, sr):
 
 
 def speech_span(y, sr):
-    """(start_s, end_s) of the speech, from the pause detector; (0.0, 0.0) if no speech is found."""
-    segments = pause_detector.detect_pauses(y, sr).speech_segments
-    if not segments:
+    """(start_s, end_s) from the first to the last frame within TRIM_DB_BELOW_REFERENCE of the
+    file's reference level. Frames are centred on multiples of the hop, so each kept frame
+    contributes half a window either side. Returns (0.0, 0.0) for an empty or all-silent signal.
+    """
+    hop = int(round(config.TRIM_HOP_SECONDS * sr))
+    level = rms_db(y, int(round(config.TRIM_FRAME_SECONDS * sr)), hop)
+    if len(level) == 0 or np.max(level) <= -120:
         return 0.0, 0.0
-    return segments[0][0], segments[-1][1]
+    reference = np.percentile(level, config.TRIM_REFERENCE_PERCENTILE)
+    loud = np.flatnonzero(level >= reference - config.TRIM_DB_BELOW_REFERENCE)
+    half_window = config.TRIM_FRAME_SECONDS / 2
+    start = max(loud[0] * config.TRIM_HOP_SECONDS - half_window, 0.0)
+    end = min(loud[-1] * config.TRIM_HOP_SECONDS + half_window, len(y) / sr)
+    return start, end
 
 
 def trim_and_truncate(y, sr):

@@ -22,7 +22,7 @@ YEARS_BEFORE_ONSET = {"0": 0, "5": -5, "10": -10, "15": -15}  # ordered time for
 def load_dementia_clips():
     manifest = pd.read_csv(config.COLLECTION_RESULTS / "file_manifest.csv")
     ages = pd.read_csv(config.COLLECTION_RESULTS / "age_at_recording.csv", dtype={"bucket": str})
-    durations = pd.read_csv(config.PROCESSING_RESULTS / "trimmed_durations.csv", dtype={"bucket": str})
+    durations = pd.read_csv(config.PROCESSING_RESULTS / "processing_report.csv", dtype={"bucket": str})
     clips = manifest[["file_id", *PROXIES]].merge(ages, on="file_id")
     clips = clips.merge(durations[["file_id", "meets_minimum"]], on="file_id")
     clips = clips[clips["label"] == 1]
