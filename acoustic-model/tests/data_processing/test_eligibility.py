@@ -26,5 +26,13 @@ def test_over_70_subset():
     assert kept(eligibility.over_70_sensitivity(AGES)) == {"d_old", "c_3"}
 
 
+def test_training_timing_drops_only_the_10_to_15_year_clips_which_go_to_trajectory():
+    training = kept(eligibility.within_10_years_of_onset(AGES))
+    trajectory = kept(eligibility.trajectory_only(AGES))
+    assert trajectory == {"d_cross55", "d_young"}
+    assert training.isdisjoint(trajectory)
+    assert training | trajectory == set(AGES["file_id"])
+
+
 def test_near_onset_only_touches_dementia_clips():
     assert kept(eligibility.near_onset_only(AGES)) == {"d_old", "d_cross70", "d_unknown", "c_1", "c_2", "c_3"}

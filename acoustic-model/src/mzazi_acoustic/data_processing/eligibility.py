@@ -26,8 +26,25 @@ def over_70_sensitivity(ages):
 
 
 def near_onset_only(ages):
-    """D7 candidate (b): dementia clips only from after onset or 0-5 years before; controls unaffected."""
+    """Dementia clips only from after onset or 0-5 years before; controls unaffected.
+
+    Not the training set (D7 chose option c); used for the pre-registered 5.2 sensitivity analysis.
+    """
     return (ages["label"] == 0) | ages["bucket"].astype(str).isin(["0", "5"])
+
+
+def within_10_years_of_onset(ages):
+    """D7 option (c), decided 2026-09-28: dementia clips from after onset to 10 years before.
+
+    The 10-15-year clips are the most likely to show no signs yet, and are the oldest recordings.
+    They go only to the Stage 5 trajectory analysis, never to training or selection.
+    """
+    return (ages["label"] == 0) | ages["bucket"].astype(str).isin(["0", "5", "10"])
+
+
+def trajectory_only(ages):
+    """Dementia clips 10-15 years before onset: scored in Stage 5's trajectory analysis only."""
+    return (ages["label"] == 1) & (ages["bucket"].astype(str) == "15")
 
 
 def count_by_class(frame, label_names):
