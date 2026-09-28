@@ -1,7 +1,7 @@
 # Mzazi Care — Acoustic Cognitive-Risk Model
 ## Development Plan: Language-Independent Acoustic Markers
 
-**Status:** Plan for building the model from scratch.
+**Status:** Plan for building the model from scratch. Scoping review done 2026-09-28: the feature list in 3.1 is frozen, and the decisions from that review are recorded in place and in `docs/ml-dev-log.md` (local).
 **Audience:** the developer and the coding agent. The agent treats this file as the source of truth. If something in it turns out to be wrong once real data is inspected, the agent stops, says so, and proposes a change. It never silently deviates.
 
 ---
@@ -33,7 +33,8 @@ Published cross-language studies point mainly to **pausing and timing** features
 - **Every number traces to a file.** Anything that can't be traced is marked "unverified".
 - **Anonymisation:** committed files use an anonymous `subject_id`. The link to real names stays local and git-ignored.
 - **Proportionate testing:** unit tests only for logic that is error-prone or guards against leakage (listed per stage). No tests for thin wrappers.
-- **Checkpoints:** each stage is scoped, approved, built, run, reviewed, then committed. The agent never commits; the developer does.
+- **Checkpoints:** each stage is scoped, approved, built, run, reviewed, then committed. (Changed 2026-09-28 at the developer's instruction: the agent commits each finished step itself, with no co-author lines, so no step starts on top of uncommitted work.)
+- **Blinding:** whenever a person listens to or annotates recordings (listening audit, pause annotation), the copies get neutral file names and the class labels are kept in a separate local file that stays closed until the work is done.
 
 ---
 
@@ -112,10 +113,10 @@ The deployed service will receive one recording at a time. So each feature funct
 4. **Subject identity.** Work out which recordings belong to the same person. Normalise names (case, spacing, punctuation), flag likely duplicates or misspellings for manual review (never auto-merge), and assign each person a stable anonymous `subject_id` (deterministic, so re-running gives the same IDs). The ID-to-name lookup is saved locally and git-ignored.
 5. **Per-file facts:** format, codec, sample rate, channel count, bit depth, duration, file size, SHA-256, and whether the file opens at all.
 6. **Integrity:** missing, unreadable, zero-length, and exact-duplicate files (same hash under different names or subjects).
-7. **Counts:** subjects per class, recordings per subject (min/mean/max, overall and per class), and class balance at both subject level and recording level. These two can differ if one class has more recordings per person; report both.
+7. **Counts:** subjects per class, recordings per subject (min/mean/max, overall and per class), and class balance at both subject level and recording level. These two can differ if one class has more recordings per person; report both. Also report the per-class distribution of recording duration.
 8. **Channel-quality proxies per file:** estimated noise floor, spectral bandwidth, spectral flatness. These describe recording conditions, not the speaker, and are reused later to check whether any feature is really measuring the microphone.
 9. **Confound check:** do recording conditions differ between classes? Aggregate proxies per subject first (so people with more recordings don't count more), then test each proxy against class label (point-biserial correlation and Mann-Whitney U with rank-biserial effect size, Bonferroni-corrected across the proxies). Report the result either way.
-10. **Listening audit.** Listen to a random sample of about 20 recordings, stratified by class, and record for each: other voices present (interviewer, audience), overlapping speech, music, laughter, applause, background noise. This matters because pause features measured on a recording containing another speaker partly measure the *conversation*, not the person. The result drives decision D1.
+10. **Listening audit.** Listen to a random sample of about 20 recordings, stratified by class (one recording per subject, shuffled, blinded as in the principles), and record for each: other voices present (interviewer, audience), overlapping speech, music, laughter, applause, background noise. This matters because pause features measured on a recording containing another speaker partly measure the *conversation*, not the person. The result drives decision D1.
 
 ### Outputs (`results/01_data_collection/`)
 
@@ -137,9 +138,11 @@ Name normalisation and duplicate flagging; `subject_id` stable across repeated r
 
 1. **Standardise:** resample to 16 kHz and convert to mono. Record the original format of each file.
 2. **Trim only the start and end.** Remove leading and trailing silence. **Never remove silences inside the recording** — internal pauses are the signal this model depends on.
-3. **Minimum usable duration.** Pause statistics are unreliable on very short recordings. Pick a minimum duration after trimming, justify it (for example, the length needed to observe a reasonable number of pauses), write it in `config.py` *before* looking at which files it excludes, then report how many files per class it removes.
+3. **Minimum usable duration.** Pause statistics are unreliable on very short recordings. Pick a minimum duration after trimming, justify it (for example, the length needed to observe a reasonable number of pauses), write it in `config.py` *before* looking at which files it excludes, then report how many files **and subjects** per class it removes. If exclusions are lopsided between classes, or leave a class too small, stop and report before continuing.
+   - **Decided 2026-09-28: 30 s after trimming**, pre-registered before any duration was measured. At typical spontaneous-speech rates, 30 s gives roughly 10 or more pauses longer than 180 ms, enough for a usable median pause duration.
+   - **This is also a deployment requirement:** the app must capture at least 30 s of speech after trimming, and the service rejects anything shorter.
 4. **Speaker isolation**, only if D1 requires it (see decisions table).
-5. **Train/test split.** Create a subject-level split, stratified by class, about 80 % train / 20 % test, with a fixed seed. Check and report class proportions in both parts. Save it to `splits.csv`.
+5. **Train/test split.** Not created until D1 is decided, because excluding recordings (D1 option c) can remove whole subjects and would change the split. Create a subject-level split, stratified by class, about 80 % train / 20 % test, with a fixed seed. Check and report class proportions in both parts. Save it to `splits.csv`.
 6. **Cross-validation folds.** On the training portion only, create 5 folds with `StratifiedGroupKFold` (grouped by subject, fixed seed) and save them to `cv_folds.csv`. Every later stage reads folds from this file instead of regenerating them, so all comparisons use identical folds.
 7. **Class balance decision.** Using the recording-level balance measured in Stage 1, decide how imbalance is handled: class weights, or oversampling (SMOTE) applied inside each training fold only. Record the choice and the reason (decision D2).
 
@@ -163,17 +166,24 @@ No subject appears in both train and test; no subject appears in more than one v
 
 The agent reviews this list during scoping and challenges anything it thinks is wrong. After scoping, the list is frozen.
 
+**Frozen 2026-09-28** after the scoping review. "Analysed time" below means the stretch from the first speech onset to the last speech offset, so leftover edge silence never counts as pausing.
+
 **A. Pausing and timing (primary family)**
 
 | Feature | Source | Why it should transfer across languages | Caveat |
 |---|---|---|---|
-| Silent pause rate (per minute) | Custom intensity-based pause detector (3.2) | Measured from the signal alone; word-retrieval effort rises in cognitive decline regardless of language | Turn-taking pauses contaminate it if another speaker is present (D1) |
+| Silent pause rate (pauses ≥ 80 ms per minute of analysed time) | Custom intensity-based pause detector (3.2) | Measured from the signal alone; word-retrieval effort rises in cognitive decline regardless of language | Turn-taking pauses contaminate it if another speaker is present (D1) |
 | Mean and median pause duration | Pause detector | As above | Pause durations are skewed; report median alongside mean |
-| Short pauses (80–180 ms) and long pauses (>180 ms): rate and proportion | Pause detector | Bands taken from a study that measured pauses acoustically and language-independently | Band edges are fixed from the literature, never tuned |
-| Phonation-time ratio (time speaking ÷ total time) | Pause detector | Signal-only | — |
+| Long-pause rate (pauses > 180 ms per minute of analysed time) | Pause detector | Band edge from He et al. (2025), who measured pauses acoustically | The 180 ms edge was fitted on English picture-description data; fixed from the literature, never tuned |
+| Long-pause share of total pause time | Pause detector | As above | Undefined when a recording has no pauses (handled in 3.3 step 1) |
+| Phonation-time ratio (speech time ÷ analysed time) | Pause detector | Signal-only | — |
 | Mean speech-segment duration | Pause detector | Signal-only | — |
 | Voiced segments per second; mean and SD of voiced and unvoiced segment length | eGeMAPS via openSMILE | Signal-only, from a validated extractor | Unvoiced segments include unvoiced consonants as well as pauses |
-| Articulation-rate proxy (intensity peaks per second of speech) | eGeMAPS `loudnessPeaksPerSec` or a syllable-nuclei detector | Signal-only | Typical speaking rate differs between languages; per-person trending over visits partly offsets this |
+| Articulation-rate proxy (intensity peaks per second of speech) | eGeMAPS `loudnessPeaksPerSec`, rescaled from per second of total time to per second of speech time | Signal-only | Typical speaking rate differs between languages; per-person trending over visits partly offsets this. openSMILE's normalisation (total vs speech time) is verified on a synthetic signal before use |
+
+**Why the pause set looks like this (decided 2026-09-28).** The original list had exact linear dependencies: total pause rate = short-pause rate + long-pause rate, and short-pause time share + long-pause time share + phonation-time ratio = 1. A pairwise |r| ≥ 0.9 rule can't catch a dependency spread across three features. Such dependencies make a linear model's coefficients unidentifiable, and they split permutation importance arbitrarily between the features involved. The fix keeps total pause rate (listed first in the original plan), long-pause rate, and the long-pause share of pause time. The short band (80–180 ms) is the one left implicit (short = total − long) because intensity-based detection confuses stop-consonant closures with short pauses, so it is the least trustworthy band. **Short-pause rate is still computed and reported descriptively, but it is not a model feature.** Whether the closure concern is real is measured, not assumed: the detector validation in 3.2 reports precision and recall separately per band.
+
+The remaining pause features are still deterministic but *non-linear* functions of each other (for example, mean pause duration = pause time ÷ pause count). That is inherent to pause statistics and accepted. 3.3 step 2 measures it with a variance inflation factor (VIF) check.
 
 **B. Voice stability (secondary family)**
 
@@ -185,6 +195,8 @@ The agent reviews this list during scoping and challenges anything it thinks is 
 
 Every family B feature goes through the channel-confound check in 3.3. The rule for acting on it is written down now: **any feature whose correlation with a channel proxy survives correction is removed from the model and reported.**
 
+**Scope of the removal rule (decided 2026-09-28): family B only.** Family A features are also correlated against the channel proxies, but only reported descriptively, because that check is circular for them. The noise-floor and noise-flatness proxies are measured on each file's quietest frames, and in speech those frames are mostly the pauses. So a person who pauses more changes the proxy, and pause features correlate with it through the measurement itself, whatever the microphone. Removing pause features on that basis would remove signal, not a confound. Family A gets a separate, non-circular check instead: controlled degradation (3.3 step 4).
+
 **C. Excluded, with reasons**
 
 | Family | Reason |
@@ -195,33 +207,45 @@ Every family B feature goes through the channel-confound check in 3.3. The rule 
 | Absolute loudness | Depends on microphone gain and distance from the speaker |
 | Anything derived from transcripts | Fails on untranscribed languages |
 
-Expected size: roughly 15–20 features. Because the set is small and justified in advance, **there is no data-driven feature-selection step.**
+Frozen size (before the 3.3 removal rules): 19 model features (13 in family A, 6 in family B: jitter, shimmer and HNR, each as mean and variability). Because the set is small and justified in advance, **there is no data-driven feature-selection step.** The only removals are the pre-stated rules in 3.3 (redundancy, exact dependency, family B channel confound).
 
 ### 3.2 Pause detector
 
 This is new code and the biggest technical risk, so it is validated against human judgement before use.
 
-- Frame-level intensity; proposed 25 ms window, 10 ms hop.
-- Silence threshold **relative to each recording's own speech level** (for example, a fixed number of dB below a high percentile of that file's intensity), so microphone gain doesn't change the result.
-- Minimum pause length 80 ms (the lower edge of the short-pause band).
+- Frame-level intensity; 25 ms window, 10 ms hop.
+- Silence threshold **relative to each recording's own speech level**: 25 dB below the 99th percentile of that file's frame intensity (the 2010 update of De Jong & Wempe's syllable-nuclei script; 25 dB is also Praat's standard silence setting). Microphone gain therefore doesn't change the result.
+- **Noise guard:** the threshold is raised to at least 6 dB above the file's noise level (5th percentile of frame intensity). Without it, in any recording whose speech is less than ~31 dB above the background noise, "25 dB below speech" falls under the noise, so no pause is ever found, and pause features would measure the noise instead of the speaker. In clean recordings the guard is inactive.
+- Minimum pause length 80 ms (the lower edge of the short-pause band). Sounding stretches shorter than 25 ms are treated as silence, so a click can't split one pause into two (the minimum speech duration of the SPA detector used by He et al. 2025).
+- Only internal pauses count: silence before the first speech onset or after the last speech offset is neither pause nor speech.
 - All parameters are written in `config.py` with a reason **before** class labels are looked at, and are **never tuned to improve model scores.**
 - **Validation:** manually mark pauses in about 10 recordings (Praat or Audacity) drawn from both classes. Report the detector's agreement (precision and recall of pause boundaries within a stated tolerance). Parameters may be adjusted only against these annotations, never against labels. Record the final agreement figures.
+  - **Sample (decided 2026-09-28):** 10 recordings (5 per class, one per subject) drawn with the global seed from the **training portion only**, once the split exists, so no test audio is heard before Stage 5. Only recordings whose trimmed duration is at least 70 s are eligible. From each, a **fixed 60 s segment starting 10 s after the trimmed start** is annotated, because the first seconds of a clip are often an unrepresentative lead-in. Copies are blinded (neutral names, key in a local file).
+  - **Tolerance:** a detected pause matches an annotated one when both its start and its end are within **40 ms**. That covers about 20 ms of detector boundary uncertainty (25 ms window, 10 ms hop) plus about 20 ms of human placement error. The detector runs on the whole trimmed recording, as in deployment. Only pauses lying fully inside the annotated segment are scored, on both sides.
+  - **Per band:** precision and recall are reported overall and **separately for short (80–180 ms) and long (> 180 ms) pauses**. A detected pause is banded by its detected duration for precision, and an annotated pause by its annotated duration for recall. This measures the stop-closure concern from 3.1 instead of assuming it.
+  - **Under noise:** the same scoring is repeated with the annotated recordings degraded as in 3.3 step 4 (bandpass alone; bandpass + white and pink noise at 20 and 10 dB SNR). It reports how precision and recall change from clean.
+  - **Sign-off:** at-scale feature extraction and any per-class feature statistics wait until the developer signs off the detector on these figures. That way, detector settings are never adjusted after seeing class results.
 
 ### 3.3 Checks before any modelling (training portion only)
 
 1. **Completeness:** missing or infinite values per feature; list any recording where a feature couldn't be computed and how it is handled.
 2. **Redundancy:** correlation matrix across the feature set. Pre-stated rule: for any pair with |r| ≥ 0.9, keep the one listed first in 3.1 and drop the other. Record what was dropped.
-3. **Channel confound:** each feature against each channel proxy, aggregated per subject, Bonferroni-corrected across all pairs. Apply the removal rule from 3.1.
-4. **Class differences (descriptive only):** per-class mean, SD and median, plus Mann-Whitney U with effect size, per subject. **Nothing is added or removed based on this.**
-5. **Direction check:** the literature expects more and longer pauses and a lower phonation-time ratio with cognitive decline. Report whether the data agrees; don't force it.
+   - **Multi-feature dependencies (added 2026-09-28):** the pairwise rule can't see a dependency spread across three or more features. After the pairwise step, compute the numerical rank of the standardised training matrix (singular values below 1e-8 × the largest count as zero) and each feature's variance inflation factor (VIF). Pre-stated rule: if the matrix is rank-deficient, the **later-listed** feature in each exact dependency is dropped, with the same "listed first wins" logic. Features with VIF > 10 are reported but not removed, because the non-linear redundancy among pause statistics is expected (3.1) and the candidate models tolerate it.
+3. **Channel confound:** each feature against each channel proxy, aggregated per subject, Bonferroni-corrected across all pairs. Apply the removal rule from 3.1 to **family B only**. Report family A's correlations descriptively, with the circularity from 3.1 explained next to them.
+4. **Family A robustness under controlled degradation (added 2026-09-28; non-circular check).** Re-extract the family A features from training-portion audio under the same conditions as 5.1: phone bandpass alone (100–7000 Hz), and bandpass plus white and pink noise at 20 and 10 dB SNR. The SNR is measured after filtering and the noise gain set so the measured value matches the target. For each feature and condition, report the per-recording relative change from clean, (degraded − clean) ÷ |clean|, as a median and interquartile range. Recordings whose clean value is 0 are left out of that feature's figure and counted.
+   - **Flag rule (pre-registered):** a family A feature whose median relative change under the **mildest condition (bandpass alone)** exceeds the tolerance is **flagged and tracked into the 5.1 interpretation, not removed**.
+   - **Proposed tolerance: 10 %**, awaiting the developer's approval before this check runs. Reason: a 100–7000 Hz band keeps essentially all of the speech energy an intensity-based detector relies on, so a detector that measures the speaker should move by only a few percent. A shift above 10 % means the feature depends on energy outside the phone band, which is a property of the microphone, not the person.
+5. **Recording-duration dependence (added 2026-09-28):** correlate each feature with trimmed recording duration at subject level (both averaged per subject). Pre-stated rule: any feature with |r| > 0.2 is flagged and tracked into 5.1, not removed. Reason: timing statistics are estimated more stably, and can drift systematically, as recordings get longer, so a class difference in recording length could otherwise pass for a class difference in speech. The developer's cited precedent: the ADReSS challenge baseline (Luz et al. 2020).
+6. **Class differences (descriptive only):** per-class mean, SD and median, plus Mann-Whitney U with effect size, per subject. **Nothing is added or removed based on this.**
+7. **Direction check:** the literature expects more and longer pauses and a lower phonation-time ratio with cognitive decline. Report whether the data agrees; don't force it.
 
 ### Outputs (`results/03_feature_engineering/`)
 
-`feature_matrix.csv` (one row per recording, with `subject_id`, split and fold), `pause_detector_validation.csv`, `redundancy.csv`, `channel_confound.csv`, `class_differences.csv`, `summary.md`.
+`feature_matrix.csv` (one row per recording, with `subject_id`, split and fold), `pause_detector_validation.csv`, `redundancy.csv`, `dependency_check.csv`, `channel_confound.csv`, `degradation_shift.csv`, `duration_dependence.csv`, `class_differences.csv`, `summary.md`.
 
 ### Tests
 
-Pause detector on synthetic signals with known pauses returns the exact counts and durations; scaling a signal's volume (for example by 0.1) gives the same pauses; each feature function runs on a single waveform.
+Pause detector on synthetic signals with known pauses returns the exact counts and durations; scaling a signal's volume (for example by 0.1) gives the same pauses; each feature function runs on a single waveform; agreement scoring gives known precision and recall on hand-built cases; degradation hits the target SNR as measured after filtering.
 
 **Checkpoint 3:** detector validated; checks reviewed; final feature list frozen and written to `config.py`.
 
@@ -323,6 +347,17 @@ The ML development specification and the report currently describe a different f
 4. **Language:** "language-independent" here means measurable without knowing the language and supported by cross-language research. Typical levels (for example speaking rate) may still differ between languages. Without labelled local-language data, accuracy in Kenyan languages is not validated.
 5. **Multiple speakers:** pause features assume the target speaker is isolated (D1).
 6. **Sample size:** whatever Stage 1 measures; small samples mean large fold-to-fold variation.
+7. **Label timing (added 2026-09-28):** labels describe the person, not the recording. A public figure's recordings may pre-date the onset of their dementia, so some "dementia" recordings may carry no signs of it. That is label noise the data can't resolve.
+8. **Unmatched demographics (added 2026-09-28):** age and sex are not recorded, so they can't be matched or controlled. Both affect voice and timing features.
+
+---
+
+## Review notes carried to later stages (2026-09-28)
+
+Raised in the scoping review and deliberately not acted on yet. Each is decided at the named stage's scoping:
+
+- **Stage 4, selection rule:** fold-paired t-tests on CV scores are anti-conservative, because the training portions of different folds overlap. The Nadeau-Bengio corrected resampled t-test is the standard correction and is recommended in place of the plain t-test.
+- **Stage 3.2, annotation eligibility:** requiring 70 s of trimmed audio favours longer recordings. Report the sampled recordings' durations next to the dataset's, so any bias is visible.
 
 ---
 
@@ -346,7 +381,8 @@ or unclear before we start Stage 1.
 
 - Luz et al. (2024), overview of the ADReSS-M challenge (models trained on English, tested on Greek): pause and disfluency features judged effective and generalisable across languages. https://talkbank.org/dementia/ADReSS-M/IEEE.pdf
 - Gosztolya et al. (2021), mild cognitive impairment detection from temporal speech parameters, English and Hungarian: no performance difference between same-language and cross-language settings. https://www.sciencedirect.com/science/article/abs/pii/S088523082100022X
-- He et al. (2025), language-independent acoustic pause analysis; short (80–180 ms) and long (>180 ms) pauses associated with tau and amyloid. https://pmc.ncbi.nlm.nih.gov/articles/PMC12397068/
+- He et al. (2025), acoustic pause analysis with the SPA detector (minimum pause 80 ms, minimum speech 25 ms); short (80–180 ms) and long (>180 ms) pauses associated with tau and amyloid. The method needs no transcript, but the study itself is English-only (Cookie Theft picture description), and the 180 ms edge was fitted empirically on its unimpaired participants (checked against the paper 2026-09-28). https://pmc.ncbi.nlm.nih.gov/articles/PMC12397068/
+- De Jong & Wempe, Praat script to detect syllable nuclei (Behavior Research Methods 41, 2009). The 2010 update of the script sets its threshold at the 0.99 quantile of intensity minus 25 dB. The 0.99 quantile avoids non-speech bursts, and 25 dB matches Praat's standard silence setting. The 2009 paper itself used median + 2 dB. The 2010 rule is the source of the detector's threshold in 3.2. https://sites.google.com/site/speechrate
 - Cross-linguistic generalisability of automated speech markers of Alzheimer's (JMIR, 2025): timing features expected to transfer better than lexical ones. https://doi.org/10.2196/74200
 - Acoustic cues in Alzheimer's across language and gender (2026): a Mandarin (tonal) model relied mainly on pause features. https://arxiv.org/html/2607.23977
 - Tone status: Kikuyu https://en.wikipedia.org/wiki/Kikuyu_language · Dholuo https://en.wikipedia.org/wiki/Luo_language_(Kenya_and_Tanzania) · Swahili's loss of lexical tone https://www.sciencedirect.com/science/article/abs/pii/S0388000108000478
