@@ -136,6 +136,58 @@ BOUNDARY_TOLERANCE_SECONDS = 0.040
 ANNOTATION_FILES = 10
 ANNOTATION_SEGMENT_SECONDS = 60.0
 ANNOTATION_SEGMENT_OFFSET_SECONDS = 10.0  # the segment starts 10 s after the trimmed start
+# The segment must fit inside the kept (<= 90 s) audio: 10 s offset + 60 s = 70 s of trimmed audio.
+ANNOTATION_MIN_TRIMMED_SECONDS = ANNOTATION_SEGMENT_OFFSET_SECONDS + ANNOTATION_SEGMENT_SECONDS
+# Developer, 2026-09-28: the sample deliberately includes noisy-background clips, because the noise
+# guard is the part of the detector most likely to fail. Of the 5 clips per class, this many are
+# drawn from clips where the noise guard is active (speech-to-noise dynamic range under
+# SILENCE_DB_BELOW_SPEECH + NOISE_MARGIN_DB = 31 dB), when enough such clips exist.
+ANNOTATION_NOISY_PER_CLASS = 2
+NOISE_GUARD_ACTIVE_BELOW_DB = SILENCE_DB_BELOW_SPEECH + NOISE_MARGIN_DB
+
+# ---------------------------------------------------------------- gates (developer decisions)
+# Code that depends on a pending human decision refuses to run until it is recorded here.
+D1_DECISION = None  # "a" limitation / "b" speaker separation / "c" single-speaker only (HEZ-95)
+DETECTOR_SIGNED_OFF = False  # set True only after the developer signs off the annotation agreement
+
+# ---------------------------------------------------------------- Stage 3: frozen feature set
+# PLAN.md 3.1, frozen 2026-09-28. Order matters: the redundancy and dependency rules in 3.3 keep the
+# feature listed FIRST, so this order is the plan's order and must not be rearranged.
+FAMILY_A_FEATURES = [
+    "pause_rate_per_min", "mean_pause_s", "median_pause_s", "long_pause_rate_per_min",
+    "long_pause_time_share", "phonation_time_ratio", "mean_speech_segment_s",
+    "voiced_segments_per_s", "mean_voiced_segment_s", "sd_voiced_segment_s",
+    "mean_unvoiced_segment_s", "sd_unvoiced_segment_s", "articulation_rate_proxy",
+]
+FAMILY_B_FEATURES = ["jitter_mean", "jitter_cv", "shimmer_db_mean", "shimmer_db_cv", "hnr_db_mean", "hnr_db_cv"]
+MODEL_FEATURES = FAMILY_A_FEATURES + FAMILY_B_FEATURES
+# eGeMAPSv02 functional (openSMILE) -> our name. loudnessPeaksPerSec is converted to the
+# articulation-rate proxy (peaks per second of speech) in feature_engineering, not used raw.
+EGEMAPS_COLUMNS = {
+    "VoicedSegmentsPerSec": "voiced_segments_per_s",
+    "MeanVoicedSegmentLengthSec": "mean_voiced_segment_s",
+    "StddevVoicedSegmentLengthSec": "sd_voiced_segment_s",
+    "MeanUnvoicedSegmentLength": "mean_unvoiced_segment_s",
+    "StddevUnvoicedSegmentLength": "sd_unvoiced_segment_s",
+    "loudnessPeaksPerSec": "loudness_peaks_per_s",
+    "jitterLocal_sma3nz_amean": "jitter_mean",
+    "jitterLocal_sma3nz_stddevNorm": "jitter_cv",
+    "shimmerLocaldB_sma3nz_amean": "shimmer_db_mean",
+    "shimmerLocaldB_sma3nz_stddevNorm": "shimmer_db_cv",
+    "HNRdBACF_sma3nz_amean": "hnr_db_mean",
+    "HNRdBACF_sma3nz_stddevNorm": "hnr_db_cv",
+}
+
+# ---------------------------------------------------------------- Stage 3.3: pre-stated check rules
+REDUNDANCY_ABS_R = 0.9  # pairwise |r| >= this: keep the feature listed first
+RANK_RELATIVE_TOLERANCE = 1e-8  # singular values below this x the largest count as zero
+VIF_REPORT_THRESHOLD = 10.0  # reported only, never removed
+DURATION_DEPENDENCE_ABS_R = 0.2  # per-subject |r| with trimmed duration above this is flagged
+# Literature-expected direction with cognitive decline (PLAN.md 3.3 step 7), for the direction check.
+EXPECTED_DIRECTION = {
+    "pause_rate_per_min": "higher", "mean_pause_s": "higher", "median_pause_s": "higher",
+    "long_pause_rate_per_min": "higher", "long_pause_time_share": "higher", "phonation_time_ratio": "lower",
+}
 
 # ---------------------------------------------------------------- degradation (Stage 3.3 and 5.1)
 
@@ -163,3 +215,21 @@ CV_REPEATS = 5  # each repeat uses seed SEED + repeat index
 INNER_CV_FOLDS = 3
 SEARCH_CONFIGS_PER_MODEL = 20  # equal budget for all four candidates
 N_PAIRWISE_COMPARISONS = 6  # Bonferroni family: 4 candidates, all pairs
+TEST_SUBJECT_SHARE = 0.20  # ~80/20 subject-level split, stratified by class (PLAN.md Stage 2)
+CANDIDATES = ["logistic_regression", "random_forest", "svm", "xgboost"]
+# Modest search spaces, written before any run (PLAN.md 4.2). ("log", low, high) = log-uniform,
+# ("int", low, high) = integers inclusive, ("uniform", low, high), or a list = pick one.
+# The same spaces were timed in the runtime benchmark (~18 min for 5 x 5 at 20 configs).
+SEARCH_SPACES = {
+    "logistic_regression": {"C": ("log", 1e-3, 1e2)},
+    "random_forest": {"max_depth": [None, 3, 5, 8], "min_samples_leaf": ("int", 1, 9),
+                      "max_features": ["sqrt", 0.5, 1.0]},
+    "svm": {"C": ("log", 1e-2, 1e2), "gamma": ("log", 1e-3, 1.0)},
+    "xgboost": {"max_depth": ("int", 2, 5), "learning_rate": ("log", 0.01, 0.3), "subsample": ("uniform", 0.6, 1.0),
+                "colsample_bytree": ("uniform", 0.6, 1.0), "min_child_weight": ("int", 1, 9)},
+}
+N_TREES = 300  # random forest and xgboost; fixed, not searched
+# Threshold-dependent metrics (PLAN.md 4.2): Youden's J per fold (labelled optimistic), and
+# sensitivity at this fixed specificity.
+FIXED_SPECIFICITY = 0.90
+CALIBRATION_BINS = 10  # expected calibration error
