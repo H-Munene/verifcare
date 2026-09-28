@@ -412,7 +412,7 @@ Raised in the scoping review and deliberately not acted on yet. Each is decided 
 
 - **Stage 4, selection rule:** fold-paired t-tests on CV scores are anti-conservative, because the training portions of different folds overlap. The Nadeau-Bengio corrected resampled t-test is the standard correction and is recommended in place of the plain t-test.
 - **Stage 3.2, annotation eligibility:** requiring 70 s of trimmed audio favours longer recordings. Report the sampled recordings' durations next to the dataset's, so any bias is visible.
-- **Stage 4, calibration with D2's weights — decided 2026-09-28:** class-balanced training weights shift a model's raw probabilities towards 50 %. So the calibrator is fit with the **per-person weights only** (1 ÷ that subject's clips), without class balancing. Every person counts equally, and the calibrated output reflects the dataset's own class balance rather than a forced 50 % prior.
+- **Stage 4, calibration with D2's weights, decided 2026-09-28:** class-balanced training weights shift a model's raw probabilities towards 50 %. So the calibrator is fit with the **per-person weights only** (1 ÷ that subject's clips), without class balancing. Every person counts equally, and the calibrated output reflects the dataset's own class balance rather than a forced 50 % prior.
 
 ---
 
