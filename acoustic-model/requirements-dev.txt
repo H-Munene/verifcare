@@ -1,6 +1,6 @@
 -r requirements.txt
 pytest==9.1.1
 
-# Reporting only (weekly assessment charts, scripts/generate_weekly_assessment_charts.py) -
-# not part of the deployed inference pipeline, so kept out of requirements.txt.
+# Figures for the stage summaries and the final report only; not part of the deployed
+# inference pipeline, so kept out of requirements.txt.
 matplotlib==3.11.2
