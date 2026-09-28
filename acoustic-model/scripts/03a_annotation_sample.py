@@ -34,6 +34,9 @@ def main():
         dynamic_range = pause_detector.detect_pauses(y, sr).dynamic_range_db
         flags.append(dynamic_range < config.NOISE_GUARD_ACTIVE_BELOW_DB)
     eligible["noise_guard_active"] = flags
+    # Stage 1 noise-floor estimate, for the fallback when too few clips trigger the noise guard.
+    floors = pd.read_csv(config.COLLECTION_RESULTS / "file_manifest.csv")[["file_id", "noise_floor_dbfs"]]
+    eligible = eligible.merge(floors, on="file_id", how="left")
 
     sample, shortfall = annotation_sample.draw_annotation_sample(eligible)
     key = annotation_sample.export_segments(sample, config.PROCESSED_DIR, config.DATA_DIR / "annotation")
@@ -50,8 +53,9 @@ def main():
              f"{annotation_sample.PER_CLASS} per class, one per subject.",
              f"- Noise guard active: {int(sample['noise_guard_active'].sum())} of {len(sample)} sampled clips; "
              f"{int(eligible['noise_guard_active'].sum())} of {len(eligible)} eligible clips.",
-             f"- Noisy-quota shortfall per class ({config.ANNOTATION_NOISY_PER_CLASS} wanted each): "
-             f"{ {config.LABEL_NAMES[k]: int(v) for k, v in shortfall.items()} }.",
+             f"- Noisy clips per class ({config.ANNOTATION_NOISY_PER_CLASS} wanted each) that had to come from the "
+             f"highest Stage 1 noise-floor fallback: {({config.LABEL_NAMES[k]: int(v) for k, v in shortfall.items()})}. "
+             f"How each clip was picked: {sample['picked_as'].value_counts().to_dict()}.",
              "- Trimmed duration, sampled clips: " + spread(sample["trimmed_s"]),
              "- Trimmed duration, all training-portion pool clips: " + spread(train["trimmed_s"]),
              "  (Eligibility requires 70 s, so the sample favours longer clips; shown so the bias is visible.)", ""]

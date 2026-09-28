@@ -25,9 +25,13 @@ from scipy import stats
 from mzazi_acoustic.common import config
 from mzazi_acoustic.common.stats import bonferroni
 
-# Fewest dependencies and smallest saved model first (a linear model is a few numbers; SVM keeps
-# support vectors; forests keep 300 trees). Used only if everything else ties.
+# Expected simplicity order (fewest dependencies, smallest saved model): a linear model is a few
+# numbers, SVM keeps support vectors, forests keep 300 trees. Only used to order ties inside the
+# cascade and as a last-resort tiebreak; the simplicity level itself ranks by what is measured.
 SIMPLICITY_ORDER = ["logistic_regression", "svm", "random_forest", "xgboost"]
+# Third-party packages each candidate needs at inference, beyond numpy/scipy.
+DEPENDENCIES = {"logistic_regression": ["scikit-learn"], "svm": ["scikit-learn"],
+                "random_forest": ["scikit-learn"], "xgboost": ["scikit-learn", "xgboost"]}
 LEVELS = [("roc_auc_person", True), ("brier_person", False)]
 
 
@@ -86,6 +90,24 @@ def select(fold_metrics, n_train, n_test, k=config.CV_FOLDS, r=config.CV_REPEATS
     if len(best) == 1:
         record.append(f"ece_person: lowest mean is {best[0]}; chosen")
         return best[0], record, tables
-    chosen = sorted(best, key=SIMPLICITY_ORDER.index)[0]
-    record.append(f"ece_person: exact tie {best}; simplest is {chosen}; chosen")
+    chosen, simplicity = simplest(fold_metrics, best)
+    record.append(f"ece_person: exact tie {best}; simplicity level reached; {simplicity}; chosen {chosen}")
     return chosen, record, tables
+
+
+def simplest(fold_metrics, tied):
+    """Simplicity level: fewest dependencies, then smallest mean saved size (measured per fold).
+
+    Returns (chosen, a record of every tied model's dependencies and size). Falls back to
+    SIMPLICITY_ORDER for anything still equal, or when sizes weren't measured.
+    """
+    sizes = {}
+    if "artifact_bytes" in fold_metrics:
+        sizes = fold_metrics[fold_metrics.model.isin(tied)].groupby("model")["artifact_bytes"].mean().to_dict()
+
+    def key(model):
+        return (len(DEPENDENCIES[model]), sizes.get(model, np.inf), SIMPLICITY_ORDER.index(model))
+
+    chosen = min(tied, key=key)
+    details = ", ".join(f"{m}: deps={DEPENDENCIES[m]}, mean size={sizes.get(m, float('nan')):.0f} B" for m in tied)
+    return chosen, details

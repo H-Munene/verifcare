@@ -89,9 +89,13 @@ def test_features_from_a_single_waveform():
     assert 0 < features["phonation_time_ratio"] < 1
 
 
-def test_no_pauses_gives_nan_for_undefined_features():
+def test_no_pauses_gives_structural_zeros_and_nan_only_where_undefined():
     features = pause_detector.extract_pause_features(build([voiced(3.0)]), SR)
     assert features["n_pauses"] == 0
+    # Structurally defined: no pauses means none per minute and no long-pause share.
     assert features["pause_rate_per_min"] == 0
-    assert np.isnan(features["median_pause_s"]) and np.isnan(features["long_pause_time_share"])
+    assert features["long_pause_rate_per_min"] == 0
+    assert features["long_pause_time_share"] == 0
+    # Genuinely undefined: there is no pause to take a length of.
+    assert np.isnan(features["median_pause_s"]) and np.isnan(features["mean_pause_s"])
     assert features["phonation_time_ratio"] == pytest.approx(1.0)

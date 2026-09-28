@@ -121,8 +121,10 @@ def detect_pauses(y, sr):
 def pause_features(result):
     """Family A pause/timing features (PLAN.md 3.1, frozen set) plus descriptive and diagnostic values.
 
-    Values that are undefined for a recording (e.g. median pause length with no pauses) are NaN;
-    how NaNs are handled is decided in PLAN.md 3.3 step 1, not here.
+    Structurally defined values are set here (PLAN.md 3.3 step 1, developer 2026-09-28): a clip with
+    speech but no pauses has a pause rate, long-pause rate and long-pause share of 0. Only genuinely
+    undefined values stay NaN (mean/median pause length with no pauses; everything with no speech);
+    those are filled later with the training-fold median.
     """
     durations = np.array([end - start for start, end in result.pauses])
     minutes = result.analysed_seconds / 60
@@ -137,7 +139,8 @@ def pause_features(result):
         "mean_pause_s": durations.mean() if has_pauses else np.nan,
         "median_pause_s": float(np.median(durations)) if has_pauses else np.nan,
         "long_pause_rate_per_min": is_long.sum() / minutes if has_speech else np.nan,
-        "long_pause_time_share": durations[is_long].sum() / durations.sum() if has_pauses else np.nan,
+        "long_pause_time_share": (durations[is_long].sum() / durations.sum() if has_pauses
+                                  else 0.0 if has_speech else np.nan),
         "phonation_time_ratio": speech_time / result.analysed_seconds if has_speech else np.nan,
         "mean_speech_segment_s": speech_time / len(result.speech_segments) if has_speech else np.nan,
         # descriptive only: short = total - long, kept out of the model (PLAN.md 3.1)

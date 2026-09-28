@@ -181,6 +181,14 @@ EGEMAPS_COLUMNS = {
 # ---------------------------------------------------------------- Stage 3.3: pre-stated check rules
 REDUNDANCY_ABS_R = 0.9  # pairwise |r| >= this: keep the feature listed first
 ALPHA = 0.05  # significance level for every pre-registered test, applied after Bonferroni
+# Missing values (PLAN.md 3.3 step 1, developer 2026-09-28): structurally defined values are set by
+# the feature code; only genuinely undefined ones are filled with the training-fold median. Stop and
+# report to the developer if fills are common or differ markedly by class, pre-registered as: a
+# feature's fill rate above 5 % of training clips, or class fill rates more than 5 percentage points
+# apart. Above that, the median stands in for too much data, or missingness itself could carry the
+# label into the model.
+FILL_RATE_STOP = 0.05
+FILL_CLASS_GAP_STOP = 0.05
 RANK_RELATIVE_TOLERANCE = 1e-8  # singular values below this x the largest count as zero
 VIF_REPORT_THRESHOLD = 10.0  # reported only, never removed
 DURATION_DEPENDENCE_ABS_R = 0.2  # per-subject |r| with trimmed duration above this is flagged

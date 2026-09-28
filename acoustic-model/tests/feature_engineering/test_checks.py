@@ -94,3 +94,17 @@ def test_checks_script_exits_while_its_gate_is_closed(monkeypatch):
     script = Path(__file__).resolve().parents[2] / "scripts" / "03b_checks.py"
     with pytest.raises(SystemExit, match="signed off"):
         runpy.run_path(str(script), run_name="__main__")
+
+
+def test_completeness_counts_fills_per_class_and_raises_the_stop_flag():
+    n = 40
+    table = pd.DataFrame({"file_id": [f"f{i}" for i in range(n)], "label": [1] * 20 + [0] * 20,
+                          "rare": [np.nan] + [1.0] * (n - 1),  # 1 of 40 = 2.5 %, one class only
+                          "common": [np.nan] * 4 + [1.0] * (n - 4),  # 10 % overall
+                          "clean": np.ones(n)})
+    result = checks.completeness(table, ["rare", "common", "clean"]).set_index("feature")
+    assert result.loc["rare", "fills_dementia"] == 1 and result.loc["rare", "fills_control"] == 0
+    # 2.5 % overall is fine, but 5 % vs 0 % between classes is not above the 5-point gap either.
+    assert not result.loc["rare", "stop"]
+    assert result.loc["common", "stop"]  # 10 % > 5 %, and 20 % vs 0 % by class
+    assert not result.loc["clean", "stop"]

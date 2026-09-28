@@ -28,11 +28,27 @@ def per_subject(table, columns):
 # ---------------------------------------------------------------- step 1: completeness
 
 def completeness(table, features=config.MODEL_FEATURES):
+    """Values the training-fold median will fill, per feature and per class, with the stop flag.
+
+    Structural values (e.g. 0 pauses -> pause rate 0) are already set by the feature code, so every
+    NaN/inf left here is genuinely undefined. `stop` is True when fills are common or differ
+    markedly by class (config.FILL_RATE_STOP / FILL_CLASS_GAP_STOP): then the developer is told
+    before any modelling.
+    """
     rows = []
     for feature in features:
         values = pd.to_numeric(table[feature], errors="coerce")
         bad = values.isna() | np.isinf(values)
+        rate_dementia = bad[table["label"] == 1].mean()
+        rate_control = bad[table["label"] == 0].mean()
         rows.append({"feature": feature, "n_nan": int(values.isna().sum()), "n_inf": int(np.isinf(values).sum()),
+                     "fills_dementia": int(bad[table["label"] == 1].sum()),
+                     "fills_control": int(bad[table["label"] == 0].sum()),
+                     "fill_rate": round(float(bad.mean()), 4),
+                     "fill_rate_dementia": round(float(rate_dementia), 4),
+                     "fill_rate_control": round(float(rate_control), 4),
+                     "stop": bool(bad.mean() > config.FILL_RATE_STOP
+                                  or abs(rate_dementia - rate_control) > config.FILL_CLASS_GAP_STOP),
                      "file_ids": ";".join(table.loc[bad, "file_id"])})
     return pd.DataFrame(rows)
 

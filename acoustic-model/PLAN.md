@@ -248,11 +248,17 @@ This is new code and the biggest technical risk, so it is validated against huma
   - **Sign-off:** at-scale feature extraction and any per-class feature statistics wait until the developer signs off the detector on these figures. That way, detector settings are never adjusted after seeing class results.
   - **Order (developer, 2026-09-28):** listening audit → D1 → split and folds → draw the 10 blinded annotation clips from the training portion → developer annotates → score agreement per band and under added noise → adjust settings **only against the annotations** → freeze permanently → extract features at scale. The detector is deliberately not frozen before the annotations exist: they must be able to fix real detector errors while no class result exists yet. Freezing first would leave only "report a known-bad detector" or "fix it after seeing results".
   - **Noisy clips in the sample (developer, 2026-09-28):** the 10 clips deliberately include clips with noisy backgrounds, e.g. ones where the noise guard is active (speech-to-noise dynamic range under 31 dB) or with low estimated SNR. The guard was already active on a real clip, and it's the part of the detector most likely to fail. How many noisy clips were included is recorded.
+    - **Rule (confirmed 2026-09-28):** 2 of each class's 5 clips are noisy. "Noisy" first means the detector's noise guard is active on the processed clip. **Fallback:** if a class has too few such clips, the quota is completed with the eligible clips with the highest Stage 1 noise-floor estimate. Each sampled clip records how it was picked. If a class has fewer than 5 eligible people, the sampler stops with an error rather than drawing a smaller sample.
   - **Record** the final settings, the agreement figures, and every adjustment made, each with its reason, here and in `docs/ml-dev-log.md`.
 
 ### 3.3 Checks before any modelling (training portion only)
 
 1. **Completeness:** missing or infinite values per feature; list any recording where a feature couldn't be computed and how it is handled.
+   - **Missing-value rule (developer, 2026-09-28):**
+     - First, **structurally defined values** are set by the feature code itself, so training and deployment agree. A clip with speech but no pauses has pause rate, long-pause rate and long-pause share of **0**.
+     - Only **genuinely undefined** values stay missing, for example mean or median pause length when there is no pause. Those are **filled with the training-fold median**, as the first learned step of each pipeline, so it is fit inside the fold like everything else.
+     - Fills are reported per feature and per class (`completeness.csv`).
+     - **Stop rule:** if fills are common (a feature's fill rate above 5 % of training clips) or differ markedly by class (class fill rates more than 5 percentage points apart), stop and tell the developer before any modelling. Reason: the median would then stand in for too much data, or the fact that a value is missing could itself carry the label into the model. The thresholds are in `config.FILL_RATE_STOP` and `config.FILL_CLASS_GAP_STOP`.
 2. **Redundancy:** correlation matrix across the feature set. Pre-stated rule: for any pair with |r| ≥ 0.9, keep the one listed first in 3.1 and drop the other. Record what was dropped.
    - **Multi-feature dependencies (added 2026-09-28):** the pairwise rule can't see a dependency spread across three or more features. After the pairwise step, compute the numerical rank of the standardised training matrix (singular values below 1e-8 × the largest count as zero) and each feature's variance inflation factor (VIF). Pre-stated rule: if the matrix is rank-deficient, the **later-listed** feature in each exact dependency is dropped, with the same "listed first wins" logic. Features with VIF > 10 are reported but not removed, because the non-linear redundancy among pause statistics is expected (3.1) and the candidate models tolerate it.
 3. **Channel confound:** each feature against each channel proxy, aggregated per subject, Bonferroni-corrected across all pairs. Apply the removal rule from 3.1 to **family B only**. Report family A's correlations descriptively, with the circularity from 3.1 explained next to them.
@@ -297,6 +303,7 @@ The project report (Chapter 3.2.3) names **Random Forest, Support Vector Machine
 
 1. **Pipeline:** each candidate is wrapped in one pipeline (scaling, imbalance handling per D2, model), so every learned step is fit inside the training fold only.
 2. **Baselines:** default settings, evaluated on the saved folds. Per fold: ROC-AUC, PR-AUC, F1, Brier score. Threshold-dependent metrics use a threshold chosen within each fold (Youden's J) and are labelled as optimistic; also report sensitivity at a fixed specificity (for example 90 %).
+   - **Baselines are calibrated exactly like the tuned models** (developer, 2026-09-28), so their Brier scores and calibration errors are comparable.
 3. **Tuning:** nested cross-validation. The outer folds (from file) estimate performance; an inner 3-fold subject-grouped search picks settings. Equal search budget per candidate, modest search spaces, fixed seed. Record every configuration tried.
 4. **Calibration:** sigmoid (Platt) calibration fit on out-of-fold predictions, grouped by subject. Add a test that confirms the subject groups actually reach the splitter used for calibration. If a library tool can't pass groups through, calibrate manually using grouped out-of-fold predictions.
 5. **Selection rule (pre-registered, written before any results):**
@@ -309,6 +316,12 @@ The project report (Chapter 3.2.3) names **Random Forest, Support Vector Machine
    - If tied: calibrated Brier score, same test.
    - If still tied: expected calibration error.
    - Last resort: the simplest model (fewest dependencies, smallest saved file).
+   - **How "tied" is decided (developer, 2026-09-28; `model_training/compare.py`):**
+     - At each tested level, the leader is the model with the best mean. It wins only if it is significantly better than **every** other remaining model: corrected repeated k-fold t-test, Bonferroni-adjusted p below 0.05.
+     - Otherwise, every model not significantly worse than the leader moves to the next level.
+     - The Brier level uses the same test and the same "better than every remaining model" rule. **The Bonferroni family stays fixed at 6 at every level**, even when fewer models remain, because the family was pre-registered.
+     - The calibration-error level has no test: the lowest mean wins, and an exact tie goes on.
+     - If the simplicity level is reached, it ranks by the number of third-party dependencies, then the mean saved size of the models measured in CV. **Both are recorded** in `selection.md`.
    - With only 5 folds, a tie is a likely outcome and is reported plainly rather than forced.
 6. **Final fit:** refit the chosen pipeline (scaling + model + calibration) on the whole training portion, with the same grouped internal search. The score from this refit is never reported as performance.
 7. **Save** with joblib to `models/`, with a metadata file: feature list, feature-extractor and pause-detector parameters, package versions, seed, training date.

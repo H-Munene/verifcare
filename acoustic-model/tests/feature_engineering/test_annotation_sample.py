@@ -15,7 +15,8 @@ def candidates(noisy_per_class=(4, 4), n_subjects=12):
         for s in range(n_subjects):
             for c in range(2):  # two clips per subject, so "one per subject" is actually tested
                 rows.append({"file_id": f"L{label}S{s}f{c}", "subject_id": f"L{label}S{s}", "label": label,
-                             "trimmed_s": 80.0, "noise_guard_active": s < noisy_per_class[label]})
+                             "trimmed_s": 80.0, "noise_guard_active": s < noisy_per_class[label],
+                             "noise_floor_dbfs": -60.0 + s})  # higher subject index = noisier
     frame = pd.DataFrame(rows)
     frame.loc[frame["subject_id"].str.endswith("S11"), "trimmed_s"] = 40.0  # too short to be eligible
     return frame
@@ -34,6 +35,16 @@ def test_noisy_quota_and_shortfall():
     noisy = sample.groupby("label")["noise_guard_active"].sum().to_dict()
     assert noisy == {0: config.ANNOTATION_NOISY_PER_CLASS, 1: 1}
     assert shortfall == {0: 0, 1: config.ANNOTATION_NOISY_PER_CLASS - 1}
+
+
+def test_shortfall_is_filled_with_the_highest_noise_floor_clips():
+    sample, _ = ann.draw_annotation_sample(candidates(noisy_per_class=(4, 1)), seed=1)
+    class1 = sample[sample["label"] == 1]
+    fallback = class1[class1["picked_as"] == "noise_floor_fallback"]
+    assert len(fallback) == config.ANNOTATION_NOISY_PER_CLASS - 1
+    # Subject 11 is too short to be eligible, so the noisiest eligible one is subject 10.
+    assert set(fallback["subject_id"]) == {"L1S10"}
+    assert (class1["picked_as"] == "noise_guard").sum() == 1
 
 
 def test_reproducible_and_ids_carry_no_label():

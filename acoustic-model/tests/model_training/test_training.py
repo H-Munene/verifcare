@@ -184,7 +184,18 @@ def test_selection_auc_tie_resolved_by_brier():
 def test_selection_full_tie_goes_to_the_simplest_model():
     table = fold_table(SAME, {m: 0.2 for m in config.CANDIDATES}, {m: 0.05 for m in config.CANDIDATES})
     chosen, record, _ = compare.select(table, n_train=200, n_test=50)
-    assert chosen == "logistic_regression" and "simplest" in record[-1]
+    assert chosen == "logistic_regression" and "simplicity level reached" in record[-1]
+
+
+def test_simplicity_level_uses_measured_dependencies_and_size_not_just_the_order():
+    table = fold_table(SAME, {m: 0.2 for m in config.CANDIDATES}, {m: 0.05 for m in config.CANDIDATES})
+    # Measured sizes overturn the expected order among the scikit-learn-only models;
+    # xgboost is smallest but needs an extra dependency, so it still loses.
+    sizes = {"logistic_regression": 9000, "svm": 3000, "random_forest": 50000, "xgboost": 1000}
+    table["artifact_bytes"] = table["model"].map(sizes)
+    chosen, record, _ = compare.select(table, n_train=200, n_test=50)
+    assert chosen == "svm"
+    assert "deps=['scikit-learn', 'xgboost']" in record[-1] and "3000 B" in record[-1]
 
 
 def test_all_four_real_candidates_run_end_to_end():

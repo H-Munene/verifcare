@@ -6,6 +6,9 @@ both calibrated, then scored on the validation clips. Every learned step (imputa
 the model, the sigmoid) sees only the training clips of that fold.
 """
 
+import io
+
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -32,11 +35,20 @@ def fit_calibrated(name, variant, X, y, groups, seed):
     return calibration.calibrate(pipeline, X, y, groups, seed), log
 
 
+def artifact_bytes(model):
+    """Size of the model as it would be saved. Recorded so the selection rule's last level
+    (the simplest model: fewest dependencies, smallest saved file) rests on measured sizes."""
+    buffer = io.BytesIO()
+    joblib.dump(model, buffer)
+    return buffer.getbuffer().nbytes
+
+
 def run_fold(train, val, feature_cols, name, variant, seed):
     """Fit on `train` rows only, predict `val`. Returns (metrics row, prediction rows, log rows, model)."""
     model, log = fit_calibrated(name, variant, train[feature_cols], train["label"], train["subject_id"], seed)
     p = model.predict_proba(np.asarray(val[feature_cols], float))[:, 1]
-    row = {"model": name, "variant": variant, **metrics.evaluate(val["label"], p, val["subject_id"])}
+    row = {"model": name, "variant": variant, **metrics.evaluate(val["label"], p, val["subject_id"]),
+           "artifact_bytes": artifact_bytes(model)}
     predictions = val[["file_id", "subject_id", "label"]].assign(model=name, variant=variant, probability=p)
     return row, predictions, log, model
 
