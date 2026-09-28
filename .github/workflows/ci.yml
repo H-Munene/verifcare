@@ -51,14 +51,6 @@ jobs:
           USER_POOL_CLIENT_ID: 62h8bi9cih94nhcd3hom9kheol
           CAREGIVER_USER_POOL_CLIENT_ID: 4th550b5rk8st5fmgfdio465tr
           FAMILY_MEMBER_USER_POOL_CLIENT_ID: 7b63vkbmrooqvu4g5to6c1gtvk
-          # Real, deployed bucket name (HEZ-31) - same reasoning as the Cognito values above;
-          # lambda.test.ts's loadConfig() call now requires this too.
-          BIOMETRIC_ENROLLMENTS_BUCKET_NAME: mzazicarestack-biometricenrollmentsbuckete1b7d3ba-udjy18fdi2be
-          # Same reasoning, for HEZ-85's Rekognition Collection id.
-          BIOMETRIC_FACES_COLLECTION_ID: mzazi-care-biometric-faces
-          # Placeholder (HEZ-34) - CheckinLivenessFramesBucket doesn't exist in real AWS yet;
-          # only loadConfig()'s own validation needs a value here, not a real deployed bucket.
-          CHECKIN_LIVENESS_FRAMES_BUCKET_NAME: mzazicarestack-checkinlivenessframesbucket-placeholder
 
   infra:
     runs-on: ubuntu-latest

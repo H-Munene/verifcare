@@ -33,33 +33,6 @@ describe('encodeCursor / decodeCursor', () => {
   });
 });
 
-describe('sorted cursors', () => {
-  it("round-trips the sort and the last row's sort value", () => {
-    const original = { id: 'abc-123', sort: '-name', value: 'Wanjiku Kamau' };
-
-    expect(decodeCursor(encodeCursor(original), '-name')).toEqual(original);
-  });
-
-  it('rejects a cursor made for another sort, rather than paging from the wrong place', () => {
-    const byName = encodeCursor({ id: 'abc-123', sort: 'name', value: 'Wanjiku Kamau' });
-
-    expect(() => decodeCursor(byName, 'dob')).toThrow(/different sort/);
-    expect(() => decodeCursor(byName)).toThrow(/different sort/);
-  });
-
-  it('rejects an unsorted cursor on a sorted list', () => {
-    expect(() => decodeCursor(encodeCursor({ id: 'abc-123' }), 'name')).toThrow(/different sort/);
-  });
-
-  it('rejects a sorted cursor with no sort value', () => {
-    const cursor = Buffer.from(JSON.stringify({ id: 'abc-123', sort: 'name' })).toString(
-      'base64url',
-    );
-
-    expect(() => decodeCursor(cursor, 'name')).toThrow(/Malformed pagination cursor/);
-  });
-});
-
 describe('paginate', () => {
   interface Row {
     id: string;

@@ -1,5 +1,2 @@
 dist/
 node_modules/
-# Deliberately compact (JSON.stringify with no indentation, see geo_data/extract/run.ts) - running
-# prettier over these would re-indent a 34MB wards.geojson into something many times larger.
-public/geo_data/

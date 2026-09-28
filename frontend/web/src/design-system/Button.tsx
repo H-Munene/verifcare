@@ -1,10 +1,9 @@
-import type { ComponentProps } from 'react';
+import type { ButtonHTMLAttributes } from 'react';
 import './components.css';
 
 export type ButtonVariant = 'default' | 'primary' | 'cta-pill';
 
-// ComponentProps (not ButtonHTMLAttributes) so a caller can pass a ref, e.g. to focus it.
-export interface ButtonProps extends ComponentProps<'button'> {
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
 }
 

@@ -34,14 +34,6 @@ security:
   - bearerAuth: []
 
 tags:
-  - name: Dashboard
-    description: The supervisor console's Overview page.
-  - name: Compliance
-    description: The supervisor console's Compliance tab - period reports on visit verification, exceptions, alert response, consent, terms acceptance and the audit trail, with CSV exports.
-  - name: Family Link Requests
-    description: A family member asking a dependant's primary contact to link them, and the primary contact's answer.
-  - name: Terms
-    description: The terms of use and privacy notice each mobile app's users must accept (the consent screen).
   - name: Users
     description: Generic user profiles (any role) - creation, lookup, and offboarding.
   - name: Caregivers
@@ -127,28 +119,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /users/me:
-    get:
-      tags: [Users]
-      summary: Get the caller's own user
-      description: |
-        The caller's own `users` row, found by their token's Cognito sub. Clients only know their
-        sub, while other responses refer to users by internal id (e.g. a dependant's
-        family-member links), so this is how a client recognizes its own entries. 404 if the
-        caller hasn't completed registration (`POST /users`) yet.
-      operationId: getCurrentUser
-      responses:
-        '200':
-          description: The caller's user.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /users/{userId}:
     parameters:
       - $ref: '#/components/parameters/UserId'
@@ -225,12 +195,6 @@ paths:
           in: query
           schema:
             type: boolean
-        - name: sort
-          in: query
-          description: Order by `name` or `hireDate`; a leading `-` sorts descending. A missing hire date sorts earliest. Without it, the list is in id order. A cursor only works with the sort it came from.
-          schema:
-            type: string
-            enum: [name, -name, hireDate, -hireDate]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -284,30 +248,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /caregivers/{caregiverId}/stats:
-    parameters:
-      - $ref: '#/components/parameters/CaregiverId'
-    get:
-      tags: [Caregivers]
-      summary: Visit statistics for a caregiver
-      description: |
-        What the caregiver's page shows at a glance: their visits over the last 30 days by outcome,
-        their completion rate, and their next and most recent visits, across every dependant they
-        visit. Outcomes follow the same rules as `GET /dashboard/overview`'s trend. Supervisor-only,
-        like every `/caregivers` route.
-      operationId: getCaregiverStats
-      responses:
-        '200':
-          description: The caregiver's visit statistics.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VisitStats'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /dependants:
     post:
       tags: [Dependants]
@@ -316,10 +256,6 @@ paths:
         Atomically creates the `dependants` row and its first `dependant_family_members` link
         (`primaryFamilyMember`, marked `isPrimaryContact: true`), per architecture.md's
         atomic-first-family-member-at-registration requirement.
-
-        If the primary family member has given both consents on the family app's consent screen
-        (`POST /terms/current/accept`), the same transaction records `biometric_verification` and
-        `audio_cognitive_monitoring` consent for the new dependant, granted by them.
       operationId: createDependant
       requestBody:
         required: true
@@ -346,18 +282,6 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/DependantStatus'
-        - name: photo
-          in: query
-          description: Only dependants whose check-in photo stands this way, as reported in each one's `checkinPhotoStatus`.
-          schema:
-            type: string
-            enum: [ready, awaiting_review, missing]
-        - name: sort
-          in: query
-          description: Order by `name` or `dob`; a leading `-` sorts descending. Without it, the list is in id order. A cursor only works with the sort it came from.
-          schema:
-            type: string
-            enum: [name, -name, dob, -dob]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -391,11 +315,7 @@ paths:
     patch:
       tags: [Dependants]
       summary: Update a dependant
-      description: |
-        Covers geofence adjustments, cognitive monitoring toggle, and offboarding via `status`.
-        A supervisor may change any field. The dependant's primary-contact family member may change
-        every field except `status` and `geofenceRadiusMeters` (403): the radius is what caregiver
-        check-in is verified against, so widening it stays a supervisor decision.
+      description: Covers geofence adjustments, cognitive monitoring toggle, and offboarding via `status`.
       operationId: updateDependant
       requestBody:
         required: true
@@ -415,41 +335,12 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /dependants/{dependantId}/stats:
-    parameters:
-      - $ref: '#/components/parameters/DependantId'
-    get:
-      tags: [Dependants]
-      summary: Visit statistics for a dependant
-      description: |
-        What the dependant's page shows at a glance: their visits over the last 30 days by outcome,
-        the completion rate, and the next and most recent visits. Outcomes follow the same rules as
-        `GET /dashboard/overview`'s trend. The same access as `GET /dependants/{dependantId}`: a
-        supervisor, or a family member linked to this dependant (403 otherwise).
-      operationId: getDependantStats
-      responses:
-        '200':
-          description: The dependant's visit statistics.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VisitStats'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /dependants/{dependantId}/family-members:
     parameters:
       - $ref: '#/components/parameters/DependantId'
     post:
       tags: [Dependants]
       summary: Link an additional family member to a dependant
-      description: |
-        Allowed for a supervisor or any family member already linked to the dependant. Adding
-        someone with `isPrimaryContact: true` demotes the current primary contact, so a linked
-        family member may only do that if they are the current primary contact themselves (403
-        otherwise).
       operationId: addDependantFamilyMember
       requestBody:
         required: true
@@ -511,84 +402,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /dependants/{dependantId}/care-tasks:
-    parameters:
-      - $ref: '#/components/parameters/DependantId'
-    post:
-      tags: [Dependants]
-      summary: Create a care-plan task for a dependant
-      description: |
-        Visit task checklist (docs/visit-task-checklist-plan.md). Supervisor-only - the care plan
-        is authored by a supervisor on a dedicated Care Plan screen, not by the caregiver and not
-        part of dependant registration.
-      operationId: createCareTask
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateCareTaskRequest'
-      responses:
-        '201':
-          description: The created task.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CareTask'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-    get:
-      tags: [Dependants]
-      summary: List a dependant's care-plan tasks
-      description: Supervisor sees any dependant's tasks; a family_member sees only a linked dependant's, same ownership rule as `GET /dependants/{dependantId}`.
-      operationId: listCareTasks
-      parameters:
-        - name: active
-          in: query
-          schema:
-            type: boolean
-          description: Omit to list every task (active and retired); set to filter to one or the other.
-      responses:
-        '200':
-          description: The dependant's care-plan tasks.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CareTask'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /dependants/{dependantId}/care-tasks/{careTaskId}:
-    parameters:
-      - $ref: '#/components/parameters/DependantId'
-      - $ref: '#/components/parameters/CareTaskId'
-    patch:
-      tags: [Dependants]
-      summary: Update or retire a care-plan task
-      description: "Supervisor-only. Retiring (`active: false`) keeps the task's history on any `visit_task_completions` rows that already reference it, but stops it appearing on future visits."
-      operationId: updateCareTask
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateCareTaskRequest'
-      responses:
-        '200':
-          description: The updated task.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CareTask'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /biometric-enrollments/upload-url:
     post:
       tags: [Biometric Enrollments]
@@ -614,12 +427,7 @@ paths:
     post:
       tags: [Biometric Enrollments]
       summary: Confirm an uploaded biometric image and record it
-      description: |
-        Called after the client has PUT the image to the presigned URL from
-        `/biometric-enrollments/upload-url`. A photo that activates supersedes every other active
-        row for the subject, whatever its `imageOrder` (one photo per person); a photo flagged as a
-        likely duplicate supersedes nothing until a supervisor approves it, so the current photo
-        stays in use meanwhile.
+      description: Called after the client has PUT the image to the presigned URL from `/biometric-enrollments/upload-url`.
       operationId: createBiometricEnrollment
       requestBody:
         required: true
@@ -664,84 +472,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /biometric-enrollments/flagged:
-    get:
-      tags: [Biometric Enrollments]
-      summary: List enrollments flagged as a possible duplicate of a different subject (HEZ-85)
-      description: |
-        Supervisor-only. A row lands here when confirming it found this face already enrolled
-        under a *different* subject above the duplicate-detection threshold - not hard-rejected
-        (see `matchedSubjectType`/`matchedSubjectId`/`matchedSimilarity` on each row for the
-        context a supervisor needs to approve or reject it via the two endpoints below.
-      operationId: listFlaggedBiometricEnrollments
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Flagged enrollments across every subject, oldest first.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FlaggedBiometricEnrollmentPage'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments/{id}/approve:
-    post:
-      tags: [Biometric Enrollments]
-      summary: Approve a flagged enrollment as legitimate (HEZ-85)
-      description: |
-        Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
-        until now, since it wasn't indexed while flagged) and promotes the row to `active`,
-        superseding every other active row for the subject (one photo per person).
-      operationId: approveBiometricEnrollment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The now-active enrollment.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BiometricEnrollment'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments/{id}/reject:
-    post:
-      tags: [Biometric Enrollments]
-      summary: Reject a flagged enrollment as a genuine duplicate (HEZ-85)
-      description: |
-        Supervisor-only. Marks the row `deleted` - it was never indexed while flagged, so nothing
-        needs to be removed from the enrollment-uniqueness collection.
-      operationId: rejectBiometricEnrollment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The now-deleted enrollment.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BiometricEnrollment'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /visit-schedules:
     post:
       tags: [Visit Schedules]
@@ -770,8 +500,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
-        '422':
-          $ref: '#/components/responses/Unschedulable'
         default:
           $ref: '#/components/responses/Problem'
     get:
@@ -806,12 +534,6 @@ paths:
           schema:
             type: string
             format: date-time
-        - name: sort
-          in: query
-          description: Order by `scheduledStart`; a leading `-` sorts latest first. Without it, the list is in id (creation) order. A cursor only works with the sort it came from.
-          schema:
-            type: string
-            enum: [scheduledStart, -scheduledStart]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -867,8 +589,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
-        '422':
-          $ref: '#/components/responses/Unschedulable'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -887,33 +607,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VerificationAudit'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/task-outcomes:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-    get:
-      tags: [Visit Schedules]
-      summary: Get the recorded care-task outcomes for a visit
-      description: |
-        What the caregiver recorded for each care task on this visit, for any visit status, under
-        the same read rule as `GET /visit-schedules/{visitScheduleId}` (supervisor: any visit;
-        caregiver: own visits; family member: visits for a linked dependant). Only recorded
-        outcomes are returned, not the live care plan, so a task deactivated after the visit still
-        shows, and a visit that never started returns an empty array.
-      operationId: getVisitTaskOutcomes
-      responses:
-        '200':
-          description: The recorded outcomes, in care-plan order.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/VisitTaskOutcome'
         '404':
           $ref: '#/components/responses/NotFound'
         default:
@@ -946,10 +639,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GeofenceCheckinResult'
         '422':
-          description: |
-            Geofence check failed. `failureReason` is one of `out_of_range`/`insufficient_accuracy`
-            (retriable - the caregiver can move closer or wait for a better fix) or
-            `mock_location_detected` (a hard block - the app should not offer a retry).
+          description: Geofence check failed (out of range, insufficient accuracy, or mock location detected).
           content:
             application/problem+json:
               schema:
@@ -957,55 +647,22 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/context:
+  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/challenge:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     get:
       tags: [Check-in]
-      summary: Get the dependant display name and geofence for a visit, before check-in starts
-      description: |
-        View-only, pre-geofence - no `X-Checkin-Session-Token` is required (unlike every route past
-        the geofence step), since none exists yet at this point. Lets the caregiver app render the
-        geofence circle/marker and confirm the right dependant/address before attempting a GPS
-        read. Deliberately narrow: not the full dependant record (no `primaryConditionSummary`,
-        `county`/`constituency`/`ward`, etc.) - a caregiver needs enough to render the map and
-        confirm they're at the right home, nothing else. Same caregiver-only, own-visit,
-        still-'scheduled' rule as every other route in this router.
-      operationId: getCheckinContext
+      summary: Get a randomized liveness challenge for the caregiver
+      operationId: getCaregiverLivenessChallenge
+      security:
+        - bearerAuth: [sessionToken]
       responses:
         '200':
-          description: Context for the check-in map screen.
+          description: The challenge to perform on-camera.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CheckinContext'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/upload-url:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-    post:
-      tags: [Check-in]
-      summary: Get a presigned URL to upload the caregiver's check-in photo
-      description: Called once, before POST .../caregiver-liveness. Uploads go to a separate, short-retention bucket from biometric-enrollments - see architecture.md's storage notes.
-      operationId: createCaregiverLivenessFrameUploadUrl
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
-      responses:
-        '201':
-          description: A presigned PUT URL, short-lived.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PresignedUpload'
+                $ref: '#/components/schemas/LivenessChallenge'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -1014,21 +671,14 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the caregiver's check-in photo
+      summary: Submit the caregiver's captured liveness frames
       description: |
-        A single photo, not a liveness/anti-spoofing check - the user explicitly decided to drop
-        multi-frame challenge-response liveness detection in favor of one photo, for caregiver
-        mobile app build simplicity (a deliberate, informed tradeoff - see architecture.md's "Key
-        design decisions"). `DetectFaces` confirms exactly one face is present, then `CompareFaces`
-        runs against the caregiver's enrolled reference images. Writes a `verification_attempts`
-        row (`attempt_type: caregiver_liveness`) and, on success, updates
-        `verification_events.caregiver_liveness_passed` / `caregiver_match_confidence`. The photo
-        is deleted from storage right after processing, pass or fail - it is never needed again
-        either way.
+        `DetectFaces` runs across the captured frame burst (pose/eye/mouth attribute checks,
+        frame-to-frame movement), then `CompareFaces` against the caregiver's enrolled reference
+        images. Writes a `verification_attempts` row (`attempt_type: caregiver_liveness`) and, on
+        success, updates `verification_events.caregiver_liveness_passed` /
+        `caregiver_match_confidence`.
       operationId: submitCaregiverLiveness
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -1037,7 +687,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Result.
+          description: Liveness result.
           content:
             application/json:
               schema:
@@ -1045,30 +695,21 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/upload-url:
+  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/challenge:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
-    post:
+    get:
       tags: [Check-in]
-      summary: Get a presigned URL to upload the dependant's check-in photo
-      description: Same flow as the caregiver step's upload-url endpoint.
-      operationId: createDependantLivenessFrameUploadUrl
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
+      summary: Get a randomized liveness challenge for the dependant
+      description: Only reachable once the caregiver liveness step has passed, and within the configurable bounded co-presence time window.
+      operationId: getDependantLivenessChallenge
       responses:
-        '201':
-          description: A presigned PUT URL, short-lived.
+        '200':
+          description: The challenge to perform on-camera.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PresignedUpload'
+                $ref: '#/components/schemas/LivenessChallenge'
         default:
           $ref: '#/components/responses/Problem'
 
@@ -1077,12 +718,9 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the dependant's check-in photo
-      description: 'Same flow as the caregiver step (see its own description for the single-photo-not-liveness reasoning). Only reachable once the caregiver step has passed, within the configurable bounded co-presence time window. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
+      summary: Submit the dependant's captured liveness frames
+      description: 'Same flow as the caregiver step. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both liveness steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
       operationId: submitDependantLiveness
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
       requestBody:
         required: true
         content:
@@ -1091,7 +729,7 @@ paths:
               $ref: '#/components/schemas/LivenessSubmission'
       responses:
         '200':
-          description: Result. On pass, check-in is complete.
+          description: Liveness result. On pass, check-in is complete.
           content:
             application/json:
               schema:
@@ -1153,35 +791,8 @@ paths:
     post:
       tags: [Visit Schedules]
       summary: Check out of a visit
-      description: |
-        Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to
-        `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
-        dependant_care_tasks row has no matching visit_task_completions row for this visit -
-        "addressed" means any status was recorded, not necessarily `completed`.
-
-        Must happen inside the dependant's geofence radius, measured from the caregiver's current
-        GPS fix with the same distance calculation as check-in; the fix and its distance are stored
-        on `verification_events` (`checkoutGpsLat`, `checkoutGpsLng`,
-        `checkoutDistanceFromGeofenceMeters`).
+      description: Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to `completed`.
       operationId: checkoutVisit
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [gpsLat, gpsLng]
-              properties:
-                gpsLat:
-                  type: number
-                  format: double
-                  minimum: -90
-                  maximum: 90
-                gpsLng:
-                  type: number
-                  format: double
-                  minimum: -180
-                  maximum: 180
       responses:
         '200':
           description: Checked out.
@@ -1189,91 +800,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VisitSchedule'
-        '400':
-          description: The location is missing or invalid.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '422':
-          description: The caregiver is outside the dependant's geofence radius; `detail` gives the distance and the radius.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
         '409':
-          description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/tasks:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-    get:
-      tags: [Visit Schedules]
-      summary: Get this visit's task checklist
-      description: |
-        Visit task checklist (docs/visit-task-checklist-plan.md). Caregiver-only, own visit,
-        `in_progress` only - the checklist is worked through during the visit, after check-in and
-        before checkout. Live-joined against dependant_care_tasks (active, for this visit's
-        dependant) - not a snapshot, so a care-plan edit made mid-visit is reflected immediately.
-      operationId: listVisitTasks
-      responses:
-        '200':
-          description: This visit's task checklist.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/VisitTask'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/tasks/{careTaskId}:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-      - $ref: '#/components/parameters/CareTaskId'
-    put:
-      tags: [Visit Schedules]
-      summary: Record (or correct) this visit's completion status for one task
-      description: Upserts - a second submission for the same task replaces the first, rather than appending. Rejects with 409 once the visit is no longer `in_progress` ("locked after checkout" - see the plan doc's section 2).
-      operationId: putVisitTaskCompletion
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PutVisitTaskCompletionRequest'
-      responses:
-        '200':
-          description: The recorded completion.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [careTaskId, status, reason, notes, completedAt]
-                properties:
-                  careTaskId:
-                    type: string
-                    format: uuid
-                  status:
-                    $ref: '#/components/schemas/TaskCompletionStatus'
-                  reason:
-                    oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
-                  notes:
-                    type: [string, 'null']
-                  completedAt:
-                    type: string
-                    format: date-time
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The visit is not `in_progress` (either not yet checked in, or already past checkout).
+          description: The visit hasn't been checked in yet, or is already completed/cancelled.
           content:
             application/problem+json:
               schema:
@@ -1355,766 +883,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /dependants/{dependantId}/family-members/link:
-    parameters:
-      - $ref: '#/components/parameters/DependantId'
-    post:
-      tags: [Dependants]
-      summary: Link an existing account by email (primary contact)
-      description: |
-        The dependant's primary contact links someone who already has a family-member account,
-        found by their exact email, with no request or approval. Never creates an account; someone
-        without one is told to sign up and send a link request instead. Only a primary contact can
-        learn from the 404 whether an email is registered.
-      operationId: linkExistingFamilyMember
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email]
-              properties:
-                email:
-                  type: string
-                  format: email
-                relationship:
-                  type: string
-      responses:
-        '201':
-          description: Linked.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DependantFamilyMember'
-        '403':
-          description: The caller isn't the dependant's primary contact.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '404':
-          description: No family-member account uses that email.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '409':
-          description: Already linked to this dependant.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /dashboard/overview:
-    get:
-      tags: [Dashboard]
-      summary: The Overview page's data for one day (supervisors only)
-      description: |
-        One Nairobi calendar day's visits (cancelled ones left out), each with its dependant's home
-        location and a `state` for the map: `upcoming` (not checked in, start not reached),
-        `awaiting_checkin` (not checked in, between start and end), `checked_in` (checked in, with
-        or without a checkout since), or `no_checkin` (end passed with no check-in, or marked
-        missed/investigated). Also the 14 days of visit outcomes ending on that day, and what needs
-        a supervisor's attention now. Days are Africa/Nairobi days whatever the caller's time zone.
-      operationId: getDashboardOverview
-      parameters:
-        - name: date
-          in: query
-          required: false
-          description: YYYY-MM-DD; defaults to today in Nairobi.
-          schema:
-            type: string
-            format: date
-      responses:
-        '200':
-          description: The overview.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DashboardOverview'
-        '400':
-          description: The date isn't a real YYYY-MM-DD date.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/visits:
-    get:
-      tags: [Compliance]
-      summary: Visit verification summary per caregiver or dependant (supervisors only)
-      description: |
-        Every visit that started in the period (Nairobi days), counted per person with the
-        Overview's own outcome rules, plus the period's totals. A visit is `fullyVerified` when it
-        was checked in inside the geofence, both faces matched, and it was checked out inside the
-        home radius (visits checked out before checkout location was recorded can't show the last
-        part, so they don't count). A check-in more than 15 minutes after the scheduled start is
-        `late` (a report figure only; late check-ins aren't blocked).
-      operationId: getComplianceVisitSummary
-      parameters:
-        - $ref: '#/components/parameters/PeriodFrom'
-        - $ref: '#/components/parameters/PeriodTo'
-        - name: groupBy
-          in: query
-          schema:
-            type: string
-            enum: [caregiver, dependant]
-            default: caregiver
-        - name: sort
-          in: query
-          description: A column, `-` prefixed for descending. People with no rate yet sort last.
-          schema:
-            type: string
-            enum:
-              [
-                name,
-                -name,
-                total,
-                -total,
-                completionRate,
-                -completionRate,
-                verifiedRate,
-                -verifiedRate,
-                missed,
-                -missed,
-                late,
-                -late,
-                missingCheckout,
-                -missingCheckout,
-              ]
-            default: name
-      responses:
-        '200':
-          description: The summary.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ComplianceVisitSummary'
-        '400':
-          description: A parameter is malformed, or the period runs backwards or covers more than 366 days.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/exceptions:
-    get:
-      tags: [Compliance]
-      summary: Missed visits, missing checkouts and failed checks, with how each was resolved
-      description: |
-        Visits in the period a supervisor should account for, newest first: `missed` (no check-in
-        by the end, or marked missed/investigated), `missing_checkout` (checked in, end passed, no
-        checkout), and `failed_check` (at least one failed geofence or face attempt). Cancelled
-        visits are never exceptions. Each carries its latest resolution, if any.
-      operationId: listComplianceExceptions
-      parameters:
-        - $ref: '#/components/parameters/PeriodFrom'
-        - $ref: '#/components/parameters/PeriodTo'
-        - name: kind
-          in: query
-          schema:
-            $ref: '#/components/schemas/ExceptionKind'
-        - name: resolved
-          in: query
-          schema:
-            type: boolean
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: A page of exceptions.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ComplianceExceptionPage'
-        '400':
-          description: A parameter is malformed, or the period runs backwards or covers more than 366 days.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/alerts:
-    get:
-      tags: [Compliance]
-      summary: How quickly missed-visit alerts raised in the period were acknowledged
-      operationId: getComplianceAlertResponse
-      parameters:
-        - $ref: '#/components/parameters/PeriodFrom'
-        - $ref: '#/components/parameters/PeriodTo'
-      responses:
-        '200':
-          description: The alert response report.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ComplianceAlertResponse'
-        '400':
-          description: A parameter is malformed, or the period runs backwards or covers more than 366 days.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/consents:
-    get:
-      tags: [Compliance]
-      summary: The consent register - every active caregiver and dependant's consents
-      description: |
-        Each consent type's current state per person (`active`, `revoked` or `none`), who granted
-        and who revoked it, and how many upcoming visits are booked for someone without photo
-        verification consent (possible only when consent was revoked after booking).
-      operationId: getComplianceConsentRegister
-      parameters:
-        - name: subjectType
-          in: query
-          schema:
-            type: string
-            enum: [caregiver, dependant]
-        - name: status
-          in: query
-          description: "`missing`: at least one consent isn't active. `complete`: every consent is."
-          schema:
-            type: string
-            enum: [missing, complete]
-      responses:
-        '200':
-          description: The register.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/ConsentRegisterRow'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/terms:
-    get:
-      tags: [Compliance]
-      summary: Who has accepted each app's current terms and privacy notice
-      operationId: getComplianceTermsReport
-      responses:
-        '200':
-          description: One report per app.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [documents]
-                properties:
-                  documents:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/TermsDocumentReport'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/audit-log:
-    get:
-      tags: [Compliance]
-      summary: The audit trail, newest first
-      description: |
-        Who did what to which record, and when: every change, every compliance export, and views
-        of check-in verification details and biometric photos. The trail is append-only. `actorUserId`
-        is null for the system (a scheduled job).
-      operationId: listAuditLog
-      parameters:
-        - $ref: '#/components/parameters/PeriodFrom'
-        - $ref: '#/components/parameters/PeriodTo'
-        - name: actorUserId
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: entityType
-          in: query
-          schema:
-            type: string
-        - name: entityId
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: action
-          in: query
-          schema:
-            type: string
-        - $ref: '#/components/parameters/Cursor'
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 25
-      responses:
-        '200':
-          description: A page of audit entries.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuditLogPage'
-        '400':
-          description: A parameter is malformed, or the period runs backwards or covers more than 366 days.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/audit-log/facets:
-    get:
-      tags: [Compliance]
-      summary: The distinct actions and record types in the audit trail, for filter menus
-      operationId: getAuditLogFacets
-      responses:
-        '200':
-          description: The facets.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [actions, entityTypes]
-                properties:
-                  actions:
-                    type: array
-                    items:
-                      type: string
-                  entityTypes:
-                    type: array
-                    items:
-                      type: string
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /compliance/exports/{report}:
-    get:
-      tags: [Compliance]
-      summary: Download a compliance report as CSV
-      description: |
-        `visits` (one row per visit in the period), `visit-summary` (per person, with a totals
-        row; takes `groupBy`), `consents`, `terms`, and `audit-log` (takes the audit log's
-        filters). Times are Nairobi local time. Text that a spreadsheet would run as a formula is
-        prefixed with an apostrophe. Every export is itself recorded in the audit trail.
-      operationId: exportComplianceReport
-      parameters:
-        - name: report
-          in: path
-          required: true
-          schema:
-            type: string
-            enum: [visits, visit-summary, consents, terms, audit-log]
-        - $ref: '#/components/parameters/PeriodFrom'
-        - $ref: '#/components/parameters/PeriodTo'
-        - name: groupBy
-          in: query
-          schema:
-            type: string
-            enum: [caregiver, dependant]
-            default: caregiver
-        - name: actorUserId
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: entityType
-          in: query
-          schema:
-            type: string
-        - name: entityId
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: action
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: The CSV file, as an attachment.
-          content:
-            text/csv:
-              schema:
-                type: string
-        '400':
-          description: A parameter is malformed, or the period runs backwards or covers more than 366 days.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/resolutions:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-    post:
-      tags: [Compliance]
-      summary: Record how an exception was resolved (supervisors only)
-      description: |
-        Only for a visit that is an exception (see `GET /compliance/exceptions`); otherwise `409`.
-        Resolving a missed visit (or one past its end with no check-in that the missed-visit sweep
-        hasn't reached) moves it to `investigated`; other visits keep their status. The visit's
-        open missed-visit alert, if any, is acknowledged by the same supervisor. Resolutions are
-        append-only: resolving again adds a newer one that supersedes the earlier.
-      operationId: createVisitResolution
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [outcome, note]
-              properties:
-                outcome:
-                  $ref: '#/components/schemas/VisitResolutionOutcome'
-                note:
-                  type: string
-                  minLength: 1
-                  maxLength: 2000
-                  description: Required; surrounding whitespace is trimmed.
-      responses:
-        '201':
-          description: The resolution.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VisitResolution'
-        '400':
-          description: The outcome isn't one of the allowed values, or the note is blank.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '403':
-          description: The caller isn't a supervisor.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The visit has nothing to resolve.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /family-link-requests:
-    post:
-      tags: [Family Link Requests]
-      summary: Ask a primary contact to link you
-      description: |
-        Family members only. `contact` is the primary contact's exact email or E.164 phone number.
-        The answer is always the same `202`, whoever the contact is: the request is stored and
-        listed back to the requester as pending either way, and it only reaches anyone if the
-        contact belonged to a dependant's primary contact at the time. So this can't be used to
-        find out who is registered. Asking again while a request to the same contact is open
-        doesn't create another.
-      operationId: createFamilyLinkRequest
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [contact]
-              properties:
-                contact:
-                  type: string
-                  description: Email address or E.164 phone number.
-                relationship:
-                  type: string
-                  description: The requester's relationship to the dependant(s), e.g. Grandson.
-      responses:
-        '202':
-          description: Accepted (the same answer whether or not the contact matched anyone).
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
-        default:
-          $ref: '#/components/responses/Problem'
-    get:
-      tags: [Family Link Requests]
-      summary: Requests to you, and your own requests
-      description: |
-        `incoming`: open requests addressed to the caller as a primary contact, with who is asking
-        and which of the caller's active dependants they could be linked to (`alreadyLinked` marks
-        ones they already are). `outgoing`: every request the caller has made; a decided one the
-        caller hasn't seen yet has `unread: true` (the app's in-app notification).
-      operationId: listFamilyLinkRequests
-      responses:
-        '200':
-          description: Incoming and outgoing requests.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FamilyLinkRequests'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /family-link-requests/{requestId}/approve:
-    parameters:
-      - name: requestId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    post:
-      tags: [Family Link Requests]
-      summary: Approve a request, linking the requester to chosen dependants
-      description: Only the primary contact the request was sent to, and only for dependants they are still the primary contact of. Links are made with the requester's stated relationship, not as primary contact.
-      operationId: approveFamilyLinkRequest
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [dependantIds]
-              properties:
-                dependantIds:
-                  type: array
-                  minItems: 1
-                  items:
-                    type: string
-                    format: uuid
-      responses:
-        '200':
-          description: Approved and linked.
-        '403':
-          description: A chosen dependant isn't one the caller is the primary contact of.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: Already answered.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /family-link-requests/{requestId}/reject:
-    parameters:
-      - name: requestId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    post:
-      tags: [Family Link Requests]
-      summary: Reject a request
-      operationId: rejectFamilyLinkRequest
-      responses:
-        '200':
-          description: Rejected.
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: Already answered.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /family-link-requests/outcomes/seen:
-    post:
-      tags: [Family Link Requests]
-      summary: Mark your decided requests as seen
-      description: Clears `unread` on the caller's approved and rejected requests (the app calls this when its notifications sheet is opened).
-      operationId: markFamilyLinkOutcomesSeen
-      responses:
-        '204':
-          description: Marked as seen.
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /terms/current:
-    get:
-      tags: [Terms]
-      summary: Get the current terms for the caller's app
-      description: |
-        The current terms of use and privacy notice for the caller's role (`caregiver` or
-        `family_member`; supervisors have none), and whether the caller has accepted this exact
-        version. The mobile apps show a consent screen that can't be dismissed until it's accepted.
-        Publishing a new `version` asks every user of that app to accept again.
-      operationId: getCurrentTerms
-      responses:
-        '200':
-          description: The current document and the caller's acceptance of it.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CurrentTerms'
-        '403':
-          description: The caller has no users row yet (a family member must finish registering first).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '404':
-          description: There are no app terms for the caller's role (supervisor).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /terms/current/accept:
-    post:
-      tags: [Terms]
-      summary: Accept the current terms
-      description: |
-        Records the caller's acceptance of the version they were shown, with the consent screen's two
-        required consents. Idempotent: accepting again keeps the original acceptance time
-        (acceptances are append-only).
-
-        Also records the matching consent records (`biometric_verification` and
-        `audio_cognitive_monitoring`), skipping any already active: for a caregiver, for
-        themselves; for a family member, for each active dependant they are the primary contact
-        of. Dependants a consenting family member registers later get the same consent at
-        registration.
-      operationId: acceptCurrentTerms
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [version, biometricConsent, audioConsent]
-              properties:
-                version:
-                  type: string
-                  description: The version the user was shown; must be the current one.
-                biometricConsent:
-                  type: boolean
-                  enum: [true]
-                  description: Consent to photos being used to verify identity at each visit. Must be true.
-                audioConsent:
-                  type: boolean
-                  enum: [true]
-                  description: Consent to audio being recorded during visits. Must be true.
-      responses:
-        '200':
-          description: Accepted.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [document, version, acceptedAt]
-                properties:
-                  document:
-                    type: string
-                    enum: [caregiver, family_member]
-                  version:
-                    type: string
-                  acceptedAt:
-                    type: string
-                    format: date-time
-        '400':
-          description: A consent was missing or not true, or the body was otherwise invalid.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        '409':
-          description: The terms were updated since the app loaded them - the user must review the current version.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-
   /notifications:
     get:
       tags: [Notifications]
@@ -2174,37 +942,8 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: A Cognito-issued ID token (not the access token - the `custom:role` custom attribute this API's RBAC relies on is only present in the ID token by default, confirmed against AWS's Cognito documentation; the access token's default claim set does not include custom attributes without a Pre Token Generation Lambda trigger, which this project does not use). The `custom:role` claim drives RBAC.
-    checkinSessionToken:
-      type: apiKey
-      in: header
-      name: X-Checkin-Session-Token
-      description: |
-        The short-lived session token returned by `POST .../checkin/geofence`, required in
-        addition to (not instead of) the normal `bearerAuth` Cognito token on every remaining
-        check-in step (photo upload, submit - caregiver and dependant). Proves this specific
-        visit's geofence step was passed recently, not just that the caller is a valid caregiver in
-        general - defense in depth, confirmed with the user as the more robust of two designs over
-        a session-token-only approach (HEZ-34). A previous draft of this file used
-        `security: [{bearerAuth: [sessionToken]}]` on one endpoint only, an ambiguous OAuth2-style
-        scopes annotation that doesn't apply to an `http`/`bearer` scheme and was never a
-        considered design - superseded by this explicit second scheme, applied consistently to
-        every step past the geofence check.
 
   parameters:
-    PeriodFrom:
-      name: from
-      in: query
-      description: First Nairobi day of the period (YYYY-MM-DD). Defaults to the first of this month.
-      schema:
-        type: string
-        format: date
-    PeriodTo:
-      name: to
-      in: query
-      description: Last Nairobi day of the period, included (YYYY-MM-DD). Defaults to the last of this month.
-      schema:
-        type: string
-        format: date
     Cursor:
       name: cursor
       in: query
@@ -2248,29 +987,10 @@ components:
       schema:
         type: string
         format: uuid
-    CareTaskId:
-      name: careTaskId
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
 
   responses:
     Problem:
       description: An error, in RFC 7807 Problem Details format.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-    Unschedulable:
-      description: |
-        The visit can't be scheduled, or moved to a new time, and `detail` says who is missing
-        what. Either the caregiver or the dependant (or both) has no active photo, so check-in
-        couldn't verify them (a photo still awaiting a supervisor's review doesn't count); or one
-        of them has no active (unrevoked) `biometric_verification` consent record, given by
-        accepting the terms in the mobile app. Status-only updates (e.g. cancelling) are never
-        blocked by this.
       content:
         application/problem+json:
           schema:
@@ -2289,223 +1009,6 @@ components:
             $ref: '#/components/schemas/Problem'
 
   schemas:
-    VisitStats:
-      type: object
-      required: [windowDays, visits, completionRate, lastMissedVisitStart, nextVisit, lastVisit]
-      properties:
-        windowDays:
-          type: integer
-          description: How many days back `visits` covers (30), ending now.
-        visits:
-          type: object
-          description: |
-            Visits that started in the window, by outcome. `missed` includes a visit whose end
-            passed with no check-in even before the missed-visit sweep marks it; `open` is one
-            under way or checked in but not yet checked out.
-          required: [total, completed, missed, cancelled, open]
-          properties:
-            total: { type: integer }
-            completed: { type: integer }
-            missed: { type: integer }
-            cancelled: { type: integer }
-            open: { type: integer }
-        completionRate:
-          type: [number, 'null']
-          minimum: 0
-          maximum: 1
-          description: completed / (completed + missed); null when neither happened in the window.
-        lastMissedVisitStart:
-          type: [string, 'null']
-          format: date-time
-          description: When the most recent missed visit in the window was due to start.
-        nextVisit:
-          description: The next scheduled visit still to come.
-          oneOf:
-            - $ref: '#/components/schemas/VisitStatsVisit'
-            - type: 'null'
-        lastVisit:
-          description: The most recent visit someone checked in to, however long ago.
-          oneOf:
-            - allOf:
-                - $ref: '#/components/schemas/VisitStatsVisit'
-                - type: object
-                  required: [checkinAt, checkoutAt]
-                  properties:
-                    checkinAt: { type: string, format: date-time }
-                    checkoutAt: { type: [string, 'null'], format: date-time }
-            - type: 'null'
-    VisitStatsVisit:
-      type: object
-      required:
-        [id, scheduledStart, scheduledEnd, caregiverId, caregiverName, dependantId, dependantName]
-      properties:
-        id: { type: string, format: uuid }
-        scheduledStart: { type: string, format: date-time }
-        scheduledEnd: { type: string, format: date-time }
-        caregiverId: { type: string, format: uuid }
-        caregiverName: { type: string }
-        dependantId: { type: string, format: uuid }
-        dependantName: { type: string }
-    DashboardOverview:
-      type: object
-      required: [date, timeZone, generatedAt, visits, trend, previousPeriod, attention]
-      properties:
-        date: { type: string, format: date }
-        timeZone: { type: string, example: Africa/Nairobi }
-        generatedAt: { type: string, format: date-time }
-        visits:
-          type: array
-          items:
-            type: object
-            properties:
-              id: { type: string, format: uuid }
-              state: { type: string, enum: [upcoming, awaiting_checkin, checked_in, no_checkin] }
-              status: { type: string }
-              scheduledStart: { type: string, format: date-time }
-              scheduledEnd: { type: string, format: date-time }
-              checkinAt: { type: [string, 'null'], format: date-time }
-              checkoutAt: { type: [string, 'null'], format: date-time }
-              caregiver:
-                type: object
-                properties:
-                  id: { type: string, format: uuid }
-                  fullName: { type: string }
-                  phoneNumber: { type: string }
-              dependant:
-                type: object
-                properties:
-                  id: { type: string, format: uuid }
-                  fullName: { type: string }
-                  lat: { type: number }
-                  lng: { type: number }
-        trend:
-          type: array
-          description: 14 days, oldest first. `open` is visits not yet completed or missed.
-          items:
-            type: object
-            properties:
-              date: { type: string, format: date }
-              completed: { type: integer }
-              missed: { type: integer }
-              cancelled: { type: integer }
-              open: { type: integer }
-        previousPeriod:
-          type: object
-          description: Completed and missed visits in the 14 days before `trend`, so a client can compare completion rates.
-          properties:
-            completed: { type: integer }
-            missed: { type: integer }
-        attention:
-          type: object
-          properties:
-            missedVisitAlerts:
-              type: object
-              description: Unacknowledged missed-visit alerts, newest first; `items` holds up to 100.
-              properties:
-                total: { type: integer }
-                items:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      id: { type: string, format: uuid }
-                      sentAt: { type: [string, 'null'], format: date-time }
-                      visitScheduleId: { type: string, format: uuid }
-                      scheduledStart: { type: string, format: date-time }
-                      dependantName: { type: string }
-                      caregiverName: { type: string }
-            flaggedPhotos:
-              type: integer
-              description: Photos flagged as possible duplicates, waiting for review.
-            dependantsWithoutPhoto:
-              type: object
-              description: Active dependants with no usable photo, who can't be scheduled; `items` holds up to 100, by name.
-              properties:
-                total: { type: integer }
-                items:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      id: { type: string, format: uuid }
-                      fullName: { type: string }
-    FamilyLinkRequests:
-      type: object
-      required: [incoming, outgoing]
-      properties:
-        incoming:
-          type: array
-          items:
-            type: object
-            required: [id, requester, relationship, createdAt, dependants]
-            properties:
-              id: { type: string, format: uuid }
-              requester:
-                type: object
-                properties:
-                  fullName: { type: string }
-                  email: { type: [string, 'null'] }
-                  phoneNumber: { type: [string, 'null'] }
-              relationship: { type: [string, 'null'] }
-              createdAt: { type: string, format: date-time }
-              dependants:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    id: { type: string, format: uuid }
-                    fullName: { type: string }
-                    alreadyLinked: { type: boolean }
-        outgoing:
-          type: array
-          items:
-            type: object
-            required: [id, targetContact, status, createdAt, decidedAt, unread, linkedDependants]
-            properties:
-              id: { type: string, format: uuid }
-              targetContact: { type: string }
-              relationship: { type: [string, 'null'] }
-              status: { type: string, enum: [pending, approved, rejected] }
-              createdAt: { type: string, format: date-time }
-              decidedAt: { type: [string, 'null'], format: date-time }
-              unread: { type: boolean }
-              linkedDependants:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    id: { type: string, format: uuid }
-                    fullName: { type: string }
-    CurrentTerms:
-      type: object
-      required: [document, version, title, effectiveDate, sections, acceptedAt]
-      properties:
-        document:
-          type: string
-          enum: [caregiver, family_member]
-        version:
-          type: string
-        title:
-          type: string
-        effectiveDate:
-          type: string
-          format: date
-        sections:
-          type: array
-          items:
-            type: object
-            required: [heading, paragraphs]
-            properties:
-              heading:
-                type: string
-              paragraphs:
-                type: array
-                items:
-                  type: string
-        acceptedAt:
-          type: [string, 'null']
-          format: date-time
-          description: When the caller accepted this exact version, or null if they haven't.
     Problem:
       type: object
       description: RFC 7807 Problem Details.
@@ -2524,9 +1027,6 @@ components:
         instance:
           type: string
           format: uri
-        failureReason:
-          type: string
-          description: Present on some error responses (e.g. GeofenceCheckinFailureReason on the geofence check's 422) so a client can branch deterministically instead of parsing `detail`'s prose.
 
     UserRole:
       type: string
@@ -2537,23 +1037,15 @@ components:
     DependantStatus:
       type: string
       enum: [active, deactivated]
-    # Renamed from DependantGender (2026-09-22, HEZ-54) - caregivers now use the same enum, per
-    # backend/src/db/schema.ts's own person_gender rename.
-    PersonGender:
+    DependantGender:
       type: string
       enum: [male, female]
-    CaregiverOccupation:
-      type: string
-      enum: [nurse, community_health_worker, caregiver]
-    IdType:
-      type: string
-      enum: [national_id, passport]
     SubjectType:
       type: string
       enum: [caregiver, dependant]
     BiometricEnrollmentStatus:
       type: string
-      enum: [active, superseded, deleted, flagged]
+      enum: [active, superseded, deleted]
     VisitStatus:
       type: string
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated]
@@ -2643,38 +1135,13 @@ components:
           format: uuid
         fullName:
           type: string
-        email:
-          type: [string, 'null']
-          format: email
         phoneNumber:
           type: [string, 'null']
-        idType:
-          oneOf:
-            - $ref: '#/components/schemas/IdType'
-            - type: 'null'
-        idNumber:
-          type: [string, 'null']
-        dob:
-          type: [string, 'null']
-          format: date
-        gender:
-          oneOf:
-            - $ref: '#/components/schemas/PersonGender'
-            - type: 'null'
-        occupation:
-          oneOf:
-            - $ref: '#/components/schemas/CaregiverOccupation'
-            - type: 'null'
         employeeNumber:
           type: [string, 'null']
-          description: >-
-            Auto-generated at registration ('CG-' plus a zero-padded sequence value, e.g.
-            CG-0001), never client-supplied - see CreateCaregiverRequest. Still editable later via
-            UpdateCaregiverRequest if a supervisor ever needs to correct one by hand.
         hireDate:
           type: [string, 'null']
           format: date
-          description: 'Auto-populated to the actual registration date, never client-supplied - see CreateCaregiverRequest.'
         active:
           type: boolean
         createdAt:
@@ -2685,52 +1152,26 @@ components:
           format: date-time
     CreateCaregiverRequest:
       type: object
-      description: >-
-        employeeNumber/hireDate are deliberately absent here (2026-09-22, HEZ-54) - both are
-        DB-generated at registration, not supervisor-entered. Creates a brand-new Cognito identity
-        itself (like AddFamilyMemberRequest's email path) - a caregiver never self-registers, so a
-        pre-existing Cognito account can never be assumed.
-      required: [fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
+      required: [cognitoSub, phoneNumber, fullName]
       properties:
-        fullName:
+        cognitoSub:
           type: string
-        email:
-          type: string
-          format: email
         phoneNumber:
           type: string
-        idType:
-          $ref: '#/components/schemas/IdType'
-        idNumber:
+        fullName:
           type: string
-        dob:
+        employeeNumber:
+          type: string
+        hireDate:
           type: string
           format: date
-        gender:
-          $ref: '#/components/schemas/PersonGender'
-        occupation:
-          $ref: '#/components/schemas/CaregiverOccupation'
     UpdateCaregiverRequest:
       type: object
       properties:
-        fullName:
-          type: string
-        email:
-          type: string
-          format: email
         phoneNumber:
           type: string
-        idType:
-          $ref: '#/components/schemas/IdType'
-        idNumber:
+        fullName:
           type: string
-        dob:
-          type: string
-          format: date
-        gender:
-          $ref: '#/components/schemas/PersonGender'
-        occupation:
-          $ref: '#/components/schemas/CaregiverOccupation'
         employeeNumber:
           type: string
         hireDate:
@@ -2763,7 +1204,6 @@ components:
         - registeredBy
         - createdAt
         - updatedAt
-        - checkinPhotoStatus
       properties:
         id:
           type: string
@@ -2775,19 +1215,9 @@ components:
           format: date
         gender:
           oneOf:
-            - $ref: '#/components/schemas/PersonGender'
+            - $ref: '#/components/schemas/DependantGender'
             - type: 'null'
         homeAddressText:
-          type: [string, 'null']
-        primaryConditionSummary:
-          description: Free-text clinical/care context for caregivers/supervisors - not a structured diagnosis field.
-          type: [string, 'null']
-        county:
-          description: Resolved client-side (admin web app) via a point-in-polygon lookup against IEBC ward boundary GeoJSON as the geofence pin is placed. Null for dependants registered before this field existed.
-          type: [string, 'null']
-        constituency:
-          type: [string, 'null']
-        ward:
           type: [string, 'null']
         geofenceLat:
           type: number
@@ -2811,29 +1241,9 @@ components:
         updatedAt:
           type: string
           format: date-time
-        checkinPhotoStatus:
-          type: string
-          enum: [ready, awaiting_review, missing]
-          description: |
-            Where this dependant's check-in photo stands. `ready`: an active photo check-in can
-            verify against. `awaiting_review`: only a photo flagged for a supervisor's review, which
-            check-in can't use yet. `missing`: none. A visit can only be scheduled once it's
-            `ready`. Always `missing` straight after registration, since the photo is added
-            afterwards.
     CreateDependantRequest:
       type: object
-      required:
-        [
-          fullName,
-          dob,
-          county,
-          constituency,
-          ward,
-          geofenceLat,
-          geofenceLng,
-          geofenceRadiusMeters,
-          primaryFamilyMember,
-        ]
+      required: [fullName, dob, geofenceLat, geofenceLng, geofenceRadiusMeters, primaryFamilyMember]
       properties:
         fullName:
           type: string
@@ -2841,17 +1251,8 @@ components:
           type: string
           format: date
         gender:
-          $ref: '#/components/schemas/PersonGender'
+          $ref: '#/components/schemas/DependantGender'
         homeAddressText:
-          type: string
-        primaryConditionSummary:
-          type: string
-        county:
-          description: Required for every new registration, unlike homeAddressText's own optional free-text treatment - resolved client-side as the geofence pin is placed.
-          type: string
-        constituency:
-          type: string
-        ward:
           type: string
         geofenceLat:
           type: number
@@ -2873,16 +1274,8 @@ components:
         fullName:
           type: string
         gender:
-          $ref: '#/components/schemas/PersonGender'
+          $ref: '#/components/schemas/DependantGender'
         homeAddressText:
-          type: string
-        primaryConditionSummary:
-          type: string
-        county:
-          type: string
-        constituency:
-          type: string
-        ward:
           type: string
         geofenceLat:
           type: number
@@ -2910,24 +1303,7 @@ components:
 
     DependantFamilyMember:
       type: object
-      description: |
-        A family member's link to a dependant, with their registration details. Email and phone
-        are returned to anyone who can see the list (other family members of the same dependant
-        use them to coordinate care). `idType`/`idNumber` are returned to supervisors only and are
-        absent from a family member's response altogether, since a national ID number is
-        sensitive and another family member has no need for it.
-      required:
-        [
-          dependantId,
-          familyMemberUserId,
-          fullName,
-          isPrimaryContact,
-          addedBy,
-          createdAt,
-          email,
-          phoneNumber,
-          addedByName,
-        ]
+      required: [dependantId, familyMemberUserId, isPrimaryContact, addedBy, createdAt]
       properties:
         dependantId:
           type: string
@@ -2935,9 +1311,6 @@ components:
         familyMemberUserId:
           type: string
           format: uuid
-        fullName:
-          type: string
-          description: The linked member's own name, so a family member can see who the other members are without access to `GET /users/{userId}`.
         relationship:
           type: [string, 'null']
         isPrimaryContact:
@@ -2948,21 +1321,6 @@ components:
         createdAt:
           type: string
           format: date-time
-          description: When the link was made.
-        email:
-          type: [string, 'null']
-        phoneNumber:
-          type: [string, 'null']
-        addedByName:
-          type: [string, 'null']
-          description: The name of the person who linked this member (a supervisor or the primary contact).
-        idType:
-          type: [string, 'null']
-          enum: [national_id, passport, null]
-          description: Supervisors only.
-        idNumber:
-          type: [string, 'null']
-          description: Supervisors only.
     AddFamilyMemberRequest:
       type: object
       description: |
@@ -2985,19 +1343,8 @@ components:
           description: 'Creates a brand-new Cognito identity and sends it a real invitation email. Mutually exclusive with cognitoSub.'
         phoneNumber:
           type: string
-          description: >-
-            Required in E.164 format (e.g. +254712345678) only when email is also set - that's the
-            only path that sends this value to Cognito's AdminCreateUser, which rejects any other
-            format. Not validated against this format when cognitoSub is set instead (linking an
-            existing identity never uses this field).
         fullName:
           type: string
-        idType:
-          allOf: [{ $ref: '#/components/schemas/IdType' }]
-          description: 'Required together with idNumber when registering a brand-new user via email.'
-        idNumber:
-          type: string
-          description: 'Required together with idType when registering a brand-new user via email.'
         relationship:
           type: string
         isPrimaryContact:
@@ -3011,138 +1358,9 @@ components:
         isPrimaryContact:
           type: boolean
 
-    TaskCompletionStatus:
-      type: string
-      enum: [completed, not_completed, not_applicable]
-    TaskSkipReason:
-      type: string
-      enum: [client_declined, client_unavailable, equipment_unavailable, other]
-    CareTask:
-      type: object
-      description: A care-plan task (docs/visit-task-checklist-plan.md), authored by a supervisor for one dependant.
-      required: [id, dependantId, title, required, active, createdBy, createdAt, updatedAt]
-      properties:
-        id:
-          type: string
-          format: uuid
-        dependantId:
-          type: string
-          format: uuid
-        title:
-          type: string
-        description:
-          type: [string, 'null']
-        category:
-          type: [string, 'null']
-          description: Free text, not a fixed ADL/IADL taxonomy - a display grouping label only.
-        required:
-          type: boolean
-          description: A required task with no visit_task_completions row blocks checkout for that visit.
-        active:
-          type: boolean
-          description: A retired (false) task keeps its history but stops appearing on future visits.
-        createdBy:
-          type: string
-          format: uuid
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-    CreateCareTaskRequest:
-      type: object
-      required: [title]
-      properties:
-        title:
-          type: string
-        description:
-          type: string
-        category:
-          type: string
-        required:
-          type: boolean
-          default: true
-    UpdateCareTaskRequest:
-      type: object
-      properties:
-        title:
-          type: string
-        description:
-          type: string
-        category:
-          type: string
-        required:
-          type: boolean
-        active:
-          type: boolean
-    VisitTask:
-      type: object
-      description: A care-plan task live-joined against this visit's own completion, if any has been recorded yet.
-      required: [careTaskId, title, required, status, reason, notes, completedAt]
-      properties:
-        careTaskId:
-          type: string
-          format: uuid
-        title:
-          type: string
-        description:
-          type: [string, 'null']
-        category:
-          type: [string, 'null']
-        required:
-          type: boolean
-        status:
-          oneOf: [{ $ref: '#/components/schemas/TaskCompletionStatus' }, { type: 'null' }]
-          description: 'Null: not yet addressed this visit.'
-        reason:
-          oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
-        notes:
-          type: [string, 'null']
-        completedAt:
-          type: [string, 'null']
-          format: date-time
-    VisitTaskOutcome:
-      type: object
-      description: One recorded care-task outcome for a visit.
-      required: [careTaskId, title, required, status, reason, notes, completedAt]
-      properties:
-        careTaskId:
-          type: string
-          format: uuid
-        title:
-          type: string
-        description:
-          type: [string, 'null']
-        category:
-          type: [string, 'null']
-        required:
-          type: boolean
-        status:
-          $ref: '#/components/schemas/TaskCompletionStatus'
-        reason:
-          oneOf: [{ $ref: '#/components/schemas/TaskSkipReason' }, { type: 'null' }]
-          description: 'Set only when status is not_completed.'
-        notes:
-          type: [string, 'null']
-        completedAt:
-          type: string
-          format: date-time
-    PutVisitTaskCompletionRequest:
-      type: object
-      description: "`reason` is required when `status` is `not_completed`, and must be omitted otherwise (matches `visit_task_completions`'s own CHECK constraint)."
-      required: [status]
-      properties:
-        status:
-          $ref: '#/components/schemas/TaskCompletionStatus'
-        reason:
-          $ref: '#/components/schemas/TaskSkipReason'
-        notes:
-          type: string
-
     BiometricEnrollment:
       type: object
-      required: [id, subjectType, imageOrder, imageUrl, status, enrolledBy, enrolledAt, updatedAt]
+      required: [id, subjectType, imageOrder, status, enrolledBy, enrolledAt, updatedAt]
       properties:
         id:
           type: string
@@ -3159,29 +1377,11 @@ components:
           type: integer
           minimum: 1
           maximum: 3
-        imageUrl:
-          type: string
-          format: uri
-          description: A time-limited presigned S3 GET URL, freshly generated on every response - never a permanent link.
         qualityScore:
           type: [number, 'null']
           format: float
         status:
           $ref: '#/components/schemas/BiometricEnrollmentStatus'
-        matchedSubjectType:
-          description: |
-            Set only when status is (or was) `flagged` (HEZ-85): the *other* subject this image's
-            face matched above the duplicate-detection threshold at confirm time.
-          oneOf:
-            - $ref: '#/components/schemas/SubjectType'
-            - type: 'null'
-        matchedSubjectId:
-          type: [string, 'null']
-          format: uuid
-        matchedSimilarity:
-          description: The Rekognition similarity score (0-100) for the match above.
-          type: [number, 'null']
-          format: float
         enrolledBy:
           type: string
           format: uuid
@@ -3235,38 +1435,6 @@ components:
           type: integer
           minimum: 1
           maximum: 3
-    FlaggedBiometricEnrollmentPage:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/FlaggedBiometricEnrollment'
-        nextCursor:
-          type: [string, 'null']
-    FlaggedBiometricEnrollment:
-      description: |
-        A flagged enrollment with what a supervisor needs to compare the two faces before approving
-        or rejecting it: both people's names and the matched person's current photo.
-      allOf:
-        - $ref: '#/components/schemas/BiometricEnrollment'
-        - type: object
-          required: [subjectName, matchedSubjectName, matchedImageUrl]
-          properties:
-            subjectName:
-              type: [string, 'null']
-              description: Full name of the person this photo was uploaded for.
-            matchedSubjectName:
-              type: [string, 'null']
-              description: Full name of the already-enrolled person the face matched.
-            matchedImageUrl:
-              type: [string, 'null']
-              format: uri
-              description: |
-                A short-lived presigned GET URL for the matched person's active photo (the best
-                quality one, as check-in picks it), like `imageUrl`. Null when they have no active
-                photo any more, e.g. after being offboarded.
 
     VisitSchedule:
       type: object
@@ -3275,8 +1443,6 @@ components:
           id,
           caregiverId,
           dependantId,
-          caregiverDisplayName,
-          dependantDisplayName,
           scheduledStart,
           scheduledEnd,
           status,
@@ -3294,11 +1460,6 @@ components:
         dependantId:
           type: string
           format: uuid
-        caregiverDisplayName:
-          type: string
-          description: Added for HEZ-66 - every consumer of this endpoint needed a display name per visit and had no other way to get one (a caregiver in particular has no access to GET /dependants at all).
-        dependantDisplayName:
-          type: string
         scheduledStart:
           type: string
           format: date-time
@@ -3376,16 +1537,6 @@ components:
         distanceFromGeofenceMeters:
           type: [number, 'null']
           format: double
-        checkoutGpsLat:
-          type: [number, 'null']
-          format: double
-          description: Where the caregiver checked out. Null before checkout, and for visits checked out before checkout locations were recorded.
-        checkoutGpsLng:
-          type: [number, 'null']
-          format: double
-        checkoutDistanceFromGeofenceMeters:
-          type: [number, 'null']
-          format: double
         caregiverMatchConfidence:
           type: [number, 'null']
           format: double
@@ -3424,24 +1575,11 @@ components:
       required: [event, attempts]
       properties:
         event:
-          description: Null when the visit has never reached the geofence step (no verification_events row exists yet).
-          oneOf:
-            - $ref: '#/components/schemas/VerificationEvent'
-            - type: 'null'
+          $ref: '#/components/schemas/VerificationEvent'
         attempts:
           type: array
           items:
             $ref: '#/components/schemas/VerificationAttempt'
-        exceptionKinds:
-          type: array
-          description: Supervisors only. Why the visit is an exception (empty when it isn't); see `GET /compliance/exceptions`.
-          items:
-            $ref: '#/components/schemas/ExceptionKind'
-        resolutions:
-          type: array
-          description: Supervisors only. How the exception was resolved, newest first; the first is the one in force.
-          items:
-            $ref: '#/components/schemas/VisitResolution'
 
     GeofenceCheckinRequest:
       type: object
@@ -3472,44 +1610,39 @@ components:
         expiresAt:
           type: string
           format: date-time
-    CheckinContext:
-      type: object
-      required:
-        [
-          dependantDisplayName,
-          dependantHomeAddressText,
-          geofenceLat,
-          geofenceLng,
-          geofenceRadiusMeters,
-        ]
-      properties:
-        dependantDisplayName:
-          type: string
-        dependantHomeAddressText:
-          type: [string, 'null']
-        geofenceLat:
-          type: number
-          format: double
-        geofenceLng:
-          type: number
-          format: double
-        geofenceRadiusMeters:
-          type: integer
 
-    LivenessFrameUploadUrlRequest:
+    LivenessChallenge:
       type: object
-      required: [contentType]
+      required: [challengeId, instructions, expiresAt]
       properties:
-        contentType:
+        challengeId:
           type: string
-          enum: [image/jpeg, image/png]
+          format: uuid
+        instructions:
+          type: string
+          example: Turn your head left, then right.
+        expiresAt:
+          type: string
+          format: date-time
     LivenessSubmission:
       type: object
-      required: [s3Key]
-      description: A single check-in photo, not a multi-frame burst - see submitCaregiverLiveness's own description for why.
+      required: [challengeId, frames]
       properties:
-        s3Key:
+        challengeId:
           type: string
+          format: uuid
+        frames:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [s3Key, capturedAt]
+            properties:
+              s3Key:
+                type: string
+              capturedAt:
+                type: string
+                format: date-time
     LivenessResult:
       type: object
       required: [passed]
@@ -3595,375 +1728,6 @@ components:
         consentType:
           $ref: '#/components/schemas/ConsentType'
 
-    Period:
-      type: object
-      required: [from, to]
-      properties:
-        from:
-          type: string
-          format: date
-        to:
-          type: string
-          format: date
-    VisitSummaryCounts:
-      type: object
-      required:
-        [
-          total,
-          completed,
-          missed,
-          cancelled,
-          open,
-          investigated,
-          fullyVerified,
-          late,
-          missingCheckout,
-          requiredTasksNotDone,
-          completionRate,
-          verifiedRate,
-        ]
-      properties:
-        total:
-          type: integer
-          description: Every visit that started in the period, cancelled ones included.
-        completed:
-          type: integer
-        missed:
-          type: integer
-        cancelled:
-          type: integer
-        open:
-          type: integer
-          description: Not decided yet, or checked in with no checkout.
-        investigated:
-          type: integer
-          description: Missed visits a supervisor has resolved.
-        fullyVerified:
-          type: integer
-        late:
-          type: integer
-        missingCheckout:
-          type: integer
-        requiredTasksNotDone:
-          type: integer
-        completionRate:
-          type: [number, 'null']
-          description: completed / (completed + missed).
-        verifiedRate:
-          type: [number, 'null']
-          description: fullyVerified / completed.
-    ComplianceVisitSummary:
-      type: object
-      required: [period, groupBy, rows, totals]
-      properties:
-        period:
-          $ref: '#/components/schemas/Period'
-        groupBy:
-          type: string
-          enum: [caregiver, dependant]
-        rows:
-          type: array
-          items:
-            allOf:
-              - $ref: '#/components/schemas/VisitSummaryCounts'
-              - type: object
-                required: [personId, personName]
-                properties:
-                  personId:
-                    type: string
-                    format: uuid
-                  personName:
-                    type: string
-        totals:
-          $ref: '#/components/schemas/VisitSummaryCounts'
-    ExceptionKind:
-      type: string
-      enum: [missed, missing_checkout, failed_check]
-    VisitResolutionOutcome:
-      type: string
-      enum:
-        [
-          caregiver_absent,
-          family_cancelled,
-          dependant_unavailable,
-          device_or_network_issue,
-          visit_took_place,
-          verified_manually,
-          other,
-        ]
-    VisitResolution:
-      type: object
-      required: [id, visitScheduleId, outcome, note, resolvedBy, resolvedByName, resolvedAt]
-      properties:
-        id:
-          type: string
-          format: uuid
-        visitScheduleId:
-          type: string
-          format: uuid
-        outcome:
-          $ref: '#/components/schemas/VisitResolutionOutcome'
-        note:
-          type: string
-        resolvedBy:
-          type: string
-          format: uuid
-        resolvedByName:
-          type: string
-        resolvedAt:
-          type: string
-          format: date-time
-    ComplianceException:
-      type: object
-      required:
-        [
-          visitScheduleId,
-          scheduledStart,
-          scheduledEnd,
-          status,
-          caregiverId,
-          caregiverName,
-          dependantId,
-          dependantName,
-          checkinAt,
-          checkoutAt,
-          kinds,
-          failedChecks,
-          latestResolution,
-        ]
-      properties:
-        visitScheduleId:
-          type: string
-          format: uuid
-        scheduledStart:
-          type: string
-          format: date-time
-        scheduledEnd:
-          type: string
-          format: date-time
-        status:
-          type: string
-        caregiverId:
-          type: string
-          format: uuid
-        caregiverName:
-          type: string
-        dependantId:
-          type: string
-          format: uuid
-        dependantName:
-          type: string
-        checkinAt:
-          type: [string, 'null']
-          format: date-time
-        checkoutAt:
-          type: [string, 'null']
-          format: date-time
-        kinds:
-          type: array
-          items:
-            $ref: '#/components/schemas/ExceptionKind'
-        failedChecks:
-          type: array
-          items:
-            type: object
-            required: [attemptType, failureReason, count]
-            properties:
-              attemptType:
-                type: string
-              failureReason:
-                type: [string, 'null']
-              count:
-                type: integer
-        latestResolution:
-          oneOf:
-            - type: 'null'
-            - type: object
-              required: [outcome, note, resolvedByName, resolvedAt]
-              properties:
-                outcome:
-                  $ref: '#/components/schemas/VisitResolutionOutcome'
-                note:
-                  type: string
-                resolvedByName:
-                  type: string
-                resolvedAt:
-                  type: string
-                  format: date-time
-    ComplianceExceptionPage:
-      type: object
-      required: [period, total, items]
-      properties:
-        period:
-          $ref: '#/components/schemas/Period'
-        total:
-          type: integer
-          description: How many exceptions match, across every page.
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/ComplianceException'
-        nextCursor:
-          type: [string, 'null']
-    ComplianceAlertResponse:
-      type: object
-      required:
-        [
-          period,
-          raised,
-          acknowledged,
-          unacknowledged,
-          medianMinutesToAcknowledge,
-          p90MinutesToAcknowledge,
-          oldestUnacknowledgedSentAt,
-          bySupervisor,
-        ]
-      properties:
-        period:
-          $ref: '#/components/schemas/Period'
-        raised:
-          type: integer
-        acknowledged:
-          type: integer
-        unacknowledged:
-          type: integer
-        medianMinutesToAcknowledge:
-          type: [number, 'null']
-        p90MinutesToAcknowledge:
-          type: [number, 'null']
-        oldestUnacknowledgedSentAt:
-          type: [string, 'null']
-          format: date-time
-        bySupervisor:
-          type: array
-          items:
-            type: object
-            required: [userId, name, acknowledged, medianMinutesToAcknowledge]
-            properties:
-              userId:
-                type: string
-                format: uuid
-              name:
-                type: string
-              acknowledged:
-                type: integer
-              medianMinutesToAcknowledge:
-                type: [number, 'null']
-    ConsentState:
-      type: object
-      required: [status, grantedByName, grantedAt, revokedByName, revokedAt]
-      properties:
-        status:
-          type: string
-          enum: [active, revoked, none]
-        grantedByName:
-          type: [string, 'null']
-        grantedAt:
-          type: [string, 'null']
-          format: date-time
-        revokedByName:
-          type: [string, 'null']
-          description: Null for consents revoked before who revoked was recorded.
-        revokedAt:
-          type: [string, 'null']
-          format: date-time
-    ConsentRegisterRow:
-      type: object
-      required: [subjectType, subjectId, name, consents, upcomingVisitsWithoutConsent]
-      properties:
-        subjectType:
-          type: string
-          enum: [caregiver, dependant]
-        subjectId:
-          type: string
-          format: uuid
-        name:
-          type: string
-        consents:
-          type: object
-          required: [biometric_verification, audio_cognitive_monitoring]
-          properties:
-            biometric_verification:
-              $ref: '#/components/schemas/ConsentState'
-            audio_cognitive_monitoring:
-              $ref: '#/components/schemas/ConsentState'
-        upcomingVisitsWithoutConsent:
-          type: integer
-    TermsDocumentReport:
-      type: object
-      required: [document, currentVersion, activeUsers, acceptedCurrent, users]
-      properties:
-        document:
-          type: string
-          enum: [caregiver, family_member]
-        currentVersion:
-          type: string
-        activeUsers:
-          type: integer
-        acceptedCurrent:
-          type: integer
-        users:
-          type: array
-          description: Every active user of the app, those who haven't accepted the current version first.
-          items:
-            type: object
-            required: [userId, name, acceptedCurrent, lastAcceptedVersion, lastAcceptedAt]
-            properties:
-              userId:
-                type: string
-                format: uuid
-              name:
-                type: string
-              acceptedCurrent:
-                type: boolean
-              lastAcceptedVersion:
-                type: [string, 'null']
-              lastAcceptedAt:
-                type: [string, 'null']
-                format: date-time
-    AuditLogEntry:
-      type: object
-      required:
-        [id, createdAt, actorUserId, actorName, actorRole, action, entityType, entityId, metadata]
-      properties:
-        id:
-          type: string
-          format: uuid
-        createdAt:
-          type: string
-          format: date-time
-        actorUserId:
-          type: [string, 'null']
-          format: uuid
-          description: Null for the system (a scheduled job).
-        actorName:
-          type: [string, 'null']
-        actorRole:
-          type: [string, 'null']
-        action:
-          type: string
-          description: '`<entity>.<verb>`, e.g. `visit_schedule.update`, `consent.revoke`, `compliance.export`.'
-        entityType:
-          type: string
-        entityId:
-          type: [string, 'null']
-          format: uuid
-          description: Null for an action covering no single record, such as an export.
-        metadata:
-          type: [object, 'null']
-          description: What changed (non-sensitive fields as from/to; sensitive ones only as "changed").
-    AuditLogPage:
-      type: object
-      required: [period, items]
-      properties:
-        period:
-          $ref: '#/components/schemas/Period'
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AuditLogEntry'
-        nextCursor:
-          type: [string, 'null']
     Notification:
       type: object
       required: [id, type, recipientUserId]
@@ -3980,9 +1744,8 @@ components:
           type: [string, 'null']
           format: uuid
         recipientUserId:
-          type: [string, 'null']
+          type: string
           format: uuid
-          description: Null for a missed-visit alert, which is shared by every supervisor; any supervisor may acknowledge it.
         channel:
           type: [string, 'null']
         sentAt:

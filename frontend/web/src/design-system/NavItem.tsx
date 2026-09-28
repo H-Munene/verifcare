@@ -1,18 +1,17 @@
-import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
 import type { ReactNode } from 'react';
 import './components.css';
 
 export interface NavItemProps {
   label: ReactNode;
-  icon: IconSvgElement;
   active?: boolean;
   disabled?: boolean;
   onClick?: () => void;
 }
 
-// 32px height, 16px leading icon (Hugeicons, replacing the wireframe's placeholder squares),
-// selected state = blue-tint fill + blue text. The icon takes the row's text colour.
-export function NavItem({ label, icon, active, disabled, onClick }: NavItemProps) {
+// 32px height, 14px leading icon (a simple geometric placeholder square, per the wireframe's own
+// disclosed assumption - "Icons are simple geometric placeholders, not final iconography"),
+// selected state = blue-tint fill + blue text.
+export function NavItem({ label, active, disabled, onClick }: NavItemProps) {
   const classes = [
     'ds-nav-item',
     active ? 'ds-nav-item--active' : undefined,
@@ -22,13 +21,7 @@ export function NavItem({ label, icon, active, disabled, onClick }: NavItemProps
     .join(' ');
   return (
     <button type="button" className={classes} onClick={onClick} disabled={disabled}>
-      <HugeiconsIcon
-        icon={icon}
-        size={16}
-        strokeWidth={1.5}
-        className="ds-nav-item__icon"
-        aria-hidden
-      />
+      <span className="ds-nav-item__icon" aria-hidden="true" />
       <span className="ds-nav-item__label">{label}</span>
     </button>
   );

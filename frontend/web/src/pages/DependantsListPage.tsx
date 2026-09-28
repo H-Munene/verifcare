@@ -1,184 +1,111 @@
-import {
-  Calendar03Icon,
-  Camera01Icon,
-  CheckmarkBadge01Icon,
-  UserIcon,
-  UserSquareIcon,
-} from '@hugeicons/core-free-icons';
-import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
-import type { CheckinPhotoStatus, DependantStatus, ListDependantsParams } from '../api/dependants';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../api/useApi';
-import { Badge, type BadgeTone } from '../design-system/Badge';
+import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
-import { FilterBar, FilterMenu } from '../design-system/FilterMenu';
-import { sortState } from '../design-system/sortState';
-import { SortableTh, TableFrame, Th } from '../design-system/Table';
-import { useCursorPages } from '../hooks/useCursorPages';
-import { useListParams } from '../hooks/useListParams';
+import { Switch } from '../design-system/Switch';
 import './DependantsListPage.css';
-import { TableSkeleton } from '../design-system/Skeleton';
 
-type DependantSort = NonNullable<ListDependantsParams['sort']>;
-
-const STATUS_OPTIONS = [
-  { value: 'active', label: 'Active' },
-  { value: 'deactivated', label: 'Deactivated' },
-];
-
-const PHOTO_META: Record<CheckinPhotoStatus, { label: string; tone: BadgeTone }> = {
-  ready: { label: 'Has photo', tone: 'success' },
-  awaiting_review: { label: 'Awaiting review', tone: 'neutral' },
-  missing: { label: 'No photo', tone: 'danger' },
-};
-
-const PHOTO_OPTIONS = Object.entries(PHOTO_META).map(([value, { label }]) => ({ value, label }));
-
-const SORTS: readonly DependantSort[] = ['name', '-name', 'dob', '-dob'];
-
-// Filters and sort live in the URL (2026-09-26, the new table filters), so a reload or a shared
-// link keeps them, and the server applies them, so they cover the whole list, not just a page.
 export function DependantsListPage() {
   const { dependants } = useApi();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const params = useListParams();
-  const status = params.get('status') as DependantStatus | '';
-  const photo = params.get('photo') as CheckinPhotoStatus | '';
-  const sort = params.oneOf('sort', SORTS, 'name');
-  const pages = useCursorPages(`${status}|${photo}|${sort}`);
-  const { directionOf, toggled } = sortState<'name' | 'dob'>(sort);
+  // Simple back/forward cursor history - this list is small and bounded (cursor pagination, per
+  // pagination.ts's design), so a plain stack is enough rather than a full pagination library.
+  const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([undefined]);
+  const currentCursor = cursorStack[cursorStack.length - 1];
 
   const query = useQuery({
-    queryKey: ['dependants', { status, photo, sort, cursor: pages.cursor }],
-    queryFn: () =>
-      dependants.listDependants({
-        status: status || undefined,
-        photo: photo || undefined,
-        sort,
-        cursor: pages.cursor,
-        limit: 20,
-      }),
+    queryKey: ['dependants', currentCursor],
+    queryFn: () => dependants.listDependants({ cursor: currentCursor, limit: 20 }),
   });
-  const filtered = Boolean(status || photo);
+
+  const toggleMonitoring = useMutation({
+    mutationFn: (params: { id: string; enabled: boolean }) =>
+      dependants.updateDependant(params.id, { cognitiveMonitoringEnabled: params.enabled }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dependants'] });
+    },
+  });
 
   return (
     <div>
       <div className="dependants-page__toolbar">
-        <div className="dependants-page__toolbar-actions">
-          <Button
-            variant="cta-pill"
-            onClick={() => {
-              void navigate('/dependants/new');
-            }}
-          >
-            + Register Dependant
-          </Button>
-        </div>
+        <h1 className="dependants-page__title">Dependants</h1>
+        <Button
+          variant="cta-pill"
+          onClick={() => {
+            void navigate('/dependants/new');
+          }}
+        >
+          + Register Dependant
+        </Button>
       </div>
 
-      <FilterBar onClear={filtered ? () => params.clear(['status', 'photo']) : undefined}>
-        <FilterMenu
-          label="Status"
-          icon={CheckmarkBadge01Icon}
-          value={status}
-          allLabel="All statuses"
-          options={STATUS_OPTIONS}
-          onChange={(value) => params.set('status', value)}
-        />
-        <FilterMenu
-          label="Photo"
-          icon={Camera01Icon}
-          value={photo}
-          allLabel="Any photo status"
-          options={PHOTO_OPTIONS}
-          onChange={(value) => params.set('photo', value)}
-        />
-      </FilterBar>
-
-      {query.isLoading ? <TableSkeleton columns={5} /> : null}
+      {query.isLoading ? <p>Loading...</p> : null}
       {query.isError ? <p>Failed to load dependants.</p> : null}
 
       {query.data ? (
         <>
-          <TableFrame>
-            <table className="ds-table ds-table--table-cell">
-              <thead>
-                <tr>
-                  <SortableTh
-                    icon={UserIcon}
-                    direction={directionOf('name')}
-                    onSort={() => params.set('sort', toggled('name'))}
-                  >
-                    Name
-                  </SortableTh>
-                  <SortableTh
-                    icon={Calendar03Icon}
-                    direction={directionOf('dob')}
-                    onSort={() => params.set('sort', toggled('dob'))}
-                  >
-                    Date of birth
-                  </SortableTh>
-                  <Th icon={UserSquareIcon}>Gender</Th>
-                  <Th icon={Camera01Icon}>Photo</Th>
-                  <Th icon={CheckmarkBadge01Icon}>Status</Th>
+          <table className="ds-table ds-table--table-cell">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>DOB</th>
+                <th>Gender</th>
+                <th>Cognitive Monitoring</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {query.data.items.map((dependant) => (
+                <tr
+                  key={dependant.id}
+                  className="dependants-page__row"
+                  onClick={() => {
+                    void navigate(`/dependants/${dependant.id}`);
+                  }}
+                >
+                  <td>{dependant.fullName}</td>
+                  <td>{dependant.dob}</td>
+                  <td>{dependant.gender ?? '-'}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <Switch
+                      checked={dependant.cognitiveMonitoringEnabled}
+                      disabled={toggleMonitoring.isPending}
+                      onChange={(enabled) => toggleMonitoring.mutate({ id: dependant.id, enabled })}
+                    />
+                  </td>
+                  <td>
+                    <Badge tone={dependant.status === 'active' ? 'success' : 'neutral'}>
+                      {dependant.status}
+                    </Badge>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {query.data.items.map((dependant) => (
-                  <tr
-                    key={dependant.id}
-                    className="ds-table__row--link"
-                    onClick={() => {
-                      void navigate(`/dependants/${dependant.id}`);
-                    }}
-                  >
-                    <td>
-                      <Link
-                        to={`/dependants/${dependant.id}`}
-                        className="ds-table__link"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {dependant.fullName}
-                      </Link>
-                    </td>
-                    <td>{dependant.dob}</td>
-                    <td>{dependant.gender ?? '-'}</td>
-                    <td>
-                      <Badge tone={PHOTO_META[dependant.checkinPhotoStatus].tone}>
-                        {PHOTO_META[dependant.checkinPhotoStatus].label}
-                      </Badge>
-                    </td>
-                    <td>
-                      <Badge tone={dependant.status === 'active' ? 'success' : 'neutral'}>
-                        {dependant.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-                {query.data.items.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="ds-table__empty">
-                      {filtered
-                        ? 'No dependants match these filters.'
-                        : 'No dependants registered yet.'}
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </TableFrame>
+              ))}
+              {query.data.items.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="dependants-page__empty">
+                    No dependants registered yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
 
           <div className="dependants-page__pagination">
-            <Button disabled={!pages.canGoBack} onClick={pages.back}>
+            <Button
+              disabled={cursorStack.length <= 1}
+              onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
+            >
               Previous
             </Button>
             <Button
               disabled={!query.data.nextCursor}
-              onClick={() => {
-                if (query.data.nextCursor) {
-                  pages.next(query.data.nextCursor);
-                }
-              }}
+              onClick={() =>
+                setCursorStack((stack) => [...stack, query.data?.nextCursor ?? undefined])
+              }
             >
               Next
             </Button>

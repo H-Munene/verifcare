@@ -1,23 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Registration's Exact location step starts the map at the phone's current position. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- CAMERA is deliberately NOT declared: image_picker hands off to the system camera app via
-         an intent, which needs no permission - but once CAMERA is declared, Android refuses that
-         intent unless the permission is also granted at runtime. -->
     <application
         android:label="family_member"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-        <!-- Google Maps SDK for Android key - per architecture.md, a separate key for this app,
-             restricted to its package name (com.mzazicare.family_member) and signing
-             certificate. Replace the placeholder before running on a device; the app builds
-             without it, the registration map just won't render tiles. -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyDiu92F2OBGJH63kcoaZYRH28_qPSqhX1k" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

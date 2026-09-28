@@ -1,5 +1,3 @@
-import { RekognitionClient } from '@aws-sdk/client-rekognition';
-import { S3Client } from '@aws-sdk/client-s3';
 import type { ErrorRequestHandler } from 'express';
 import serverlessHttp from 'serverless-http';
 import { createApp } from './app.js';
@@ -7,11 +5,6 @@ import { createCognitoAdmin } from './auth/cognitoAdmin.js';
 import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
 import { loadConfig } from './config.js';
-import { createBiometricFaceCollection } from './db/biometricFaceCollection.js';
-import { createBiometricStorage } from './db/biometricStorage.js';
-import { createCheckinFrameStorage } from './db/checkinFrameStorage.js';
-import { createCheckinPhotoValidator } from './db/checkinLiveness.js';
-import { createFaceMatcher } from './db/faceMatch.js';
 import { getLambdaDb, invalidateLambdaDb } from './db/lambdaDb.js';
 import { isPostgresAuthError } from './db/postgresErrors.js';
 import { errorHandler } from './errors.js';
@@ -32,34 +25,6 @@ const requireAuth = createRequireAuth(verifier);
 const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);
 const cognitoAdmin = createCognitoAdmin(config.userPoolId);
 
-// Biometric enrollment storage (HEZ-31) - S3 for the presigned upload, Rekognition for
-// quality_score. Both clients are constructed with no explicit region/credentials, same as
-// auth/cognitoAdmin.ts's CognitoIdentityProviderClient - the Lambda execution environment supplies
-// both via its own IAM role and AWS_REGION.
-const rekognitionClient = new RekognitionClient({});
-const s3Client = new S3Client({});
-const biometricStorage = createBiometricStorage({
-  s3Client,
-  rekognitionClient,
-  bucketName: config.biometricEnrollmentsBucketName,
-});
-// HEZ-85's enrollment-uniqueness check - a separate concern from biometricStorage's DetectFaces
-// quality scoring (see db/biometricFaceCollection.ts's header comment), sharing the same
-// Rekognition client rather than constructing a second one.
-const biometricFaceCollection = createBiometricFaceCollection({
-  rekognitionClient,
-  collectionId: config.biometricFacesCollectionId,
-  bucketName: config.biometricEnrollmentsBucketName,
-});
-
-// HEZ-34's check-in flow - shares the same rekognitionClient/s3Client instances above.
-const checkinFrameStorage = createCheckinFrameStorage({
-  s3Client,
-  bucketName: config.checkinLivenessFramesBucketName,
-});
-const checkinPhotoValidator = createCheckinPhotoValidator({ rekognitionClient });
-const checkinFaceMatcher = createFaceMatcher({ rekognitionClient });
-
 // resolveDb (not db) - see app.ts's AppDependencies.resolveDb comment for why this needs to be a
 // per-request resolver createApp() wires in itself, before its routers, rather than middleware
 // bolted on afterward here (that was the actual bug, fixed 2026-09-14: middleware added to an
@@ -69,18 +34,7 @@ const app = createApp({
   requireAuth,
   requireVerifiedIdentity,
   cognitoAdmin,
-  biometricStorage,
-  biometricFaceCollection,
   resolveDb: getLambdaDb,
-  geofenceAccuracyThresholdMeters: config.geofenceAccuracyThresholdMeters,
-  checkinSessionTokenTtlSeconds: config.checkinSessionTokenTtlSeconds,
-  checkinLivenessFramesBucketName: config.checkinLivenessFramesBucketName,
-  biometricEnrollmentsBucketName: config.biometricEnrollmentsBucketName,
-  checkinLivenessMatchThresholdPercent: config.checkinLivenessMatchThresholdPercent,
-  checkinPhotoValidator,
-  checkinFaceMatcher,
-  checkinFrameStorage,
-  checkinCoPresenceWindowSeconds: config.checkinCoPresenceWindowSeconds,
 });
 
 // Best-effort warm-up: starts the Secrets Manager round trip during the Lambda INIT phase,
