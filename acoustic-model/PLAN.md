@@ -120,6 +120,9 @@ The deployed service will receive one recording at a time. So each feature funct
 
 11. **Age at recording (added 2026-09-28, decision D6).** DementiaNet's no-dementia group was selected for age, reaching 85–90+ without dementia, and the README describes the control clips' timing two inconsistent ways. Determine age at recording by class from the metadata sheet linked in the README, and how the clip-name suffix maps to it. Where ages can't be determined, record it as a limitation. Propose options and stop for the developer's decision.
     - **Found 2026-09-28** (`age_summary.md`): there are no recording dates, only buckets. Dementia `_0/_5/_10/_15` = after onset, and 0–5, 5–10, 10–15 years before onset. Control `_1/_2/_3` = under 55, 55–70, over 70, established by matching each control's URL columns against the files on disk (55 of 61 exact). Controls: 98 clips under 55, 100 at 55–70, 126 over 70. Dementia: only 8 clips wholly under 55; the median age-range midpoint is 72.
+    - **D6 decided 2026-09-28: option A.** The primary dataset keeps clips **wholly aged 55 or over**, in both classes. A dementia clip is kept only if the lower end of its age range is at least 55. So the band-crossing clips whose range crosses 55 are dropped, those crossing 70 are kept (they are wholly 55+), and clips with an unknown age are dropped, because they can't be shown to qualify. Control `_1` (under 55) clips are dropped. Rule in `data_processing/eligibility.py`.
+      - (The counts first given for option A used an age-range midpoint rule; the developer's stricter "wholly 55+" rule costs 4 more dementia clips from 2 people before the 30 s minimum, and 3 clips from 1 person after it.)
+    - **Option B (both classes wholly over 70) is pre-registered as a sensitivity analysis only** (5.2): the same frozen model, evaluated on that subset, reported whatever it shows. It is not a separate model and is not used for selection. No reweighting (option D is rejected).
 
 ### Outputs (`results/01_data_collection/`)
 
@@ -141,13 +144,15 @@ Name normalisation and duplicate flagging; `subject_id` stable across repeated r
 
 1. **Standardise:** resample to 16 kHz and convert to mono. Record the original format of each file.
 2. **Trim only the start and end.** Remove leading and trailing silence. **Never remove silences inside the recording** — internal pauses are the signal this model depends on.
+   - **Trimming rule (pre-registered 2026-09-28, before any feature extraction):** cut at the pause detector's own first speech onset and last speech offset (3.2), on the 16 kHz mono audio. Reason: one definition of silence across the pipeline. A second rule (e.g. 60 dB below the peak) would disagree with the detector about where speech starts, so the 30 s minimum would be judged on a different span from the one the pause features describe.
 3. **Minimum usable duration.** Pause statistics are unreliable on very short recordings. Pick a minimum duration after trimming, justify it (for example, the length needed to observe a reasonable number of pauses), write it in `config.py` *before* looking at which files it excludes, then report how many files **and subjects** per class it removes. If exclusions are lopsided between classes, or leave a class too small, stop and report before continuing.
    - **Decided 2026-09-28: 30 s after trimming**, pre-registered before any duration was measured. At typical spontaneous-speech rates, 30 s gives roughly 10 or more pauses longer than 180 ms, enough for a usable median pause duration.
    - **This is also a deployment requirement:** the app must capture at least 30 s of speech after trimming, and the service rejects anything shorter.
    - Stage 2's report gives the files **and** subjects this excludes, per class (developer instruction at Checkpoint 1).
+   - **Measured 2026-09-28** (`results/02_data_processing/dataset_sizes.md`): at clip level the minimum is even (22 % of clips in each class). At subject level it isn't: 9 of 84 dementia people (10.7 %) lose every clip, against 5 of 131 controls (3.8 %), because dementia people have fewer clips each. This was reported to the developer under the stop rule above.
    - **Maximum duration (pre-registered 2026-09-28, before any feature extraction): every recording is truncated to its first 90 s after trimming, in both classes.** Reason: Stage 1 found that DementiaNet clips are capped at 90 s, a cap only dementia clips exceed (7 clips, up to 162 s). A class-dependent maximum length could let duration, or any feature that drifts with duration, stand in for the label. Truncating both classes the same way removes that difference. The |r| > 0.2 duration check in 3.3 stays. The 60 s pause-annotation segment (10–70 s after the trimmed start) lies inside the kept 90 s. Order: trim, then apply the 30 s minimum, then truncate.
 4. **Speaker isolation**, only if D1 requires it (see decisions table).
-5. **Age restriction**, as decided in D6 (see decisions table and Stage 1's `age_summary.md`).
+5. **Age restriction (D6 = option A):** keep only clips wholly aged 55 or over (Stage 1 step 11). Label timing (D7) is applied here too, once decided.
 6. **Train/test split.** Not created until D1 and D6 are decided, because excluding recordings (D1 option c, or an age restriction) can remove whole subjects and would change the split. Create a subject-level split, stratified by class, about 80 % train / 20 % test, with a fixed seed. Check and report class proportions in both parts. Save it to `splits.csv`.
 7. **Cross-validation folds.** On the training portion only, create 5 folds with `StratifiedGroupKFold` (grouped by subject, fixed seed) and save them to `cv_folds.csv`. Every later stage reads folds from this file instead of regenerating them, so all comparisons use identical folds.
 8. **Class balance decision.** Using the recording-level balance measured in Stage 1, decide how imbalance is handled: class weights, or oversampling (SMOTE) applied inside each training fold only. Record the choice and the reason (decision D2).
@@ -245,6 +250,11 @@ This is new code and the biggest technical risk, so it is validated against huma
      - For each subject with 2 or more recordings, take every pair of their recordings and compute the relative difference |x_i − x_j| ÷ ((|x_i| + |x_j|) ÷ 2). The symmetric denominator is used because neither clip is the reference; pairs where both values are 0 are skipped. The subject's value is the median over their pairs.
      - The feature's benchmark is the median of those subject values.
      - Flag the feature if |median relative change| under bandpass alone exceeds its benchmark.
+   - **Same age band where possible (developer, D6 review 2026-09-28).** Pairs are drawn in this order, using the first level with at least 20 training subjects:
+     1. pairs of clips in the same age band (55–70 or over 70);
+     2. otherwise, all of a subject's pairs (under D6 option A, only 55–70 against over-70, since under-55 clips are gone);
+     3. otherwise, the 10 % fallback below.
+     Measured before the split: only 14 people (all dementia) have a same-band pair after the 30 s minimum, about 11 in the training portion. Controls can never have one, because DementiaNet samples each control once per band. So level 2 is expected, and the report states which level was used.
    - **Fallback: 10 %**, used only if fewer than 20 training subjects have 2 or more recordings. A median over fewer people is itself too unstable to serve as a benchmark. The 10 % reasoning stands for that case: a 100–7000 Hz band keeps essentially all the speech energy an intensity-based detector uses, so a larger shift points to the microphone.
    - Caveat, to state next to the result: a person's own clips can be decades apart (control clips span under-55 to over-70), so the benchmark includes ageing and changing recording conditions. That makes it a lenient benchmark: a flag means the shift is large, and no flag doesn't prove the feature is robust.
 5. **Recording-duration dependence (added 2026-09-28):** correlate each feature with trimmed recording duration at subject level (both averaged per subject). Pre-stated rule: any feature with |r| > 0.2 is flagged and tracked into 5.1, not removed. Reason: timing statistics are estimated more stably, and can drift systematically, as recordings get longer, so a class difference in recording length could otherwise pass for a class difference in speech. The developer's cited precedent: the ADReSS challenge baseline (Luz et al. 2020).
@@ -316,6 +326,13 @@ Learned steps are fit inside folds only; calibration receives subject groups; th
 3. **Uncertainty:** there are no folds on a single test set, so report 95 % confidence intervals by bootstrap resampling of subjects (people, not recordings).
 4. Afterwards, once and for reporting only: the most severe robustness condition applied to the test set.
 5. No changes after seeing the result. A disappointing result is a valid finding.
+6. **Pre-registered sensitivity analysis (D6 option B, 2026-09-28):** the same frozen model, evaluated on the test clips **wholly over 70** in both classes (`eligibility.over_70_sensitivity`). Same metrics and subject-bootstrap CIs, reported next to the main result whatever it shows. Not a separate model; not used for selection or the threshold. It will have few test subjects (about 33 dementia people are over 70 after the 30 s minimum, so roughly 7 in the test set), so its CIs will be wide, and that is stated.
+7. **Pre-symptomatic score trajectory (descriptive only; proposed 2026-09-28 with D7, never used for training, selection or the threshold):** does the model's score rise as symptom onset approaches?
+   - Each dementia clip in buckets 15, 10, 5 and 0 is scored by a model that **never saw that person**: out-of-fold models from Stage 4's CV for training-portion subjects, the final model for test subjects. Under D7 option (b), the 5–15-year clips never enter training at all, so none of them has been seen by the model that scores it.
+   - Report, per bucket: clip and subject counts, and the median calibrated score with a 95 % subject-bootstrap CI, drawn against the controls' out-of-fold score distribution as a reference.
+   - One trend statistic: Spearman's ρ between years before onset (−15, −10, −5, 0) and score, clip level, with a subject-bootstrap CI.
+   - One within-person view: for people with clips in 2 or more buckets, the share whose nearer-to-onset clip scores higher.
+   - No significance-driven conclusions. Caveat, stated with the result: earlier buckets are also older recordings (older equipment, a different recording era) and younger ages, so a trend can't be attributed to cognition alone.
 
 ### 5.3 Final report
 
@@ -338,7 +355,8 @@ Test-set guard: only the final-evaluation module can load test data.
 | D3 | Add logistic regression as a baseline alongside RF, SVM and XGBoost | Stage 4 scoping |
 | D4 | Whether to use Kenyan-language corpora for the language-shift check (check licences first) | Before 5.1 |
 | D5 | Operating threshold: favour catching more cases or fewer false alarms. Needs supervisor input. | Before 5.2 |
-| D6 | Age at recording differs by class: controls were deliberately sampled below 55, at 55–70 and over 70, while dementia clips are mostly over 55 (Stage 1 step 11). Options are in `docs/ml-dev-log.md`, for example restricting both classes to a comparable age range. | Checkpoint 1 (before the split) |
+| D6 | Age at recording differs by class: controls were deliberately sampled below 55, at 55–70 and over 70, while dementia clips are mostly over 55 (Stage 1 step 11). **Decided 2026-09-28:** option A, both classes wholly 55+ (primary); option B, over 70, as a 5.2 sensitivity analysis only; no reweighting. | Checkpoint 1 (before the split) |
+| D7 | Label timing: dementia clips from 5–15 years before symptom onset may carry no signs yet. (a) Keep all option-A clips (after the 30 s minimum: dementia 86 clips / 64 people, controls 178 / 118), or (b) keep only dementia clips after onset or 0–5 years before (dementia 49 / 40, controls unchanged). Counts are in `results/02_data_processing/dataset_sizes.md`; the Stage 5 trajectory analysis (5.2 step 7) is descriptive either way. | Before the split |
 
 ---
 
@@ -361,7 +379,9 @@ The ML development specification and the report currently describe a different f
 5. **Multiple speakers:** pause features assume the target speaker is isolated (D1).
 6. **Sample size:** whatever Stage 1 measures; small samples mean large fold-to-fold variation.
 7. **Label timing (added 2026-09-28):** labels describe the person, not the recording. A public figure's recordings may pre-date the onset of their dementia, so some "dementia" recordings may carry no signs of it. That is label noise the data can't resolve.
-8. **Demographics (added 2026-09-28, corrected the same day):** the metadata sheet gives birth year and gender, but there are no recording dates. So age at recording is known only as a bucket or range (Stage 1 step 11), and it differs by class unless D6 restricts it. Both age and sex affect voice and timing features.
+8. **Demographics (added 2026-09-28, corrected the same day):** the metadata sheet gives birth year and gender, but there are no recording dates. So age at recording is known only as a bucket or range (Stage 1 step 11). D6 restricts both classes to 55+, but **residual age confounding within the bands remains**: the classes can still differ in age inside 55–70 and over 70, and exact ages are unknown. Both age and sex affect voice and timing features.
+9. **Filename-only control ages (added 2026-09-28):** 70 of 131 controls are missing from the metadata sheet, so their age band rests only on the file-name suffix convention. That convention was checked on the 61 controls in the sheet: 55 match exactly and 6 don't. 5 of those 6 are only missing a clip the sheet lists, and 1 genuinely conflicts. So a small share of filename-only bands may be wrong.
+10. **Calibrated probabilities reflect this dataset, not the real world (added 2026-09-28):** calibration is fit on this dataset's class balance (about a third dementia by subject under D6). Real-world prevalence among caregiver-visited dependants will differ, so the probability is a relative screening score, not a real-world risk. A prior-shift adjustment would need a known deployment prevalence.
 
 ---
 
@@ -371,7 +391,7 @@ Raised in the scoping review and deliberately not acted on yet. Each is decided 
 
 - **Stage 4, selection rule:** fold-paired t-tests on CV scores are anti-conservative, because the training portions of different folds overlap. The Nadeau-Bengio corrected resampled t-test is the standard correction and is recommended in place of the plain t-test.
 - **Stage 3.2, annotation eligibility:** requiring 70 s of trimmed audio favours longer recordings. Report the sampled recordings' durations next to the dataset's, so any bias is visible.
-- **Stage 4, calibration with D2's weights:** class-balanced training weights shift a model's raw probabilities towards 50 %. If the calibrator is also fit with class balancing, the output reflects a 50 % prior, not the real prevalence. Decide at Stage 4 scoping whether calibration uses only the per-subject weights (1 ÷ clips), so every person counts equally but the class balance is left as it is.
+- **Stage 4, calibration with D2's weights — decided 2026-09-28:** class-balanced training weights shift a model's raw probabilities towards 50 %. So the calibrator is fit with the **per-person weights only** (1 ÷ that subject's clips), without class balancing. Every person counts equally, and the calibrated output reflects the dataset's own class balance rather than a forced 50 % prior.
 
 ---
 
