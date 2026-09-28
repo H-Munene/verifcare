@@ -1,0 +1,72 @@
+.register-caregiver-page {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.register-caregiver-page__title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+  text-align: center;
+}
+
+.register-caregiver-page .ds-stepper {
+  max-width: 420px;
+  margin: 20px auto 8px;
+}
+
+.register-caregiver-page__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.register-caregiver-page__section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.register-caregiver-page__section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.register-caregiver-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.register-caregiver-page__name-row {
+  display: flex;
+  gap: 16px;
+}
+
+.register-caregiver-page__name-row > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.register-caregiver-page__hint {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  margin: 0;
+}
+
+.register-caregiver-page__error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-tint);
+  border-radius: var(--radius-default);
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.register-caregiver-page__step-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

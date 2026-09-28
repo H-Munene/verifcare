@@ -1,0 +1,226 @@
+.compliance__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 20px;
+}
+
+.compliance__period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The Overview's date field, as a month picker. A select rather than <input type="month">, which
+   some desktop browsers still show as a bare text box. */
+.compliance__month {
+  height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-default);
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-primary);
+  background: var(--color-page-background);
+  cursor: pointer;
+}
+
+.compliance__month:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.compliance__as-of {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.compliance__exports {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.compliance__exports .ds-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compliance__export-error {
+  font-size: 13px;
+  color: var(--color-danger-text);
+}
+
+.compliance__subbar {
+  display: flex;
+  margin-bottom: 16px;
+}
+
+.compliance__count {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.compliance__message {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-border-structural);
+}
+
+.compliance__tiles-skeleton {
+  display: block;
+  margin-bottom: 24px;
+}
+
+.compliance__pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Numbers line up on the right, digits the same width, so columns compare at a glance. */
+.compliance__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.compliance__num .ds-table__sort {
+  margin-left: auto;
+}
+
+.compliance__nowrap {
+  white-space: nowrap;
+}
+
+.compliance__zero {
+  color: var(--color-ink-muted);
+}
+
+/* A count needing attention: the amber state icon beside the number, never colour alone. */
+.compliance__flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
+}
+
+.compliance__flag svg {
+  color: var(--color-state-awaiting-icon);
+}
+
+/* A state: its icon carries the tone, the text stays in ink (text never wears a state colour). */
+.compliance__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-ink-primary);
+  white-space: nowrap;
+}
+
+.compliance__state--ok svg {
+  color: var(--color-state-checked-in-icon);
+}
+
+.compliance__state--problem svg {
+  color: var(--color-state-no-checkin-icon);
+}
+
+.compliance__state--muted svg {
+  color: var(--color-ink-muted);
+}
+
+.compliance__resolution {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.compliance__by {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.compliance__arrow {
+  color: var(--color-ink-muted);
+}
+
+.compliance__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.compliance__kind {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: var(--radius-tag);
+  font-size: 12px;
+  color: var(--color-ink-default);
+  white-space: nowrap;
+}
+
+.compliance__details {
+  max-width: 360px;
+  font-size: 13px;
+  color: var(--color-ink-default);
+}
+
+/* A button that reads as the row's link text (the date, "Visit"). */
+.compliance__row-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.compliance__expand {
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.compliance__expand:hover {
+  color: var(--color-accent);
+}
+
+.compliance__expand:focus-visible,
+.compliance__row-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.compliance__expanded td {
+  background: var(--color-surface);
+}
+
+.compliance__expanded pre {
+  margin: 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-ink-default);
+}

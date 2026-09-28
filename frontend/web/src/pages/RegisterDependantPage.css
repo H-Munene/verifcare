@@ -1,6 +1,15 @@
 .register-dependant-page {
-  max-width: 640px;
+  /* Wider than the other steps strictly need, to give the Location step's side-by-side
+     dropdowns + map (components/LocationSelector.tsx) enough room without cramping it. */
+  max-width: 900px;
   margin: 0 auto;
+}
+
+.register-dependant-page__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 
 .register-dependant-page__title {
@@ -9,6 +18,14 @@
   font-weight: 500;
   color: var(--color-ink-primary);
   text-align: center;
+}
+
+/* The edit-mode Save button sits at the far right of the title row without pulling the title
+   itself off-center - absolutely positioned against the row rather than a flex sibling, since a
+   flex-based "space-between" would shift the centered title left by half the button's width. */
+.register-dependant-page__title-row .ds-button {
+  position: absolute;
+  right: 0;
 }
 
 .register-dependant-page .ds-stepper {
@@ -28,7 +45,11 @@
   gap: 8px;
 }
 
-.register-dependant-page__step-actions > *:only-child {
+/* Pushes the lone primary action (Next step/Save, on the very first step with no Back button yet)
+   to the far right. Scoped to the primary button specifically, not just ":only-child" - the Photo
+   step hides its own second button too, leaving Back as the sole child there, and Back must stay
+   on the far left in that case rather than getting shoved right by the same rule. */
+.register-dependant-page__step-actions > .ds-button--primary:only-child {
   margin-left: auto;
 }
 
@@ -50,29 +71,36 @@
   gap: 6px;
 }
 
+.register-dependant-page__name-row {
+  display: flex;
+  gap: 16px;
+}
+
+.register-dependant-page__name-row > * {
+  flex: 1;
+  /* Same flexbox min-width:auto overflow fix as FamilyMemberResolver.css's identical row pattern -
+     latent here too (a narrower viewport could overflow this page the same way the modal did). */
+  min-width: 0;
+}
+
+/* .ds-input's own height is a fixed single-line control height (components.css) - overridden here
+   since a multi-row textarea needs to actually show its rows, not be clipped to one line's worth. */
+.register-dependant-page__textarea {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.register-dependant-page__resolution-hint {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
 .register-dependant-page__geofence {
   display: flex;
   gap: 16px;
   align-items: flex-start;
-}
-
-.register-dependant-page__map-placeholder {
-  flex: 1;
-  height: 160px;
-  border-radius: var(--radius-default);
-  border: 1px solid var(--color-border-structural);
-  background: repeating-linear-gradient(
-    45deg,
-    var(--color-border-divider),
-    var(--color-border-divider) 10px,
-    #ffffff 10px,
-    #ffffff 20px
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: var(--color-ink-muted);
 }
 
 .register-dependant-page__geofence-fields {
@@ -88,4 +116,32 @@
   background: var(--color-danger-tint);
   border-radius: var(--radius-default);
   padding: 8px 10px;
+}
+
+.register-dependant-page__step-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  text-align: right;
+}
+
+.register-dependant-page__current-photo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.register-dependant-page__current-photo img {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--color-surface);
+}
+
+.register-dependant-page__current-photo-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink-primary);
 }

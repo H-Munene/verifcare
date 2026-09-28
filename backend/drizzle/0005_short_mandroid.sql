@@ -1,0 +1,1 @@
+ALTER TABLE "verification_events" ADD COLUMN "session_token_issued_at" timestamp with time zone;
