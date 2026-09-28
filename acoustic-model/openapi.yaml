@@ -21,8 +21,9 @@ info:
 
     This is explicitly a draft, not a settled contract: `acoustic-model/` has no implementation
     yet. Its language (Python) and packaging (container-image Lambda) were confirmed 2026-09-09 -
-    see `docs/project-state.md` - but the exact audio-feature-extraction library/framework is still
-    open. Linear HEZ-44, "Define the internal HTTP contract" (milestone "4. Acoustic ML Service"),
+    see `docs/project-state.md`. Features, as of the 2026-09-28 redo: language-independent pausing/timing
+    features from a custom intensity-based pause detector, plus a small eGeMAPS subset via openSMILE
+    (voiced/unvoiced timing, jitter, shimmer, HNR). No transcription, and no language-specific features. Linear HEZ-44, "Define the internal HTTP contract" (milestone "4. Acoustic ML Service"),
     is where this gets finalized once the function is actually scaffolded - update this file then
     rather than treating it as frozen. (HEZ-49, "Health check endpoint," is worth reconsidering
     at that point too: Lambda has no persistent process to health-check the way an ECS task did,
@@ -91,4 +92,6 @@ paths:
                     type: string
                   scoringFailureReason:
                     type: string
-                    description: Set only when `riskScore` is `null` - why scoring couldn't complete (e.g. `audio_too_short`, `unintelligible`, `unsupported_format`). `api` should still write the `audio_records` row either way, leaving `risk_score`/`model_version` null on failure.
+                    description: |
+                      Set only when `riskScore` is `null` - why scoring couldn't complete (e.g. `audio_too_short`, `unintelligible`, `unsupported_format`). `api` should still write the `audio_records` row either way, leaving `risk_score`/`model_version` null on failure.
+                      `audio_too_short` means under 30 s of speech after trimming leading and trailing silence. That minimum was pre-registered for the language-independent model (2026-09-28), because pause statistics are unreliable on shorter recordings. The caregiver app should therefore capture well over 30 s.
