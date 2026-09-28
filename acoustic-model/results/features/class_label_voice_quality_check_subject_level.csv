@@ -1,4 +1,0 @@
-voice_quality_feature,n,point_biserial_r,point_biserial_p,point_biserial_p_bonferroni_family,point_biserial_p_bonferroni_strict,mannwhitney_p,mannwhitney_p_bonferroni_family,mannwhitney_p_bonferroni_strict,mannwhitney_rank_biserial
-jitterLocal_sma3nz_amean,215,0.05688422851222371,0.40659736394504326,1.0,1.0,0.296625887689545,0.889877663068635,1.0,-0.0845147219193021
-shimmerLocaldB_sma3nz_amean,215,0.04654711098901524,0.4971987147530826,1.0,1.0,0.3753957339800895,1.0,1.0,-0.07179207560886947
-HNRdBACF_sma3nz_amean,215,-0.011618177139931555,0.8655067734675217,1.0,1.0,0.6218713474928992,1.0,1.0,0.03998545983278812

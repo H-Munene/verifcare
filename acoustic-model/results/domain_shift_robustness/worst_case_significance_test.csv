@@ -1,2 +1,0 @@
-worst_case_condition,metric,mean_diff_worst_minus_clean,t_stat,p_value,n_family,significant_at_0.05,roc_auc_clean_mean,roc_auc_worst_mean,f1_clean_mean,f1_worst_mean
-bandpass_pink_10db,roc_auc,-0.06762551174315881,-3.2397978062769197,0.03168002624594251,1,True,0.6426596279537456,0.5750341162105868,0.5268764852943353,0.4053127179725645

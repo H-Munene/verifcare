@@ -1,2 +1,0 @@
-condition,roc_auc_mean,roc_auc_std,f1_mean,f1_std,realized_snr_db_mean,realized_snr_db_std,clean_roc_auc_mean
-bandpass_pink_10db_corrected,0.5400452488687782,0.065624306111124,0.40980939001513106,0.047468095246687596,10.0,1.3155555970410114e-15,0.6426596279537456
