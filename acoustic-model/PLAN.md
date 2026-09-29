@@ -365,6 +365,7 @@ Learned steps are fit inside folds only; calibration receives subject groups; th
    - One within-person view: for people with clips in 2 or more buckets, the share whose nearer-to-onset clip scores higher.
    - No significance-driven conclusions. Caveat, stated with the result: earlier buckets are also older recordings (older equipment, a different recording era) and younger ages, so a trend can't be attributed to cognition alone. The Stage 2 channel-by-timing check found no evidence of a difference in recording-quality proxies across buckets (18 people in the within-person comparison), which doesn't rule out the equipment explanation.
 8. **Pre-registered sensitivity analysis (D7, 2026-09-28):** the same frozen model, evaluated on the test set with dementia cases restricted to clips from onset to 5 years before (`eligibility.near_onset_only`); controls unchanged. Reported next to the main result whatever it shows; never used for model selection or the threshold.
+9. **Pre-registered sensitivity analysis (D1, 2026-09-29):** the same frozen model, evaluated on single-speaker test clips only (`other_voices = no` in the full audit), reported next to the main result whatever it shows, and the same restriction applied to the CV validation clips in Stage 4. Never used for model selection or the threshold. If D1 = (c), every clip is single-speaker already, so this equals the main result; that is stated rather than reported twice.
 
 ### 5.3 Final report
 
@@ -382,7 +383,7 @@ Test-set guard: only the final-evaluation module can load test data.
 
 | ID | Decision | Needed by |
 |---|---|---|
-| D1 | If the listening audit finds other voices in many recordings: (a) accept and state it as a limitation, (b) add speaker separation, or (c) keep only recordings judged single-speaker. Deployment audio (caregiver visits) will also contain two speakers, so this affects the live system too. Note (developer, 2026-09-28): option (b) changes the audio the features are extracted from, not only the split, so it would affect Stage 3 onward too; the split, folds, annotation sample and feature extraction all wait for D1. | Checkpoint 1 |
+| D1 | If the listening audit finds other voices in many recordings: (a) accept and state it as a limitation, (b) add speaker separation, or (c) keep only recordings judged single-speaker. Deployment audio (caregiver visits) will also contain two speakers, so this affects the live system too. Note (developer, 2026-09-28): option (b) changes the audio the features are extracted from, not only the split, so it would affect Stage 3 onward too; the split, folds, annotation sample and feature extraction all wait for D1.<br><br>**First audit (20 clips, 2026-09-29):** another voice in 3 of 6 dementia pool clips vs 0 of 7 control pool clips (Fisher p = 0.07), too few to conclude. So the developer is auditing **every** pool and trajectory clip (265, blinded, `results/01_data_collection/full_audit_instructions.md`).<br><br>**Decision rule, pre-registered 2026-09-29 before the full audit** (`scripts/01f_full_audit_decision.py`, `config.D1_*`):<br>- Unit: pool **people**; a person counts as "other voice" if any of their clips has one.<br>- Choose **(c) single-speaker only** if the per-class rates differ clearly: Fisher's exact p < 0.05, **or** a gap above 10 percentage points. Otherwise **(a)**.<br>- **Viability:** (c) isn't viable if it would leave fewer than **40 dementia people** in the pool; then (a). 40 is the smallest dementia pool already considered (D7 option b). Below it, each CV validation fold has under ~6 dementia people (fold AUC standard error ≥ 0.13 at AUC 0.70) and the test set 7 or fewer; it's also more than a quarter of the current 54.<br>- **Whichever is chosen:** a pre-registered sensitivity analysis reports performance on **single-speaker clips only**, in CV and in the final test, whatever it shows, never used for model selection. Under (c) it coincides with the main result, and that is stated.<br><br>**Audit sheet additions (developer):** a `recognised_speaker` column, because recognising a public figure can reveal the diagnosis, so it records where blinding may have failed. Also a hidden random 10 % of clips (26) repeated under new names for the developer to re-rate in a later session, with agreement between the two passes reported (percent agreement and Cohen's kappa per column). | Checkpoint 1 |
 | D2 | Imbalance handling: class weights or in-fold SMOTE, based on Stage 1's measured balance. **Decided 2026-09-28:** class weights, with each recording weighted 1 ÷ its subject's clip count, then classes balanced (Stage 2 step 8). | Stage 2 |
 | D3 | Add logistic regression as a baseline alongside RF, SVM and XGBoost | Stage 4 scoping |
 | D4 | Whether to use Kenyan-language corpora for the language-shift check (check licences first) | Before 5.1 |
@@ -401,6 +402,15 @@ The ML development specification and the report currently describe a different f
 - Any wording implying the model has been validated for Kenyan languages — it will not have been (see limitations).
 
 ---
+
+## Deployment option for the supervisor (recorded 2026-09-29)
+
+Caregiver visits always involve at least two speakers, while the training data will be (mostly or entirely, depending on D1) one speaker at a time. Pause features measured on a conversation partly describe the turn-taking, not the dependant.
+
+**Option:** the caregiver app records a **prompted monologue**. The caregiver asks an open question ("tell me about your morning") and stays silent while the dependant speaks for at least 30 s after trimming (the model's minimum).
+- This matches single-speaker training data, and avoids speaker separation (diarisation) at deployment: no extra model, dependency or latency, and no diarisation error on Kenyan languages, where it is unverified.
+- The cost is a small change to the visit routine, and the app would need to guide it (a timer, and a cue for the caregiver to stay silent).
+- A product and clinical decision for the supervisor. It affects HEZ-69 (the app's recording flow) and HEZ-46 (the inference handler).
 
 ## Limitations to state in the report
 

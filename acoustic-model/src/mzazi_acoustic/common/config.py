@@ -60,6 +60,22 @@ PROXY_BANDWIDTH_ENERGY_SHARE = 0.99
 # Listening audit: about 20 recordings, stratified by class (PLAN.md Stage 1 step 10).
 LISTENING_AUDIT_PER_CLASS = 10
 
+# Full listening audit and the D1 decision rule, pre-registered 2026-09-29 before the developer
+# listens (PLAN.md decision D1). Every pool and trajectory clip is audited; a random 10 % is repeated
+# in a later session to measure the listener's own agreement.
+FULL_AUDIT_REPEAT_SHARE = 0.10
+FULL_AUDIT_DIR = DATA_DIR / "listening_audit_full"
+# Choose (c) single-speaker only if the per-class share of pool PEOPLE with another voice in any clip
+# differs clearly: Fisher's exact p < 0.05, or a gap above 10 percentage points. Otherwise (a).
+D1_FISHER_ALPHA = 0.05
+D1_RATE_GAP = 0.10
+# (c) is not viable if it would leave fewer than this many dementia people in the pool; then (a) is
+# used, with the single-speaker sensitivity analysis. 40 is the smallest dementia pool already
+# considered (D7 option b). Below it, each CV validation fold holds under ~6 dementia people (fold
+# AUC standard error >= 0.13 at AUC 0.70) and the test set 7 or fewer, and the loss would exceed a
+# quarter of the current 54.
+D1_MIN_DEMENTIA_PEOPLE = 40
+
 # Confirmed by the developer at Checkpoint 1 (2026-09-28): the mapping above is correct.
 
 # DementiaNet metadata sheet (linked from the upstream README), one tab per class. Downloaded to
