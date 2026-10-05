@@ -1,0 +1,3 @@
+split,clips,subjects,dementia_share_clips,dementia_share_people
+test,51,35,0.294,0.314
+train,200,137,0.285,0.314
