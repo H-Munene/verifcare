@@ -17,7 +17,7 @@ import pandas as pd
 
 from mzazi_acoustic.common import config, degradation, guards
 from mzazi_acoustic.model_evaluation import threshold, validation
-from mzazi_acoustic.model_training import compare, cv, final, metrics
+from mzazi_acoustic.model_training import candidates, compare, cv, final, metrics
 
 OUT = config.EVALUATION_RESULTS
 TRAINING = config.TRAINING_RESULTS
@@ -78,7 +78,7 @@ def main():
 
     # 3. Refit per fold: reproduction check, permutation importance, robustness curve
     degraded = degraded_tables()
-    importance_rows, robustness_rows, reproduction = [], [], []
+    importance_rows, robustness_rows, reproduction, calibration_rows = [], [], [], []
     for (repeat, fold), val_ids in folds.groupby(["repeat", "fold"])["file_id"]:
         in_val = training["file_id"].isin(set(val_ids))
         train, val = training[~in_val], training[in_val].reset_index(drop=True)
@@ -87,6 +87,13 @@ def main():
         p = model.predict_proba(val[feature_cols].to_numpy(float))[:, 1]
         stored = oof[(oof.repeat == repeat) & (oof.fold == fold)].set_index("file_id")["probability"]
         reproduction.append(float(np.max(np.abs(p - stored.reindex(val["file_id"]).to_numpy()))))
+        # Raw scores vs calibrated probabilities: calibration must not change the ranking
+        # (a slope of 0 means "no usable ranking": the base rate for everyone).
+        raw = candidates.scores(model.pipeline, val[feature_cols].to_numpy(float))
+        calibration_rows.append({"repeat": repeat, "fold": fold, "slope": model.slope,
+                                 "raw_auc_person": validation.person_weighted_auc(val["label"], raw, val["subject_id"]),
+                                 "calibrated_auc_person": validation.person_weighted_auc(val["label"], p,
+                                                                                         val["subject_id"])})
 
         imp = validation.permutation_importance(model, val[feature_cols], val["label"], val["subject_id"],
                                                 feature_cols, config.PERMUTATION_REPEATS,
@@ -102,6 +109,9 @@ def main():
                                     "roc_auc_person": validation.person_weighted_auc(val["label"], p_degraded,
                                                                                      val["subject_id"])})
         print(f"  repeat {repeat} fold {fold} done (reproduction max diff {reproduction[-1]:.2e})")
+
+    calibration = pd.DataFrame(calibration_rows)
+    calibration.to_csv(OUT / "calibration_by_fold.csv", index=False)
 
     importance = pd.concat(importance_rows, ignore_index=True)
     importance.to_csv(OUT / "permutation_importance_by_fold.csv", index=False)
@@ -137,6 +147,11 @@ def main():
              f"- In CV at this threshold (mean (SD) over 25 folds, person-weighted): sensitivity "
              f"{at_threshold.sensitivity_person.mean():.3f} ({at_threshold.sensitivity_person.std():.3f}), specificity "
              f"{at_threshold.specificity_person.mean():.3f} ({at_threshold.specificity_person.std():.3f}).", "",
+             "## Calibration per fold (`calibration_by_fold.csv`)", "",
+             f"- Raw-score AUC {calibration.raw_auc_person.mean():.3f} ({calibration.raw_auc_person.std():.3f}); "
+             f"calibrated AUC {calibration.calibrated_auc_person.mean():.3f} ({calibration.calibrated_auc_person.std():.3f}).",
+             f"- Folds where calibration found no usable ranking (slope 0, base rate for everyone): "
+             f"{int((calibration.slope == 0).sum())} of {len(calibration)}.", "",
              "## Single-speaker sensitivity analysis (D1, CV)", "", "```", spk.to_string(), "```", "",
              "## Permutation importance (person-weighted ROC-AUC drop; mean and SD across 25 folds)", "",
              f"Refit check: the per-fold refits reproduce the stored out-of-fold predictions to within "

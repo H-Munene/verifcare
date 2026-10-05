@@ -8,10 +8,10 @@ Mean (SD) across the 25 folds:
                     roc_auc_person         brier_person         ece_person         roc_auc_clip        
                               mean     std         mean     std       mean     std         mean     std
 model                                                                                                  
-logistic_regression         0.4904  0.1053       0.2182  0.0101     0.0495  0.0460       0.4897  0.0952
-random_forest               0.4893  0.0763       0.2205  0.0147     0.0685  0.0552       0.4745  0.0686
-svm                         0.4949  0.0806       0.2246  0.0245     0.0908  0.0701       0.4943  0.0815
-xgboost                     0.4782  0.0883       0.2300  0.0187     0.1198  0.0875       0.4803  0.0872
+logistic_regression         0.5216  0.0592       0.2180  0.0102     0.0475  0.0456       0.5084  0.0611
+random_forest               0.4991  0.0625       0.2196  0.0143     0.0613  0.0569       0.4807  0.0596
+svm                         0.5013  0.0682       0.2244  0.0245     0.0893  0.0709       0.4993  0.0723
+xgboost                     0.4801  0.0874       0.2300  0.0187     0.1198  0.0875       0.4831  0.0871
 ```
 
 ## Selection (pre-registered cascade, compare.py)
