@@ -26,3 +26,19 @@ def test_only_the_final_evaluation_module_passes_include_test_true():
         if re.search(r"include_test\s*=\s*True", path.read_text(encoding="utf-8")):
             offenders.append(path.name)
     assert not offenders, f"only {guards.FINAL_EVALUATION_MODULE} may load test rows: {offenders}"
+
+
+def test_the_splits_file_overrides_any_split_column_in_the_table():
+    # A table claiming its test row is "train" must not get it past the guard.
+    table = pd.DataFrame({"file_id": ["a", "b"], "split": ["train", "train"], "x": [1, 2]})
+    splits = pd.DataFrame({"file_id": ["a", "b"], "split": ["train", "test"], "role": "training_pool"})
+    assert list(guards.load_rows(table, splits)["file_id"]) == ["a"]
+
+
+def test_trajectory_clips_never_come_back_as_training_rows():
+    # Trajectory clips carry their person's side ("train") but must never train a model (D7).
+    table = pd.DataFrame({"file_id": ["pool", "early"], "x": [1, 2]})
+    splits = pd.DataFrame({"file_id": ["pool", "early"], "split": ["train", "train"],
+                           "role": ["training_pool", "trajectory"]})
+    assert list(guards.load_rows(table, splits)["file_id"]) == ["pool"]
+    assert list(guards.load_rows(table, splits, include_test=True)["file_id"]) == ["pool"]

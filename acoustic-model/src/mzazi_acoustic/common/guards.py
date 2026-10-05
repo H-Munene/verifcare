@@ -21,6 +21,13 @@ def load_rows(table, splits=None, include_test=False):
     """
     if splits is None:
         splits = pd.read_csv(SPLITS_FILE)
+    # The splits file is the only authority: a split column carried by the table itself (the feature
+    # matrix has one) is dropped, so a table can't relabel a test row as training.
+    table = table.drop(columns=["split", "role"], errors="ignore")
+    # Training-pool rows only. Trajectory clips (dementia 10-15 y before onset) are in the splits file
+    # with their person's side, but must never train a model (D7); they are scored separately.
+    if "role" in splits:
+        splits = splits[splits["role"] == "training_pool"]
     merged = table.merge(splits[["file_id", "split"]], on="file_id", how="inner", validate="one_to_one")
     if include_test:
         return merged
