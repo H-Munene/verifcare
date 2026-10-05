@@ -231,3 +231,17 @@ def test_training_uses_only_the_features_the_checks_kept():
     final_list = pd.DataFrame({"feature": ["a", "b", "c"], "kept": [True, False, True],
                                "reason": ["", "redundant with a", ""]})
     assert kept_features(final_list) == ["a", "c"]
+
+
+def test_calibration_never_reverses_the_ranking():
+    from mzazi_acoustic.model_training import calibration as cal
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, 300)
+    w = np.ones(300)
+    # Scores that run against the labels: an unconstrained fit would give a negative slope.
+    slope, intercept = cal.fit_sigmoid(-(y + rng.normal(0, 0.5, 300)), y, w)
+    assert slope == 0.0
+    assert 1 / (1 + np.exp(-intercept)) == pytest.approx(y.mean())  # base rate
+    # Scores that agree with the labels keep their positive slope.
+    slope, _ = cal.fit_sigmoid(y + rng.normal(0, 0.5, 300), y, w)
+    assert slope > 0

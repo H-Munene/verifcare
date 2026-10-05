@@ -25,9 +25,22 @@ class CalibratedModel:
 
 
 def fit_sigmoid(scores, y, sample_weight):
-    """Platt scaling: an unpenalised 1-D logistic regression of the label on the score."""
-    fit = LogisticRegression(C=np.inf).fit(np.asarray(scores).reshape(-1, 1), y, sample_weight=sample_weight)
-    return float(fit.coef_[0, 0]), float(fit.intercept_[0])
+    """Platt scaling with the slope constrained to be non-negative.
+
+    Calibration may rescale a model's scores but must never reverse their order: that would turn
+    calibration into a second, unvalidated classifier. With a weak signal the out-of-fold scores
+    can, by chance, run against the labels; an unconstrained fit then returns a negative slope
+    and inverts the model's ranking (found in Stage 4: 13 of 25 folds, 2026-10-05). The
+    log-loss is convex in (slope, intercept), so when the unconstrained slope is negative the
+    constrained optimum is slope = 0: predict the weighted base rate for everyone.
+    """
+    y, w = np.asarray(y), np.asarray(sample_weight, float)
+    fit = LogisticRegression(C=np.inf).fit(np.asarray(scores).reshape(-1, 1), y, sample_weight=w)
+    slope, intercept = float(fit.coef_[0, 0]), float(fit.intercept_[0])
+    if slope >= 0:
+        return slope, intercept
+    base_rate = np.sum(w * (y == 1)) / np.sum(w)
+    return 0.0, float(np.log(base_rate / (1 - base_rate)))
 
 
 def out_of_fold_scores(pipeline, X, y, groups, train_weights, seed):
