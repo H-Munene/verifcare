@@ -350,6 +350,11 @@ Learned steps are fit inside folds only; calibration receives subject groups; th
 
 1. **Interpretability:** permutation importance per fold (ROC-AUC scorer), mean ± SD. Does the model rely mainly on pausing features as intended? Do directions match the literature? Importance shows association, not causation.
 2. **Recording-quality robustness:** re-extract features from validation-fold audio under simulated phone conditions: phone-like bandpass (about 100–7000 Hz) alone, and bandpass plus white and pink noise at two severities (for example 20 dB and 10 dB SNR). Measure the actual signal-to-noise ratio of each generated file after filtering, and adjust the noise so the measured value matches the target (filtering removes noise unevenly, especially low-frequency pink noise). Report a degradation curve. Pre-register exactly one formal test: the most severe condition vs clean.
+   - **Pre-registered 2026-10-05, before any model result:**
+     - The test condition is **bandpass + pink noise at 10 dB SNR** (`config.ROBUSTNESS_TEST_CONDITION`): the lowest SNR, with pink noise's energy in the low band that holds the voice harmonics.
+     - The test is the corrected repeated k-fold t-test on the 25 per-fold person-weighted ROC-AUC differences.
+     - The degraded features are the ones Stage 3.3 extracted (same audio, same noise seeds), so the two stages agree by construction.
+   - **Interpretability and robustness use per-fold refits** of the chosen model, with the same seeds as Stage 4. `scripts/05a_validation.py` first checks the refits reproduce the stored out-of-fold predictions, so it analyses the same models CV scored.
 3. **Language-shift check (optional, licence permitting — D4):** extract the same features from unlabelled speech in Kenyan languages (for example AfriVoices-KE or Kencorpus, both smartphone-recorded). Compare each feature's distribution with the healthy group in the training data. This cannot measure accuracy (there are no labels); it shows which features shift with language alone. This data is never used for training.
 4. **Threshold (blocker):** the balance between catching more cases (more false alarms) and fewer false alarms (risk of missing cases) is a product and clinical decision (D5). It is frozen before 5.2.
 

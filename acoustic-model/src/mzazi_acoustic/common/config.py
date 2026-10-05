@@ -270,4 +270,11 @@ FIXED_SPECIFICITY = 0.90
 # is the median over repeats. It is computed in Stage 5.1 and written here BEFORE the test set is used.
 D5_TARGET_SPECIFICITY = 0.90
 D5_THRESHOLD = None
+
+# Stage 5.1 (pre-registered 2026-10-05, before any model result): the robustness curve's single
+# formal test compares this condition with clean audio (corrected repeated k-fold t-test on the
+# per-fold person-weighted ROC-AUC). It is the most severe condition: the lowest SNR, and pink noise
+# puts its energy in the low band that holds the voice harmonics jitter/shimmer/HNR are measured on.
+ROBUSTNESS_TEST_CONDITION = "bandpass+pink@10dB"
+PERMUTATION_REPEATS = 10  # shuffles per feature per fold
 CALIBRATION_BINS = 10  # expected calibration error
