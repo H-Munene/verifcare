@@ -167,7 +167,10 @@ NOISE_GUARD_ACTIVE_BELOW_DB = SILENCE_DB_BELOW_SPEECH + NOISE_MARGIN_DB
 # 2026-10-05 by the pre-registered rule: other voices in 57 % of dementia vs 62 % of control pool
 # people (Fisher p = 0.62, gap 4.5 points), and (c) would have left 30 dementia people (< 40).
 D1_DECISION = "a"
-DETECTOR_SIGNED_OFF = False  # set True only after the developer signs off the annotation agreement
+# Signed off by the developer on 2026-10-05 WITHOUT the hand-annotation validation (it would have
+# taken too long). The pre-registered detector settings are therefore frozen permanently, as they
+# are: they may never be changed, including if annotations are scored later (PLAN.md 3.2).
+DETECTOR_SIGNED_OFF = True
 
 # ---------------------------------------------------------------- Stage 3: frozen feature set
 # PLAN.md 3.1, frozen 2026-09-28. Order matters: the redundancy and dependency rules in 3.3 keep the

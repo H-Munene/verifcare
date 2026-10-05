@@ -250,6 +250,10 @@ This is new code and the biggest technical risk, so it is validated against huma
   - **Noisy clips in the sample (developer, 2026-09-28):** the 10 clips deliberately include clips with noisy backgrounds, e.g. ones where the noise guard is active (speech-to-noise dynamic range under 31 dB) or with low estimated SNR. The guard was already active on a real clip, and it's the part of the detector most likely to fail. How many noisy clips were included is recorded.
     - **Rule (confirmed 2026-09-28):** 2 of each class's 5 clips are noisy. "Noisy" first means the detector's noise guard is active on the processed clip. **Fallback:** if a class has too few such clips, the quota is completed with the eligible clips with the highest Stage 1 noise-floor estimate. Each sampled clip records how it was picked. If a class has fewer than 5 eligible people, the sampler stops with an error rather than drawing a smaller sample.
   - **Record** the final settings, the agreement figures, and every adjustment made, each with its reason, here and in `docs/ml-dev-log.md`.
+  - **Changed 2026-10-05 (developer): no hand annotation.** The annotation would have taken too long, so the developer signed off the detector without it. Consequences, accepted and recorded:
+    - The detector settings stay **exactly as pre-registered and are frozen permanently**. They are never adjusted, including if the annotations are done and scored later (`scripts/03c_validate_detector.py` would then only report agreement after the fact).
+    - The detector is **not validated against human judgement**. Its accuracy on real speech, and how much stop-consonant closures contaminate the short band, are unmeasured (limitation 15). The remaining evidence: the synthetic tests in 3.2, and the real-audio degradation check in 3.3 step 4.
+    - The 10 blinded annotation clips remain in `data/annotation/`, unused.
 
 ### 3.3 Checks before any modelling (training portion only)
 
@@ -440,6 +444,7 @@ The rule's exact form, and its false-alarm rate over a typical visit schedule, i
 12. **Speakers able to produce 30 s of speech (added 2026-09-28):** results apply only to speakers able to produce at least 30 s of speech after trimming. The minimum removed 9 of 84 dementia people entirely, all of whose clips were short (median 17.5 s). No explanation is offered for why their clips are short: the Stage 2 descriptive comparison doesn't support a "more impaired" explanation (their clips come from after onset less often, 9 % vs 22 %, only 11 clips).
 13. **Test specificity is imprecise (added 2026-10-01):** with about 24 test controls, the measured specificity at the 90 %-specificity threshold will vary widely around 90 %, so it is reported with its bootstrap CI.
 14. **Other voices in training, monologues in deployment (added 2026-10-05):** D1 = (a) keeps clips with other voices (about 60 % of people in each class), while the supervisor-approved deployment records prompted monologues. The single-speaker sensitivity analysis is the closest estimate of monologue performance.
+15. **Pause detector not validated against human annotation (added 2026-10-05):** the hand-annotation step was skipped (developer decision), so the accuracy of every pause feature on real speech is unverified, including how much stop consonants contaminate the short-pause band. The settings were pre-registered and never tuned, so this is a lack of validation, not a risk of tuning to the results.
 
 ---
 
