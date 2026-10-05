@@ -223,3 +223,11 @@ def test_script_exits_while_its_inputs_are_missing(monkeypatch, tmp_path):
     script = Path(__file__).resolve().parents[2] / "scripts" / "04_train.py"
     with pytest.raises(SystemExit, match="can't run yet"):
         runpy.run_path(str(script), run_name="__main__")
+
+
+def test_training_uses_only_the_features_the_checks_kept():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "04_train.py"
+    kept_features = runpy.run_path(str(script))["kept_features"]
+    final_list = pd.DataFrame({"feature": ["a", "b", "c"], "kept": [True, False, True],
+                               "reason": ["", "redundant with a", ""]})
+    assert kept_features(final_list) == ["a", "c"]

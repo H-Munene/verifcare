@@ -35,7 +35,9 @@ def degraded_family_a(train):
         for name, noise_type, snr in degradation.conditions():
             degraded, _ = degradation.degrade(y, sr, noise_type, snr, rng)
             values = extract_features(degraded.astype(np.float32), sr)
-            by_condition[name].append({"file_id": row.file_id, **{f: values[f] for f in config.FAMILY_A_FEATURES}})
+            # All model features are kept, not just family A: Stage 5.1's robustness curve reuses
+            # these exact degraded features (same audio, same seeds) instead of re-extracting them.
+            by_condition[name].append({"file_id": row.file_id, **{f: values[f] for f in config.MODEL_FEATURES}})
         if i % 25 == 0:
             print(f"  degraded {i}/{len(train)}")
     return {name: pd.DataFrame(rows) for name, rows in by_condition.items()}
@@ -58,7 +60,10 @@ def main():
     kept, redundant = checks.redundancy(train, features)
     kept, dependency, vif = checks.dependency(train, kept)
     confound = checks.channel_confound(train, features)
-    shift = checks.degradation_shift(train, degraded_family_a(train), config.FAMILY_A_FEATURES)
+    degraded = degraded_family_a(train)
+    for name, table in degraded.items():
+        table.to_csv(OUT / f"degraded_features_{name.replace('+', '_').replace('@', '_')}.csv", index=False)
+    shift = checks.degradation_shift(train, degraded, config.FAMILY_A_FEATURES)
     benchmark, level = checks.within_person_benchmark(train, config.FAMILY_A_FEATURES)
     flags = checks.degradation_flags(shift, benchmark)
     duration = checks.duration_dependence(train, features)

@@ -20,13 +20,18 @@ REQUIRED = [
 ]
 
 
+def kept_features(final_list):
+    """Only the features the Stage 3.3 rules kept: the list also records the removed ones, with reasons."""
+    return final_list.loc[final_list["kept"].astype(bool), "feature"].tolist()
+
+
 def main():
     missing = [p.name for p in REQUIRED if not p.exists()]
     if missing:
         sys.exit(f"Stage 4 can't run yet; missing: {', '.join(missing)}")
     OUT.mkdir(parents=True, exist_ok=True)
 
-    feature_cols = pd.read_csv(config.FEATURE_RESULTS / "final_feature_list.csv")["feature"].tolist()
+    feature_cols = kept_features(pd.read_csv(config.FEATURE_RESULTS / "final_feature_list.csv"))
     matrix = pd.read_csv(config.FEATURE_RESULTS / "feature_matrix.csv")
     training = guards.load_rows(matrix)  # training rows only
     folds = pd.read_csv(config.PROCESSING_RESULTS / "cv_folds.csv")
