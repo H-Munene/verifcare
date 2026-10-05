@@ -18,10 +18,15 @@ ALLOWED = {**{c: {"yes", "no"} for c in la.YES_NO_COLUMNS}, "background_noise": 
            "target_speech_share": {"<25%", "25-50%", "50-75%", ">75%"}}
 
 
+# recognised_speaker was not recorded in session 2 (developer, 2026-10-01): it is left out of the
+# session-2 checks and of the agreement. Session 1 has it for every clip, which is what blinding needs.
+NOT_RECORDED = {"session1": set(), "session2": {"recognised_speaker"}}
+
+
 def load_session(name):
     sheet = pd.read_csv(OUT / f"full_audit_{name}.csv", dtype=str)
     bad = [f"{r.audit_id}: {c}" for r in sheet.itertuples() for c, ok in ALLOWED.items()
-           if str(getattr(r, c)).strip() not in ok]
+           if c not in NOT_RECORDED[name] and str(getattr(r, c)).strip() not in ok]
     return sheet, bad
 
 
@@ -45,6 +50,10 @@ def main():
     if len(contradictions):
         sys.exit(f"Contradictory answers (overlap yes, other voices no): {list(contradictions.audit_id)}; please fix.")
 
+    # Per-clip flags (anonymised ids only) for the single-speaker sensitivity analysis in Stages 4-5.
+    audited[["file_id", "subject_id", "label", "role", "other_voices", "overlapping_speech", "laughter",
+             "recognised_speaker"]].sort_values("file_id").to_csv(OUT / "full_audit_by_clip.csv", index=False)
+
     people = la.people_with_other_voices(audited)
     result = la.d1_decision(people, config.D1_FISHER_ALPHA, config.D1_RATE_GAP, config.D1_MIN_DEMENTIA_PEOPLE)
     pd.DataFrame([result]).to_csv(OUT / "d1_decision.csv", index=False)
@@ -55,12 +64,14 @@ def main():
     else:
         repeats = session2.merge(key[key.session == 2][["audit_id", "file_id"]], on="audit_id")
         pairs = audited.merge(repeats, on="file_id", suffixes=("", "_second"))
-        first = pairs[la.YES_NO_COLUMNS]
-        second = pairs[[f"{c}_second" for c in la.YES_NO_COLUMNS]].set_axis(la.YES_NO_COLUMNS, axis=1)
-        table = la.agreement(first, second)
+        columns = [c for c in la.YES_NO_COLUMNS if c not in NOT_RECORDED["session2"]]
+        first = pairs[columns]
+        second = pairs[[f"{c}_second" for c in columns]].set_axis(columns, axis=1)
+        table = la.agreement(first, second, columns)
         table.to_csv(OUT / "full_audit_agreement.csv", index=False)
         agreement_lines = [f"- {row.column}: {row.percent_agreement} % agreement, kappa {row.cohens_kappa} "
                            f"({row.n_clips} clips)" for row in table.itertuples()]
+        agreement_lines.append("- recognised_speaker: not recorded in session 2, so no agreement figure.")
 
     counts = counts_by_class(audited)
     lines = ["# Decision D1 - Full listening audit", "",

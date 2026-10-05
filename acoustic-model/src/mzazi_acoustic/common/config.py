@@ -163,7 +163,10 @@ NOISE_GUARD_ACTIVE_BELOW_DB = SILENCE_DB_BELOW_SPEECH + NOISE_MARGIN_DB
 
 # ---------------------------------------------------------------- gates (developer decisions)
 # Code that depends on a pending human decision refuses to run until it is recorded here.
-D1_DECISION = None  # "a" limitation / "b" speaker separation / "c" single-speaker only (HEZ-95)
+# "a" limitation / "b" speaker separation / "c" single-speaker only (HEZ-95). Decided "a" on
+# 2026-10-05 by the pre-registered rule: other voices in 57 % of dementia vs 62 % of control pool
+# people (Fisher p = 0.62, gap 4.5 points), and (c) would have left 30 dementia people (< 40).
+D1_DECISION = "a"
 DETECTOR_SIGNED_OFF = False  # set True only after the developer signs off the annotation agreement
 
 # ---------------------------------------------------------------- Stage 3: frozen feature set
@@ -257,4 +260,11 @@ N_TREES = 300  # random forest and xgboost; fixed, not searched
 # Threshold-dependent metrics (PLAN.md 4.2): Youden's J per fold (labelled optimistic), and
 # sensitivity at this fixed specificity.
 FIXED_SPECIFICITY = 0.90
+
+# D5 (supervisor, 2026-10-01): favour fewer false alarms, so the operating threshold guarantees
+# 90 % specificity. Pre-registered computation: in each CV repeat, the lowest threshold on calibrated
+# out-of-fold probabilities whose person-weighted specificity is at least 90 %; the frozen threshold
+# is the median over repeats. It is computed in Stage 5.1 and written here BEFORE the test set is used.
+D5_TARGET_SPECIFICITY = 0.90
+D5_THRESHOLD = None
 CALIBRATION_BINS = 10  # expected calibration error
