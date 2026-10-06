@@ -269,7 +269,9 @@ FIXED_SPECIFICITY = 0.90
 # out-of-fold probabilities whose person-weighted specificity is at least 90 %; the frozen threshold
 # is the median over repeats. It is computed in Stage 5.1 and written here BEFORE the test set is used.
 D5_TARGET_SPECIFICITY = 0.90
-D5_THRESHOLD = None
+# Frozen 2026-10-06, before the test set was used: the median of the per-repeat thresholds
+# (results/05_model_evaluation/d5_threshold.csv), from the primary run (rank-preserving calibration).
+D5_THRESHOLD = 0.3391400667284537
 
 # Stage 5.1 (pre-registered 2026-10-05, before any model result): the robustness curve's single
 # formal test compares this condition with clean audio (corrected repeated k-fold t-test on the
