@@ -60,7 +60,7 @@ def blank_template(sample):
     return template
 
 
-# ---------------------------------------------------------------- full audit (decision D1)
+# full audit (decision D1)
 
 # The full audit adds one column: whether the listener recognised who is speaking. Recognising a
 # public figure can reveal their diagnosis, so it records where blinding may have failed.
