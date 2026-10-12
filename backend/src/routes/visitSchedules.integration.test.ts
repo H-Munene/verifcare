@@ -1011,7 +1011,16 @@ describe.skipIf(!hasTestDb)(
         const created = await request(app)
           .post('/visit-schedules')
           .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
+          .send(
+            // Far-future window: visitPayload's fixed date is now in the past, which would make
+            // the visit count as missed and give it an exception to resolve.
+            visitPayload({
+              caregiverId: caregiver.userId,
+              dependantId: dependant.id,
+              scheduledStart: '2099-10-01T09:00:00Z',
+              scheduledEnd: '2099-10-01T10:00:00Z',
+            }),
+          );
 
         const response = await request(app)
           .get(`/visit-schedules/${visitBody(created).id}/verification`)
