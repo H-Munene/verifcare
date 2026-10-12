@@ -1,8 +1,5 @@
 /docs
-# graphify knowledge graph of the repo, rebuilt locally by git hooks (developer decision 2026-09-28)
-/graphify-out
-
-# Node.js / TypeScript (applies to any package in this repo: backend/, infra/, frontend/web/)
+# /graphify-out
 node_modules/
 dist/
 coverage/
@@ -11,17 +8,14 @@ coverage/
 .env.*
 !.env.example
 /temp_images
-CLAUDE.md
-/.claude
+# CLAUDE.md
+# /.claude
 .agents
 /acoustic-model/data
 /acoustic-model/venv/
 
-# Python (applies to acoustic-model/)
 __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
-# Local-only, never committed: real subject names (subject_id_lookup.local.csv,
-# near_duplicate_review.local.csv, and any future file following this convention).
 /acoustic-model/results/**/*.local.csv
