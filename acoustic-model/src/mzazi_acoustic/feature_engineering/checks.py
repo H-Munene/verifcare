@@ -25,7 +25,7 @@ def per_subject(table, columns):
     return means.join(table.groupby("subject_id")["label"].first())
 
 
-# ---------------------------------------------------------------- step 1: completeness
+# step 1: completeness
 
 def completeness(table, features=config.MODEL_FEATURES):
     """Values the training-fold median will fill, per feature and per class, with the stop flag.
@@ -53,7 +53,7 @@ def completeness(table, features=config.MODEL_FEATURES):
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------- step 2: redundancy and dependency
+# step 2: redundancy and dependency
 
 def redundancy(table, features=config.MODEL_FEATURES, threshold=config.REDUNDANCY_ABS_R):
     """Pairwise |r| >= threshold: keep the earlier-listed feature. Returns (kept, dropped_pairs).
@@ -122,7 +122,7 @@ def vif(table, features):
                          "above_report_threshold": values > config.VIF_REPORT_THRESHOLD})
 
 
-# ---------------------------------------------------------------- step 3: channel confound
+# step 3: channel confound
 
 def channel_confound(table, features, proxies=PROXIES):
     """Each feature vs each channel proxy, per subject, Spearman, Bonferroni across all pairs.
@@ -149,7 +149,7 @@ def channel_confound(table, features, proxies=PROXIES):
     return result.round({"spearman_rho": 4, "p": 6, "p_bonferroni": 6})
 
 
-# ---------------------------------------------------------------- step 4: degradation
+# step 4: degradation
 
 def degradation_shift(clean, degraded_by_condition, features):
     """Per-recording relative change from clean, (degraded - clean) / |clean|, summarised per feature.
@@ -223,7 +223,7 @@ def degradation_flags(shift, benchmark, features=config.FAMILY_A_FEATURES, condi
     return merged[["feature", "median_relative_change", "benchmark", "tolerance", "flagged"]]
 
 
-# ---------------------------------------------------------------- step 5: duration dependence
+# step 5: duration dependence
 
 def duration_dependence(table, features, duration="trimmed_s", threshold=config.DURATION_DEPENDENCE_ABS_R):
     subjects = per_subject(table, list(features) + [duration])
@@ -236,7 +236,7 @@ def duration_dependence(table, features, duration="trimmed_s", threshold=config.
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------- steps 6-7: class differences, direction
+# steps 6-7: class differences, direction
 
 def class_differences(table, features):
     """Per-subject descriptives and Mann-Whitney per feature. Descriptive only: nothing is removed."""
@@ -267,7 +267,7 @@ def direction_check(differences, expected=config.EXPECTED_DIRECTION):
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------- the list for Checkpoint 3
+# the list for Checkpoint 3
 
 def final_feature_list(redundancy_dropped, dependency_outcome, confound, features=config.MODEL_FEATURES):
     reasons = {}

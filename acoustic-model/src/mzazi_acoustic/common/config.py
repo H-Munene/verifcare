@@ -7,7 +7,7 @@ Changing one of those later needs a dated entry in docs/ml-dev-log.md.
 
 from pathlib import Path
 
-# ---------------------------------------------------------------- paths
+# paths
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]  # .../acoustic-model
 DATA_DIR = PROJECT_ROOT / "data"  # git-ignored
@@ -29,11 +29,11 @@ TRAINING_RESULTS = RESULTS_DIR / "04_model_training"
 EVALUATION_RESULTS = RESULTS_DIR / "05_model_evaluation"
 MODELS_DIR = PROJECT_ROOT / "models"
 
-# ---------------------------------------------------------------- reproducibility
+# reproducibility
 
 SEED = 42  # one global seed; every random step derives from it
 
-# ---------------------------------------------------------------- Stage 1: data collection
+# Stage 1: data collection
 
 # Mapping from top-level folder to class label (1 = cognitive decline).
 FOLDER_TO_LABEL = {
@@ -84,7 +84,7 @@ METADATA_SHEET_ID = "1ih3FjEsiKDctS2oFhZKXah-OrzEridgUDHKu2awXSx8"
 METADATA_TABS = {"dementia": "628190327", "no_dementia": "1338555640"}
 METADATA_FILES = {name: DATA_DIR / f"dementianet_metadata_{name}.csv" for name in METADATA_TABS}
 
-# ---------------------------------------------------------------- Stage 2: data processing
+# Stage 2: data processing
 
 TARGET_SAMPLE_RATE = 16_000  # standard for speech; eGeMAPS is validated at 16 kHz
 
@@ -112,7 +112,7 @@ TRIM_DB_BELOW_REFERENCE = 30.0
 # exceed, so without this, maximum length would differ by class (PLAN.md Stage 2 step 3).
 MAX_DURATION_SECONDS = 90.0
 
-# ---------------------------------------------------------------- Stage 3: pause detector
+# Stage 3: pause detector
 # All pre-registered 2026-09-28, before any class labels were looked at.
 # They may be changed only against the manual pause annotations (PLAN.md 3.2), never against labels.
 
@@ -161,9 +161,9 @@ ANNOTATION_MIN_TRIMMED_SECONDS = ANNOTATION_SEGMENT_OFFSET_SECONDS + ANNOTATION_
 ANNOTATION_NOISY_PER_CLASS = 2
 NOISE_GUARD_ACTIVE_BELOW_DB = SILENCE_DB_BELOW_SPEECH + NOISE_MARGIN_DB
 
-# ---------------------------------------------------------------- gates (developer decisions)
+# gates (developer decisions)
 # Code that depends on a pending human decision refuses to run until it is recorded here.
-# "a" limitation / "b" speaker separation / "c" single-speaker only (HEZ-95). Decided "a" on
+# "a" limitation / "b" speaker separation / "c" single-speaker only. Decided "a" on
 # 2026-10-05 by the pre-registered rule: other voices in 57 % of dementia vs 62 % of control pool
 # people (Fisher p = 0.62, gap 4.5 points), and (c) would have left 30 dementia people (< 40).
 D1_DECISION = "a"
@@ -172,7 +172,7 @@ D1_DECISION = "a"
 # are: they may never be changed, including if annotations are scored later (PLAN.md 3.2).
 DETECTOR_SIGNED_OFF = True
 
-# ---------------------------------------------------------------- Stage 3: frozen feature set
+# Stage 3: frozen feature set
 # PLAN.md 3.1, frozen 2026-09-28. Order matters: the redundancy and dependency rules in 3.3 keep the
 # feature listed FIRST, so this order is the plan's order and must not be rearranged.
 FAMILY_A_FEATURES = [
@@ -200,7 +200,7 @@ EGEMAPS_COLUMNS = {
     "HNRdBACF_sma3nz_stddevNorm": "hnr_db_cv",
 }
 
-# ---------------------------------------------------------------- Stage 3.3: pre-stated check rules
+# Stage 3.3: pre-stated check rules
 REDUNDANCY_ABS_R = 0.9  # pairwise |r| >= this: keep the feature listed first
 ALPHA = 0.05  # significance level for every pre-registered test, applied after Bonferroni
 # Missing values (PLAN.md 3.3 step 1, developer 2026-09-28): structurally defined values are set by
@@ -220,7 +220,7 @@ EXPECTED_DIRECTION = {
     "long_pause_rate_per_min": "higher", "long_pause_time_share": "higher", "phonation_time_ratio": "lower",
 }
 
-# ---------------------------------------------------------------- degradation (Stage 3.3 and 5.1)
+# degradation (Stage 3.3 and 5.1)
 
 # Phone-like microphone band.
 BANDPASS_LOW_HZ = 100.0
@@ -238,7 +238,7 @@ MIN_SUBJECTS_FOR_WITHIN_SUBJECT_BENCHMARK = 20
 # whichever is smaller, so 10 % is always a cap, not only the fallback. Flagging only.
 FALLBACK_SHIFT_TOLERANCE = 0.10
 
-# ---------------------------------------------------------------- Stage 4: model training
+# Stage 4: model training
 # Decided 2026-09-28 (Stage 2 review). Repeated CV, because a single 5-fold run with the corrected
 # t-test would almost always call a tie; estimated ~18 min in total at this budget.
 CV_FOLDS = 5

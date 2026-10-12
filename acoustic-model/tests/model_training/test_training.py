@@ -39,7 +39,7 @@ def small_budget(monkeypatch):
     monkeypatch.setattr(config, "N_TREES", 10)
 
 
-# ------------------------------------------------------------------ spies
+# spies
 
 class Record:
     model_weights, scaler_weights, scorer_weights, sigmoid_weights, split_groups, fitted_rows = [], [], [], [], [], []
@@ -107,7 +107,7 @@ def spies(monkeypatch):
     return Record
 
 
-# ------------------------------------------------------------------ tests
+# tests
 
 def test_training_weights_count_each_person_once_then_balance_classes():
     subjects = ["a", "a", "b", "c", "c", "c"]
