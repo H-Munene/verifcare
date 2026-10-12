@@ -68,7 +68,12 @@ ThemeData buildAppTheme() {
   final squareButton = ButtonStyle(
     shape: WidgetStateProperty.all(const RoundedRectangleBorder()),
   );
-  const squareInput = OutlineInputBorder(borderRadius: BorderRadius.zero);
+  // Neutral grey borders that only darken on focus, never a coloured outline - the same rule as
+  // the web console's fields.
+  OutlineInputBorder squareInput(Color color) => OutlineInputBorder(
+    borderRadius: BorderRadius.zero,
+    borderSide: BorderSide(color: color),
+  );
   return ThemeData(
     // primary is pinned to the exact emerald; a bare seed would shift it to a generated tone.
     colorScheme: ColorScheme.fromSeed(
@@ -85,10 +90,17 @@ ThemeData buildAppTheme() {
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
       shape: square,
     ),
-    inputDecorationTheme: const InputDecorationTheme(
-      border: squareInput,
-      enabledBorder: squareInput,
-      focusedBorder: squareInput,
+    inputDecorationTheme: InputDecorationTheme(
+      border: squareInput(const Color(0xFFD4D4D4)),
+      enabledBorder: squareInput(const Color(0xFFD4D4D4)),
+      focusedBorder: squareInput(inkTertiary),
+      errorBorder: squareInput(dangerRed),
+      focusedErrorBorder: squareInput(dangerRed),
+      floatingLabelStyle: WidgetStateTextStyle.resolveWith(
+        (states) => TextStyle(
+          color: states.contains(WidgetState.error) ? dangerRed : inkSecondary,
+        ),
+      ),
     ),
     cardTheme: const CardThemeData(shape: square),
     chipTheme: const ChipThemeData(shape: square),
