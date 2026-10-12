@@ -69,10 +69,14 @@ jobs:
           cache-dependency-path: |
             infra/package-lock.json
             backend/package-lock.json
+            frontend/web/package-lock.json
       - run: npm ci
       # cdk synth bundles the Lambdas from backend/, so it needs backend's deps too.
       - run: npm ci
         working-directory: backend
+      # ...and cdk.json's "build" builds frontend/web for the web bucket's deployment.
+      - run: npm ci
+        working-directory: frontend/web
       - run: npx tsc --noEmit
       - run: npx cdk synth
 
