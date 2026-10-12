@@ -295,7 +295,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 enabled: !_submitting,
                 decoration: const InputDecoration(
                   labelText: 'Details (optional)',
-                    isDense: true,
+                  isDense: true,
                 ),
               ),
             ),
