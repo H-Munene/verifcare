@@ -13,11 +13,17 @@ import {
   CognitoUserPool,
   type CognitoUserSession,
 } from 'amazon-cognito-identity-js';
+import { getConfig } from '../config';
 
-const userPool = new CognitoUserPool({
-  UserPoolId: import.meta.env.VITE_USER_POOL_ID,
-  ClientId: import.meta.env.VITE_USER_POOL_CLIENT_ID,
-});
+// Built on first use, not at import, because the IDs come from the runtime config (../config.ts).
+let pool: CognitoUserPool | undefined;
+function userPool(): CognitoUserPool {
+  pool ??= new CognitoUserPool({
+    UserPoolId: getConfig().userPoolId,
+    ClientId: getConfig().userPoolClientId,
+  });
+  return pool;
+}
 
 export interface IdentityClaims {
   sub: string;
@@ -94,7 +100,7 @@ function asError(err: unknown): Error {
 
 export function signIn(email: string, password: string): Promise<SignInResult> {
   return new Promise((resolve, reject) => {
-    const user = new CognitoUser({ Username: email, Pool: userPool });
+    const user = new CognitoUser({ Username: email, Pool: userPool() });
     const authDetails = new AuthenticationDetails({ Username: email, Password: password });
     user.authenticateUser(authDetails, {
       onSuccess: (session) => resolve({ type: 'success', session }),
@@ -132,7 +138,7 @@ export function signIn(email: string, password: string): Promise<SignInResult> {
 // email is registered.
 export function requestPasswordReset(email: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    new CognitoUser({ Username: email, Pool: userPool }).forgotPassword({
+    new CognitoUser({ Username: email, Pool: userPool() }).forgotPassword({
       onSuccess: () => resolve(),
       // Fired instead of onSuccess once the code is on its way, when this callback is supplied.
       inputVerificationCode: () => resolve(),
@@ -149,7 +155,7 @@ export function confirmPasswordReset(
   newPassword: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    new CognitoUser({ Username: email, Pool: userPool }).confirmPassword(code, newPassword, {
+    new CognitoUser({ Username: email, Pool: userPool() }).confirmPassword(code, newPassword, {
       onSuccess: () => resolve(),
       onFailure: (err: unknown) => reject(asError(err)),
     });
@@ -161,7 +167,7 @@ export function confirmPasswordReset(
 // Resolves to null if there is no signed-in user or the session can't be refreshed (expired
 // refresh token) - callers treat that as "not authenticated", not an error.
 export function getCurrentIdToken(): Promise<string | null> {
-  const user = userPool.getCurrentUser();
+  const user = userPool().getCurrentUser();
   if (!user) {
     return Promise.resolve(null);
   }
@@ -177,5 +183,5 @@ export function getCurrentIdToken(): Promise<string | null> {
 }
 
 export function signOut(): void {
-  userPool.getCurrentUser()?.signOut();
+  userPool().getCurrentUser()?.signOut();
 }

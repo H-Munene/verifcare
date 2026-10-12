@@ -10,6 +10,7 @@ import { ApiError } from '../api/client';
 import type { Dependant, DependantGender, DependantStatus } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { getConfig } from '../config';
 import { EnrollmentOutcome } from '../components/EnrollmentOutcome';
 import { ExactLocationMap } from '../components/ExactLocationMap';
 import { isPointInFeature } from '../geo/adminBoundaries';
@@ -628,7 +629,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           <div className="register-dependant-page__section">
             {wardFeature ? (
               <ExactLocationMap
-                apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+                apiKey={getConfig().googleMapsApiKey}
                 wardFeature={wardFeature}
                 lat={geofenceLat}
                 lng={geofenceLng}

@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { DashboardOverview, OverviewVisit, VisitState } from '../api/dashboard';
 import { useApi } from '../api/useApi';
+import { getConfig } from '../config';
 import { AttentionList } from '../components/AttentionList';
 import { OsmVisitsMap } from '../components/OsmVisitsMap';
 import { OutcomeSummary } from '../components/OutcomeSummary';
@@ -203,7 +204,7 @@ export function OverviewPage() {
                 VITE_OVERVIEW_MAP=google switches back to Google Maps. */}
             {USE_GOOGLE_MAP ? (
               <VisitsMap
-                apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+                apiKey={getConfig().googleMapsApiKey}
                 visits={shownVisits}
                 timeZone={overview.timeZone}
                 activeId={activeHome}
