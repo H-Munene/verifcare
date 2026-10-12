@@ -19,7 +19,7 @@ final pillButtonStyle = ElevatedButton.styleFrom(
   disabledBackgroundColor: primaryGreen.withValues(alpha: 0.4),
   disabledForegroundColor: Colors.white,
   minimumSize: const Size.fromHeight(44),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
   elevation: 0,
 );
 
@@ -48,4 +48,51 @@ void showSnack(BuildContext context, String message, {bool error = true}) {
         behavior: SnackBarBehavior.floating,
       ),
     );
+}
+
+/// The app's Material theme: the shared emerald primary, and square corners on every component
+/// Material 3 rounds by default (2026-10-12, user decision: the mobile apps match the web
+/// console's square-cornered look). Count badges are the one exception, as on the web.
+ThemeData buildAppTheme() {
+  const square = RoundedRectangleBorder();
+  final squareButton = ButtonStyle(
+    shape: WidgetStateProperty.all(const RoundedRectangleBorder()),
+  );
+  const squareInput = OutlineInputBorder(borderRadius: BorderRadius.zero);
+  return ThemeData(
+    // primary is pinned to the exact emerald; a bare seed would shift it to a generated tone.
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: primaryGreen,
+      primary: primaryGreen,
+    ),
+    useMaterial3: true,
+    filledButtonTheme: FilledButtonThemeData(style: squareButton),
+    elevatedButtonTheme: ElevatedButtonThemeData(style: squareButton),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: squareButton),
+    textButtonTheme: TextButtonThemeData(style: squareButton),
+    iconButtonTheme: IconButtonThemeData(style: squareButton),
+    segmentedButtonTheme: SegmentedButtonThemeData(style: squareButton),
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      shape: square,
+    ),
+    inputDecorationTheme: const InputDecorationTheme(
+      border: squareInput,
+      enabledBorder: squareInput,
+      focusedBorder: squareInput,
+    ),
+    cardTheme: const CardThemeData(shape: square),
+    chipTheme: const ChipThemeData(shape: square),
+    dialogTheme: const DialogThemeData(shape: square),
+    bottomSheetTheme: const BottomSheetThemeData(shape: square),
+    snackBarTheme: const SnackBarThemeData(shape: square),
+    popupMenuTheme: const PopupMenuThemeData(shape: square),
+    menuTheme: const MenuThemeData(
+      style: MenuStyle(shape: WidgetStatePropertyAll(square)),
+    ),
+    navigationBarTheme: const NavigationBarThemeData(indicatorShape: square),
+    tabBarTheme: const TabBarThemeData(indicatorSize: TabBarIndicatorSize.tab),
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: primaryGreen,
+    ),
+  );
 }

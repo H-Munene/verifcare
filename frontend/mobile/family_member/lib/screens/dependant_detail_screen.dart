@@ -232,7 +232,7 @@ class _PhotoNeededBanner extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: dangerTint,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,

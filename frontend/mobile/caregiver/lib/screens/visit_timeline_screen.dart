@@ -91,7 +91,7 @@ class _VisitTimelineScreenState extends State<VisitTimelineScreen> {
                   ),
                   decoration: BoxDecoration(
                     color: missed ? dangerTint : successTint,
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.zero,
                   ),
                   child: Text(
                     missed ? 'Missed' : 'Checked out',
@@ -109,7 +109,7 @@ class _VisitTimelineScreenState extends State<VisitTimelineScreen> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.zero,
                 border: Border.all(color: borderColor),
               ),
               child: _buildBody(missed),
@@ -192,7 +192,7 @@ class _TimelineStep extends StatelessWidget {
                   height: 24,
                   decoration: BoxDecoration(
                     color: done || failed ? color : Colors.white,
-                    shape: BoxShape.circle,
+                    shape: BoxShape.rectangle,
                     border: Border.all(color: color, width: 2),
                   ),
                   child: done || failed

@@ -30,15 +30,7 @@ class MzaziCareCaregiverApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mzazi Care - Caregiver',
-      theme: ThemeData(
-        // Emerald, matching the web console (2026-10-12). fromSeed's primary is pinned to it exactly;
-        // a bare colorSchemeSeed would shift buttons to a generated tone of it.
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF047857),
-          primary: const Color(0xFF047857),
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: _RootScreen(authService: authService),
     );
   }

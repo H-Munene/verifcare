@@ -7,6 +7,7 @@ import 'api/family_link_requests_api.dart';
 import 'api/terms_api.dart';
 import 'api/users_api.dart';
 import 'api/visit_schedules_api.dart';
+import 'app_ui.dart';
 import 'auth/cognito_auth_service.dart';
 import 'auth/registration.dart';
 import 'screens/consent_screen.dart';
@@ -58,15 +59,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mzazi Care - Family Member',
-      theme: ThemeData(
-        // Emerald, matching the web console (2026-10-12). fromSeed's primary is pinned to it exactly;
-        // a bare colorSchemeSeed would shift buttons to a generated tone of it.
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF047857),
-          primary: const Color(0xFF047857),
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: _RootScreen(
         authService: authService,
         usersApi: usersApi,

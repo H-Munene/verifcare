@@ -186,7 +186,7 @@ class _LinkRequestsSheetState extends State<_LinkRequestsSheet> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.zero,
         border: Border.all(color: borderColor),
       ),
       child: Column(

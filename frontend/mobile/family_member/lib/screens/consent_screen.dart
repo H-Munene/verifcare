@@ -327,7 +327,7 @@ class _TermsView extends StatelessWidget {
                           minimumSize: const Size.fromHeight(44),
                           side: const BorderSide(color: borderColor),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: BorderRadius.zero,
                           ),
                         ),
                         child: const Text('Decline'),
@@ -373,10 +373,7 @@ class _Banner extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: tint,
-      borderRadius: BorderRadius.circular(12),
-    ),
+    decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.zero),
     child: Text(text, style: const TextStyle(fontSize: 13, color: inkDefault)),
   );
 }

@@ -292,7 +292,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
                 width: 32,
                 height: 32,
                 decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
+                  shape: BoxShape.rectangle,
                   border: Border.fromBorderSide(
                     BorderSide(color: _borderColor),
                   ),
@@ -336,7 +336,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
             decoration: const BoxDecoration(
               color: Colors.white,
               border: Border(top: BorderSide(color: _dividerColor)),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              borderRadius: BorderRadius.zero,
               boxShadow: [
                 BoxShadow(
                   color: Color(0x0A000000),
@@ -353,7 +353,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
                   height: 4,
                   decoration: BoxDecoration(
                     color: _borderColor,
-                    borderRadius: BorderRadius.circular(9999),
+                    borderRadius: BorderRadius.zero,
                   ),
                 ),
                 Padding(
@@ -407,7 +407,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
         height: 32,
         decoration: BoxDecoration(
           color: dayColor ?? _primaryGreen,
-          shape: BoxShape.circle,
+          shape: BoxShape.rectangle,
         ),
         alignment: Alignment.center,
         child: Text(
@@ -431,7 +431,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
+          shape: BoxShape.rectangle,
           border: Border.all(color: dayColor, width: 1.5),
         ),
         alignment: Alignment.center,
@@ -455,7 +455,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
 
     return InkWell(
       onTap: () => _selectDay(DateTime(day.year, day.month, day.day)),
-      customBorder: const CircleBorder(),
+      customBorder: const RoundedRectangleBorder(),
       child: Center(child: circle),
     );
   }
@@ -498,7 +498,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
                 height: 8,
                 decoration: BoxDecoration(
                   color: _statusDotColor(visit.status),
-                  shape: BoxShape.circle,
+                  shape: BoxShape.rectangle,
                 ),
               ),
             ),

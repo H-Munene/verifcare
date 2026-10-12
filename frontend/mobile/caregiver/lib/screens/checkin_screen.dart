@@ -369,7 +369,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 ),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.zero,
                   boxShadow: const [
                     BoxShadow(color: Color(0x22000000), blurRadius: 6),
                   ],
@@ -452,10 +452,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
+        borderRadius: BorderRadius.zero,
         boxShadow: [
           BoxShadow(
             color: Color(0x0F000000),
@@ -476,7 +473,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               height: 4,
               decoration: BoxDecoration(
                 color: _borderColor,
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.zero,
               ),
             ),
           ),
@@ -547,7 +544,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: inRange ? _successTint : _dangerTint,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.zero,
             ),
             child: Row(
               children: [
@@ -556,7 +553,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                   height: 8,
                   decoration: BoxDecoration(
                     color: inRange ? _successGreen : _dangerRed,
-                    shape: BoxShape.circle,
+                    shape: BoxShape.rectangle,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -585,7 +582,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               foregroundColor: Colors.white,
               disabledBackgroundColor: _primaryGreen.withValues(alpha: 0.6),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.zero,
               ),
               elevation: 0,
             ),
@@ -623,7 +620,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             height: 48,
             decoration: const BoxDecoration(
               color: _dangerTint,
-              shape: BoxShape.circle,
+              shape: BoxShape.rectangle,
             ),
             child: Center(
               child: retriable
@@ -632,7 +629,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                       width: 18,
                       height: 18,
                       decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
+                        shape: BoxShape.rectangle,
                         border: Border.fromBorderSide(
                           BorderSide(color: _dangerRed, width: 2),
                         ),
@@ -679,7 +676,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 foregroundColor: _inkSecondary,
                 side: const BorderSide(color: _borderColor),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.zero,
                 ),
               ),
               child: Text(retriable ? 'Retry' : 'Contact Support'),
@@ -721,7 +718,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 foregroundColor: _inkSecondary,
                 side: const BorderSide(color: _borderColor),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.zero,
                 ),
               ),
               child: const Text('Retry'),
@@ -744,7 +741,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             height: 48,
             decoration: const BoxDecoration(
               color: _successTint,
-              shape: BoxShape.circle,
+              shape: BoxShape.rectangle,
             ),
             child: const Icon(Icons.check, color: _successGreen),
           ),
@@ -772,7 +769,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 backgroundColor: _primaryGreen,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.zero,
                 ),
                 elevation: 0,
               ),
@@ -800,10 +797,10 @@ class _RoundIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
-      shape: const CircleBorder(side: BorderSide(color: _borderColor)),
+      shape: const RoundedRectangleBorder(side: BorderSide(color: _borderColor)),
       elevation: 2,
       child: InkWell(
-        customBorder: const CircleBorder(),
+        customBorder: const RoundedRectangleBorder(),
         onTap: onTap,
         child: SizedBox(
           width: 40,
@@ -826,7 +823,7 @@ class _InlineBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.zero,
         border: Border.all(color: _borderColor),
       ),
       child: Text(

@@ -294,11 +294,11 @@ class _DependantCard extends StatelessWidget {
       child: Material(
         color: Colors.white,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.zero,
           side: const BorderSide(color: borderColor),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.zero,
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.all(16),

@@ -442,7 +442,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
             border: Border.all(color: borderColor),
           ),
           child: Column(
@@ -571,7 +571,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         foregroundColor: inkDefault,
         minimumSize: const Size.fromHeight(44),
         side: const BorderSide(color: borderColor),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       ),
       child: const Text('Back'),
     );
@@ -886,7 +886,9 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
           right: 12,
           child: Material(
             color: Colors.white,
-            shape: const CircleBorder(side: BorderSide(color: borderColor)),
+            shape: const RoundedRectangleBorder(
+              side: BorderSide(color: borderColor),
+            ),
             elevation: 2,
             child: IconButton(
               icon: const Icon(Icons.my_location, color: primaryGreen),
@@ -904,7 +906,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.zero,
                 border: Border.all(color: borderColor),
               ),
               child: Text(
@@ -944,7 +946,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
             style: TextStyle(color: inkTertiary),
           ),
           (_, final current?) => ClipRRect(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
             child: AspectRatio(
               aspectRatio: 1,
               child: Image.network(
@@ -962,7 +964,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         },
       if (photo != null)
         ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.zero,
           child: AspectRatio(
             aspectRatio: 1,
             child: Image.memory(photo, fit: BoxFit.cover),
@@ -1063,13 +1065,18 @@ class _StepHeader extends StatelessWidget {
     };
     final column = Column(
       children: [
-        CircleAvatar(
-          radius: 12,
-          backgroundColor: background,
-          foregroundColor: foreground,
+        // Square step marker, matching the square-cornered look (2026-10-12).
+        Container(
+          width: 24,
+          height: 24,
+          alignment: Alignment.center,
+          color: background,
           child: onTap == null && i < current
-              ? const Icon(Icons.check, size: 14)
-              : Text('${i + 1}', style: const TextStyle(fontSize: 12)),
+              ? Icon(Icons.check, size: 14, color: foreground)
+              : Text(
+                  '${i + 1}',
+                  style: TextStyle(fontSize: 12, color: foreground),
+                ),
         ),
         const SizedBox(height: 4),
         Text(
@@ -1092,7 +1099,7 @@ class _StepHeader extends StatelessWidget {
       excludeSemantics: true,
       child: InkWell(
         onTap: () => onTap(i),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.zero,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: column,
@@ -1150,7 +1157,7 @@ class _ResultBanner extends StatelessWidget {
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
       color: ok ? successTint : dangerTint,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.zero,
     ),
     child: Row(
       children: [
