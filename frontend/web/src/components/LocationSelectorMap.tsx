@@ -60,18 +60,18 @@ export interface LocationSelectorMapProps {
   hoveredWard: WardFeature | null;
 }
 
-const countyStyle = { color: '#0077e6', weight: 2, fillColor: '#0077e6', fillOpacity: 0.15 };
+const countyStyle = { color: '#047857', weight: 2, fillColor: '#047857', fillOpacity: 0.15 };
 const hoveredConstituencyStyle = {
-  color: '#0068c9',
+  color: '#065f46',
   weight: 2,
   dashArray: '4',
-  fillColor: '#0068c9',
+  fillColor: '#065f46',
   fillOpacity: 0.35,
 };
 const wardOutlineStyle = { color: '#15b042', weight: 1.5, fillOpacity: 0 };
 const hoveredWardStyle = { color: '#15b042', weight: 2, fillColor: '#15b042', fillOpacity: 0.4 };
 const selectedWardStyle = { color: '#15b042', weight: 2, fillColor: '#15b042', fillOpacity: 0.5 };
-const hoveredCountyStyle = { color: '#0077e6', weight: 2, fillColor: '#0077e6', fillOpacity: 0.35 };
+const hoveredCountyStyle = { color: '#047857', weight: 2, fillColor: '#047857', fillOpacity: 0.35 };
 
 export function LocationSelectorMap({
   selectedCounty,

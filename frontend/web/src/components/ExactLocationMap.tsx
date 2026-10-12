@@ -160,9 +160,9 @@ export function ExactLocationMap({
                 center={{ lat, lng }}
                 radius={radiusMeters}
                 options={{
-                  strokeColor: '#0077e6',
+                  strokeColor: '#047857',
                   strokeWeight: 1.5,
-                  fillColor: '#0077e6',
+                  fillColor: '#047857',
                   fillOpacity: 0.12,
                   clickable: false,
                 }}

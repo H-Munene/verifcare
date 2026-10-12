@@ -181,7 +181,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: dangerTint,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.zero,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,7 +232,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget _card(List<Widget> children) => Container(
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.zero,
       border: Border.all(color: borderColor),
     ),
     child: Column(children: children),
@@ -272,7 +272,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               initialValue: reason,
               decoration: const InputDecoration(
                 labelText: 'Reason not done',
-                border: OutlineInputBorder(),
                 isDense: true,
               ),
               items: [
@@ -296,7 +295,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 enabled: !_submitting,
                 decoration: const InputDecoration(
                   labelText: 'Details (optional)',
-                  border: OutlineInputBorder(),
                   isDense: true,
                 ),
               ),

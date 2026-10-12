@@ -6,6 +6,7 @@ import 'api/terms_api.dart';
 import 'api/visit_schedules_api.dart';
 import 'app_ui.dart';
 import 'auth/cognito_auth_service.dart';
+import 'screens/account_screen.dart';
 import 'screens/checkin_screen.dart';
 import 'screens/consent_screen.dart';
 import 'screens/home_screen.dart';
@@ -30,10 +31,7 @@ class MzaziCareCaregiverApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mzazi Care - Caregiver',
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF0077E6),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: _RootScreen(authService: authService),
     );
   }
@@ -103,8 +101,8 @@ class _RootScreenState extends State<_RootScreen> {
   }
 }
 
-/// Bottom-nav shell for a signed-in caregiver: Home (existing stub) and Calendar (03b), per the
-/// user's own "minimal shared shell" decision - Profile isn't built yet, so it isn't in this bar.
+/// Bottom-nav shell for a signed-in caregiver: Home (greeting and today's visits), Calendar (03b)
+/// and Account (sign out), the last added 2026-10-12.
 /// Owns the one ApiClient/VisitSchedulesApi/CheckinApi instance set for the whole authenticated
 /// session, so neither tab constructs its own - HomeScreen and ScheduleCalendarScreen each keep
 /// their own inner Scaffold/AppBar (nesting a Scaffold inside another Scaffold's body is standard
@@ -242,14 +240,20 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
   Widget build(BuildContext context) {
     final tabs = [
       HomeScreen(
-        authService: widget.authService,
         identity: widget.identity,
-        onSignedOut: widget.onSignedOut,
+        visitSchedulesApi: _visitSchedulesApi,
+        onSelectVisit: _openVisit,
+        refreshToken: _visitsRefreshToken,
       ),
       ScheduleCalendarScreen(
         visitSchedulesApi: _visitSchedulesApi,
         onSelectVisit: _openVisit,
         refreshToken: _visitsRefreshToken,
+      ),
+      AccountScreen(
+        authService: widget.authService,
+        identity: widget.identity,
+        onSignedOut: widget.onSignedOut,
       ),
     ];
 
@@ -273,17 +277,27 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
           ),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _tabIndex,
-        onTap: (index) => setState(() => _tabIndex = index),
-        items: const [
-          BottomNavigationBarItem(
+      // Same bar as the family app (2026-10-12): Home, Calendar, and Account for signing out.
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (index) => setState(() => _tabIndex = index),
+        backgroundColor: Colors.white,
+        indicatorColor: primaryTint,
+        destinations: const [
+          NavigationDestination(
             icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home, color: primaryGreen),
             label: 'Home',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.calendar_today_outlined),
+            selectedIcon: Icon(Icons.calendar_today, color: primaryGreen),
             label: 'Calendar',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person, color: primaryGreen),
+            label: 'Account',
           ),
         ],
       ),
@@ -301,7 +315,7 @@ class _OngoingVisitBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: primaryBlue,
+      color: primaryGreen,
       child: InkWell(
         onTap: onTap,
         child: SafeArea(

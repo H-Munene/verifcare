@@ -51,7 +51,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
     const problem: Problem =
       body && typeof body === 'object' && 'title' in body
         ? (body as Problem)
-        : { type: 'about:blank', title: response.statusText, status: response.status };
+        : {
+            type: 'about:blank',
+            // A 429 comes from API Gateway's throttle or WAF's rate limit, not the API, so it has
+            // no problem body; over HTTP/2 statusText is empty too.
+            title:
+              response.status === 429
+                ? 'Too many requests right now. Please wait a moment and try again.'
+                : response.statusText || `Request failed (HTTP ${response.status}).`,
+            status: response.status,
+          };
     throw new ApiError(problem);
   }
   return body as T;

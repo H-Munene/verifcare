@@ -30,11 +30,6 @@
   color: var(--color-ink-primary);
 }
 
-.app-shell__brand-subtitle {
-  font-size: 12px;
-  color: var(--color-ink-muted);
-}
-
 .app-shell__nav {
   display: flex;
   flex-direction: column;
@@ -120,7 +115,6 @@
     width: 56px;
   }
 
-  .app-shell__brand-subtitle,
   .app-shell__nav .ds-nav-item__label {
     display: none;
   }

@@ -70,7 +70,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className="app-shell__sidebar">
         <div className="app-shell__brand">
           <div className="app-shell__brand-title">Mzazi Care</div>
-          <div className="app-shell__brand-subtitle">Supervisor Console</div>
         </div>
         <nav className="app-shell__nav">
           {navSections.map((section) => (

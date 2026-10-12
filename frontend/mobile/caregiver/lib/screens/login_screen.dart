@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
+import '../widgets/auth_layout.dart';
 import '../widgets/password_field.dart';
 import 'forgot_password_screen.dart';
 
@@ -114,22 +115,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mzazi Care - Caregiver sign in')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: _challenge == null
-            ? _SignInForm(
-                formKey: _formKey,
-                emailController: _emailController,
-                passwordController: _passwordController,
-                submitting: _submitting,
-                error: _error,
-                onSubmit: _submitSignIn,
-                onForgotPassword: _openPasswordReset,
-              )
-            : _NewPasswordForm(challenge: _challenge!, onCompleted: _finish),
-      ),
+    return AuthScaffold(
+      child: _challenge == null
+          ? _SignInForm(
+              formKey: _formKey,
+              emailController: _emailController,
+              passwordController: _passwordController,
+              submitting: _submitting,
+              error: _error,
+              onSubmit: _submitSignIn,
+              onForgotPassword: _openPasswordReset,
+            )
+          : _NewPasswordForm(challenge: _challenge!, onCompleted: _finish),
     );
   }
 }
@@ -170,9 +167,13 @@ class _SignInForm extends StatelessWidget {
     return Form(
       key: formKey,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const AuthHeading(
+            title: 'Welcome back',
+            subtitle: 'Sign in to continue.',
+          ),
           TextFormField(
             controller: emailController,
             keyboardType: TextInputType.emailAddress,
@@ -206,6 +207,7 @@ class _SignInForm extends StatelessWidget {
             const SizedBox(height: 12),
           ],
           FilledButton(
+            style: authButtonStyle,
             onPressed: submitting ? null : onSubmit,
             child: Text(submitting ? 'Signing in...' : 'Sign in'),
           ),
@@ -282,11 +284,13 @@ class _NewPasswordFormState extends State<_NewPasswordForm> {
     return Form(
       key: _formKey,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Set a new password to finish signing in.'),
-          const SizedBox(height: 16),
+          const AuthHeading(
+            title: 'Set a new password',
+            subtitle: 'Choose a new password to finish signing in.',
+          ),
           if (_needsName) ...[
             TextFormField(
               controller: _fullNameController,
@@ -324,6 +328,7 @@ class _NewPasswordFormState extends State<_NewPasswordForm> {
             const SizedBox(height: 12),
           ],
           FilledButton(
+            style: authButtonStyle,
             onPressed: _submitting ? null : _submit,
             child: Text(_submitting ? 'Saving...' : 'Set password and sign in'),
           ),

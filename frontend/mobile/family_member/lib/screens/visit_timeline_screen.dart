@@ -249,7 +249,7 @@ class _TimelineStep extends StatelessWidget {
                   height: 24,
                   decoration: BoxDecoration(
                     color: done || failed ? color : Colors.white,
-                    shape: BoxShape.circle,
+                    shape: BoxShape.rectangle,
                     border: Border.all(color: color, width: 2),
                   ),
                   child: done || failed

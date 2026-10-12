@@ -216,7 +216,7 @@ class _TermsView extends StatelessWidget {
         horizontalTitleGap: 8,
         visualDensity: VisualDensity.compact,
         controlAffinity: ListTileControlAffinity.leading,
-        activeColor: primaryBlue,
+        activeColor: primaryGreen,
         title: Text(
           label,
           style: const TextStyle(fontSize: 13, height: 1.35, color: inkDefault),
@@ -258,7 +258,7 @@ class _TermsView extends StatelessWidget {
                     ),
                     if (notice case final notice?) ...[
                       const SizedBox(height: 12),
-                      _Banner(text: notice, tint: const Color(0xFFE6F1FC)),
+                      _Banner(text: notice, tint: const Color(0xFFE7F5EF)),
                     ],
                     for (final section in terms.sections) ...[
                       const SizedBox(height: 20),
@@ -327,7 +327,7 @@ class _TermsView extends StatelessWidget {
                           minimumSize: const Size.fromHeight(44),
                           side: const BorderSide(color: borderColor),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: BorderRadius.zero,
                           ),
                         ),
                         child: const Text('Decline'),
@@ -373,10 +373,7 @@ class _Banner extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: tint,
-      borderRadius: BorderRadius.circular(12),
-    ),
+    decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.zero),
     child: Text(text, style: const TextStyle(fontSize: 13, color: inkDefault)),
   );
 }

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
-const _primaryTint = Color(0xFFE6F1FC);
 const _neutralTint = Color(0xFFF0F0F0);
 
 typedef StatusStyle = ({String label, Color ink, Color tint});
@@ -11,8 +10,12 @@ typedef StatusStyle = ({String label, Color ink, Color tint});
 /// How each visit status reads to a family member. "Completed" rather than the caregiver app's
 /// "Checked out", since the family member didn't check anything out themselves.
 StatusStyle visitStatusStyle(VisitStatus status) => switch (status) {
-  'scheduled' => (label: 'Scheduled', ink: primaryBlue, tint: _primaryTint),
-  'in_progress' => (label: 'In progress', ink: primaryBlue, tint: _primaryTint),
+  'scheduled' => (label: 'Scheduled', ink: primaryGreen, tint: primaryTint),
+  'in_progress' => (
+    label: 'In progress',
+    ink: primaryGreen,
+    tint: primaryTint,
+  ),
   'completed' => (label: 'Completed', ink: successGreen, tint: successTint),
   'missed' => (label: 'Missed', ink: dangerRed, tint: dangerTint),
   // A missed visit a supervisor is looking into.
@@ -36,7 +39,7 @@ class StatusPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: style.tint,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.zero,
       ),
       child: Text(
         style.label,
@@ -79,7 +82,7 @@ class SectionCard extends StatelessWidget {
     padding: padding,
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.zero,
       border: Border.all(color: borderColor),
     ),
     child: child,

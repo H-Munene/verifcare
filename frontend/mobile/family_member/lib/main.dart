@@ -7,6 +7,7 @@ import 'api/family_link_requests_api.dart';
 import 'api/terms_api.dart';
 import 'api/users_api.dart';
 import 'api/visit_schedules_api.dart';
+import 'app_ui.dart';
 import 'auth/cognito_auth_service.dart';
 import 'auth/registration.dart';
 import 'screens/consent_screen.dart';
@@ -58,10 +59,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Mzazi Care - Family Member',
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF0077E6),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: _RootScreen(
         authService: authService,
         usersApi: usersApi,

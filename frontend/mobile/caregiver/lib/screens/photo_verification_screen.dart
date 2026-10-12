@@ -267,7 +267,7 @@ class _PhotoButton extends StatelessWidget {
       _PhotoState.verifying => const SizedBox(
         width: 22,
         height: 22,
-        child: CircularProgressIndicator(strokeWidth: 2, color: primaryBlue),
+        child: CircularProgressIndicator(strokeWidth: 2, color: primaryGreen),
       ),
       _PhotoState.verified => const Icon(
         Icons.check_circle,
@@ -287,11 +287,11 @@ class _PhotoButton extends StatelessWidget {
     return Material(
       color: background,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.zero,
         side: BorderSide(color: border),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.zero,
         onTap: enabled ? onTap : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),

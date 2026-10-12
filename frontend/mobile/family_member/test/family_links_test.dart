@@ -569,9 +569,8 @@ void main() {
     final backend = _Backend();
     await http.runWithClient(() async {
       await _pumpHome(tester);
-      await tester.tap(find.text('Wanjiku Kamau'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Family'));
+      // Family is a bottom-navigation tab for the selected (only) dependant.
+      await tester.tap(find.widgetWithText(NavigationDestination, 'Family'));
       await tester.pumpAndSettle();
 
       await tester.tap(

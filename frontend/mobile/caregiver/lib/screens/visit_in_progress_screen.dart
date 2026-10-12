@@ -190,7 +190,7 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.zero,
         border: Border.all(color: borderColor),
       ),
       child: Column(

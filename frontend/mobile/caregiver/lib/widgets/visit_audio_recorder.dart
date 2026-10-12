@@ -206,7 +206,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.zero,
         border: Border.all(color: borderColor),
       ),
       child: switch (_mode) {
@@ -235,7 +235,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
                 height: 8,
                 decoration: const BoxDecoration(
                   color: dangerRed,
-                  shape: BoxShape.circle,
+                  shape: BoxShape.rectangle,
                 ),
               ),
               const SizedBox(width: 8),
@@ -265,7 +265,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
           levels: _levels.length > _barCount
               ? _levels.sublist(_levels.length - _barCount)
               : _levels,
-          activeColor: primaryBlue,
+          activeColor: primaryGreen,
         ),
         const SizedBox(height: 12),
         Text(
@@ -286,7 +286,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
             height: recording ? 80 : 72,
             decoration: const BoxDecoration(
               color: dangerRed,
-              shape: BoxShape.circle,
+              shape: BoxShape.rectangle,
             ),
             child: Center(
               child: recording
@@ -295,7 +295,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
                       height: 24,
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.zero,
                       ),
                     )
                   : const Icon(Icons.mic, color: Colors.white, size: 30),
@@ -352,10 +352,10 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
             ),
             const SizedBox(width: 20),
             Material(
-              color: primaryBlue,
-              shape: const CircleBorder(),
+              color: primaryGreen,
+              shape: const RoundedRectangleBorder(),
               child: InkWell(
-                customBorder: const CircleBorder(),
+                customBorder: const RoundedRectangleBorder(),
                 onTap: _togglePlay,
                 child: SizedBox(
                   width: 56,
@@ -384,7 +384,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
             minimumSize: const Size.fromHeight(44),
             side: const BorderSide(color: borderColor),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.zero,
             ),
           ),
           child: const Text('Re-record'),
@@ -444,7 +444,7 @@ class _Waveform extends StatelessWidget {
                 margin: EdgeInsets.symmetric(horizontal: slot * 1.5 / 7),
                 decoration: BoxDecoration(
                   color: active ? activeColor : waveformIdle,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.zero,
                 ),
               );
             }),
