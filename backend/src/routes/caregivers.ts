@@ -1,13 +1,7 @@
-// POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId} (HEZ-29). Every endpoint here is
-// supervisor-only (confirmed with the user before implementing) - architecture.md frames caregiver
-// registration as a supervisor action, unlike family_member/supervisor self-signup, and nothing
-// currently needs a caregiver to self-view or self-edit their own record. Adding that later is a
-// small, additive change (one requireRole call becoming an ownership check, the same shape
-// routes/users.ts already has) once the caregiver mobile app actually needs it - not built ahead
-// of that real need.
+// POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId}. All supervisor-only.
 //
-// caregivers is a 1:1 shared-PK extension of users (caregivers.userId === users.id), so every
-// response here is a join, and POST /caregivers creates both rows in one transaction.
+// caregivers shares its PK with users, so responses are joins and POST creates both rows in one
+// transaction.
 
 import { and, asc, eq } from 'drizzle-orm';
 import { Router, type RequestHandler } from 'express';
@@ -56,8 +50,7 @@ const updateCaregiverRequestSchema = z.object({
   active: z.boolean().optional(),
 });
 
-// Express 5's params type allows string | string[], so req.params.caregiverId isn't a plain
-// string on its own - validated the same way any other input is, via parseOrSendProblem.
+// Express 5 types params as string | string[], so validate rather than cast.
 const caregiverIdParamSchema = z.string().uuid();
 
 const listCaregiversQuerySchema = z.object({
@@ -120,8 +113,6 @@ function getDb(res: import('express').Response): Db | undefined {
 export function createCaregiversRouter(dependencies: CaregiversRouterDependencies): Router {
   const router = Router();
   const { cognitoAdmin, requireAuth } = dependencies;
-  // Every route in this router needs the same auth (see the file header comment) - applied once
-  // here rather than repeated on each route.
   router.use(requireAuth, requireRole('supervisor'));
 
   router.post('/', async (req, res, next) => {
@@ -135,8 +126,7 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
     }
 
     try {
-      // Same ordering rationale as routes/users.ts: assign the Cognito role before the DB insert,
-      // so a failed insert (e.g. duplicate cognitoSub) still leaves a retry able to succeed.
+      // Role before insert, so a failed insert can be retried.
       await cognitoAdmin.assignRole(body.cognitoSub, 'caregiver');
 
       const result = await db.transaction(async (tx) => {

@@ -5,10 +5,7 @@ import type { IdentityClaims, NewPasswordRequiredResult, SignInResult } from './
 interface AuthContextValue {
   identity: IdentityClaims | null;
   loading: boolean;
-  // Resolves to a NewPasswordRequiredResult when the account has a temporary password (always the
-  // case for a console- or AdminCreateUser-created account) - the caller (LoginPage) is
-  // responsible for branching on `result.type` and, for the temporary-password case, collecting a
-  // new password and calling completeNewPassword below.
+  // Returns a NewPasswordRequiredResult for temporary passwords; call completeNewPassword next.
   signIn: (email: string, password: string) => Promise<SignInResult>;
   completeNewPassword: (
     result: NewPasswordRequiredResult,
@@ -16,8 +13,7 @@ interface AuthContextValue {
     requiredAttributeValues?: Record<string, string>,
   ) => Promise<void>;
   signOut: () => void;
-  // Used by api/client.ts to attach a fresh bearer token to every request - not read from
-  // `identity` directly, since a cached identity can outlive its underlying token.
+  // Always fetches a fresh token; `identity` can outlive it.
   getIdToken: () => Promise<string | null>;
 }
 
@@ -83,9 +79,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// Context + hook are deliberately co-located (the standard React pattern) rather than split
-// across files just to satisfy react-refresh's single-component-export preference - that rule
-// only affects Fast Refresh's dev-mode granularity, not production behavior.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);

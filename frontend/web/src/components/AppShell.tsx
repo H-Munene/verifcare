@@ -4,11 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 import { NavItem } from '../design-system/NavItem';
 import './AppShell.css';
 
-// Matches the wireframe's global chrome (temp_images's design prompt): left sidebar nav with all
-// 7 sections, top bar with the signed-in user's identity and sign-out. Only "Dependants" is a
-// real route this pass (see docs/project-state.md's HEZ-52/53/55/56 entry) - every other section
-// renders present-but-disabled, so the shell matches the design without claiming functionality
-// that doesn't exist yet.
+// Sidebar nav and top bar. Only "Dependants" is wired up; the other sections are disabled for now.
 const NAV_SECTIONS = [
   { label: 'Overview', path: undefined },
   { label: 'Caregivers', path: undefined },

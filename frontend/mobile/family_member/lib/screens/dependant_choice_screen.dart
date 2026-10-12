@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Shown once right after registration completes - "optional, skippable, do-it-later" per the
-/// settled design (docs/project-state.md). Linking to an *existing* dependant someone else
-/// registered is deliberately not offered here: that path has zero backend support (no request/
-/// accept/reject table or discovery endpoint) and is out of scope for this pass.
+/// Optional step after registration. Linking to an existing dependant isn't supported yet.
 class DependantChoiceScreen extends StatelessWidget {
   final VoidCallback onRegisterNow;
   final VoidCallback onSkip;

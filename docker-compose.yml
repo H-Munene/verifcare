@@ -1,10 +1,5 @@
-# Local development Postgres (Linear HEZ-13). Matches architecture.md's target of PostgreSQL on
-# RDS as closely as a local container reasonably can - same major version, no managed-service
-# extras that wouldn't exist locally anyway.
-#
-# Host port is 5433, not the default 5432, so this doesn't collide with a Postgres already
-# installed and running locally (common enough to plan around, not a one-off workaround for a
-# single machine) - backend/.env.example's DATABASE_URL/TEST_DATABASE_URL already point at 5433.
+# Local development Postgres, same major version as RDS.
+# Host port 5433 avoids clashing with a locally installed Postgres.
 #
 # Usage: docker compose up -d   (from the repo root)
 services:
@@ -18,10 +13,7 @@ services:
     ports:
       - '5433:5432'
     volumes:
-      # postgres:18+'s image expects the volume at /var/lib/postgresql (not the pre-18
-      # /var/lib/postgresql/data convention) - it refuses to start otherwise, treating the old
-      # path as leftover data from an unrelated major-version upgrade. Confirmed the hard way:
-      # the container crash-looped with exactly that error before this was fixed.
+      # postgres 18+ expects the volume at /var/lib/postgresql, not .../data.
       - mzazi_care_postgres_data:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']

@@ -11,7 +11,7 @@ import { logger } from './logger.js';
 try {
   process.loadEnvFile();
 } catch {
-  // No .env file present - fine, DATABASE_URL is presumably set some other way.
+  // No .env file; DATABASE_URL may be set elsewhere.
 }
 
 const config = loadConfig();
@@ -22,9 +22,7 @@ if (!config.databaseUrl) {
 const pool = new Pool({ connectionString: config.databaseUrl });
 const db = createDb(pool);
 
-// No local Cognito emulator in this project's stack - local dev verifies against the same real,
-// deployed User Pool the Lambda uses (see .env.example), including AdminUpdateUserAttributes
-// calls, which need the same AWS credentials this machine already has configured for the AWS CLI.
+// Local dev uses the deployed user pool, so Cognito admin calls need local AWS credentials.
 const verifier = createIdTokenVerifier(config.userPoolId, config.userPoolClientIds);
 const requireAuth = createRequireAuth(verifier);
 const requireVerifiedIdentity = createRequireVerifiedIdentity(verifier);

@@ -1,8 +1,4 @@
-// Classifies a Postgres error wrapped by Drizzle's DrizzleQueryError, whose own top-level
-// `.message` is a generic "Failed query: ..." string - the real Postgres error (`.code` included)
-// is on `.cause` (established in enforcement.integration.test.ts, reused everywhere this project
-// needs to branch on a specific Postgres error code, not just log-and-500 every DB error the same
-// way).
+// Postgres error helpers. Drizzle wraps the driver error, so the real `.code` is on `.cause`.
 // See https://www.postgresql.org/docs/current/errcodes-appendix.html
 
 function getPostgresErrorCode(err: unknown): string | undefined {

@@ -1,24 +1,10 @@
-// Drizzle schema-as-code, ported from docs/schema.sql (Linear HEZ-8).
+// Drizzle schema. Columns are camelCase here and snake_case in the DB (`casing` option).
 //
-// Column names are written camelCase here and mapped to snake_case in generated SQL by
-// drizzle.config.ts's `casing: 'snake_case'` option - verified column-by-column against
-// drizzle-orm's toSnakeCase() before relying on it, so no column needs an explicit name string.
-// The runtime `drizzle()` client (HEZ-27) must be constructed with the same `casing: 'snake_case'`
-// option or query-time column resolution will mismatch what these migrations create.
-//
-// Not ported here - not representable in Drizzle's schema model, so left for HEZ-9's hand-written
-// custom migrations instead:
-//   - `uuid_generate_v7()`, `set_updated_at()`, `forbid_update_delete()` and the extensions they need.
-//   - The five `trg_*_updated_at` triggers. `updatedAt` columns below are plain `DEFAULT now()`
-//     columns (matching schema.sql), but nothing here keeps them current on UPDATE - that guarantee
-//     only exists once HEZ-9 adds the trigger, and it must hold for every writer, not just this app.
-//   - `trg_verification_attempts_append_only` / `trg_audit_log_append_only` (reject UPDATE/DELETE).
-//   - The two `EXCLUDE USING gist` constraints on `visit_schedules` (no `exclude()` in Drizzle's
-//     pg-core at all - confirmed against the installed version).
-//
-// CHECK constraints that were unnamed inline constraints in schema.sql (Postgres would have
-// auto-named them) are given explicit descriptive names here, since Drizzle's `check()` requires
-// one: `chk_<table>_<what>`, consistent with schema.sql's already-named constraints.
+// Things Drizzle can't express live in the hand-written migrations drizzle/0000 and 0002:
+//   - uuid_generate_v7(), set_updated_at(), forbid_update_delete() and their extensions.
+//   - The trg_*_updated_at triggers that keep `updatedAt` current.
+//   - The append-only triggers on verification_attempts and audit_log.
+//   - The EXCLUDE USING gist constraints on visit_schedules.
 
 import { sql } from 'drizzle-orm';
 import {
@@ -42,9 +28,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-// ============================================================================
 // Enum types
-// ============================================================================
 
 export const subjectTypeEnum = pgEnum('subject_type', ['caregiver', 'dependant']);
 export const dependantStatusEnum = pgEnum('dependant_status', ['active', 'deactivated']);
@@ -64,9 +48,7 @@ export const consentTypeEnum = pgEnum('consent_type', [
   'audio_cognitive_monitoring',
 ]);
 
-// ============================================================================
 // users
-// ============================================================================
 
 export const users = pgTable(
   'users',
@@ -94,9 +76,7 @@ export const users = pgTable(
   ],
 );
 
-// ============================================================================
 // caregivers (1:1 extension of users)
-// ============================================================================
 
 export const caregivers = pgTable('caregivers', {
   userId: uuid()
@@ -109,9 +89,7 @@ export const caregivers = pgTable('caregivers', {
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
 
-// ============================================================================
 // dependants
-// ============================================================================
 
 export const dependants = pgTable(
   'dependants',
@@ -141,9 +119,7 @@ export const dependants = pgTable(
   ],
 );
 
-// ============================================================================
 // dependant_family_members
-// ============================================================================
 
 export const dependantFamilyMembers = pgTable(
   'dependant_family_members',
@@ -172,9 +148,7 @@ export const dependantFamilyMembers = pgTable(
   ],
 );
 
-// ============================================================================
 // biometric_enrollments
-// ============================================================================
 
 export const biometricEnrollments = pgTable(
   'biometric_enrollments',
@@ -208,9 +182,7 @@ export const biometricEnrollments = pgTable(
   ],
 );
 
-// ============================================================================
 // visit_schedules
-// ============================================================================
 
 export const visitSchedules = pgTable(
   'visit_schedules',
@@ -246,14 +218,11 @@ export const visitSchedules = pgTable(
     index('idx_visit_schedules_dependant_start').on(table.dependantId, table.scheduledStart),
     index('idx_visit_schedules_status').on(table.status),
     index('idx_visit_schedules_created_by').on(table.createdBy),
-    // `excl_visit_schedules_caregiver_overlap` / `excl_visit_schedules_dependant_overlap`
-    // (EXCLUDE USING gist, double-booking prevention) are added by HEZ-9 - see file header.
+    // Double-booking EXCLUDE constraints are in the custom migration.
   ],
 );
 
-// ============================================================================
 // verification_events
-// ============================================================================
 
 export const verificationEvents = pgTable(
   'verification_events',
@@ -289,9 +258,7 @@ export const verificationEvents = pgTable(
   ],
 );
 
-// ============================================================================
 // verification_attempts (append-only audit trail)
-// ============================================================================
 
 export const verificationAttempts = pgTable(
   'verification_attempts',
@@ -310,13 +277,11 @@ export const verificationAttempts = pgTable(
   },
   (table) => [
     index('idx_verification_attempts_visit_time').on(table.visitScheduleId, table.attemptedAt),
-    // `trg_verification_attempts_append_only` (rejects UPDATE/DELETE) is added by HEZ-9.
+    // Append-only trigger is in the custom migration.
   ],
 );
 
-// ============================================================================
 // audio_records
-// ============================================================================
 
 export const audioRecords = pgTable(
   'audio_records',
@@ -324,10 +289,7 @@ export const audioRecords = pgTable(
     id: uuid()
       .primaryKey()
       .default(sql`uuid_generate_v7()`),
-    // No inline .references() here: the default FK constraint name it would generate
-    // ("audio_records_verification_event_id_verification_events_visit_schedule_id_fk", 76 chars)
-    // exceeds Postgres's 63-byte identifier limit and would be silently truncated. Named explicitly
-    // via foreignKey() below instead.
+    // FK is declared below with a short name; the default exceeds Postgres's 63-byte limit.
     verificationEventId: uuid().notNull(),
     s3Key: text().notNull().unique('uq_audio_records_s3_key'),
     durationSeconds: integer(),
@@ -346,9 +308,7 @@ export const audioRecords = pgTable(
   ],
 );
 
-// ============================================================================
 // consent_records
-// ============================================================================
 
 export const consentRecords = pgTable(
   'consent_records',
@@ -379,9 +339,7 @@ export const consentRecords = pgTable(
   ],
 );
 
-// ============================================================================
 // notification_log
-// ============================================================================
 
 export const notificationLog = pgTable(
   'notification_log',
@@ -414,9 +372,7 @@ export const notificationLog = pgTable(
   ],
 );
 
-// ============================================================================
 // audit_log (append-only, generic across every entity type in the system)
-// ============================================================================
 
 export const auditLog = pgTable(
   'audit_log',
@@ -435,6 +391,6 @@ export const auditLog = pgTable(
   (table) => [
     index('idx_audit_log_entity').on(table.entityType, table.entityId),
     index('idx_audit_log_actor_time').on(table.actorUserId, table.createdAt),
-    // `trg_audit_log_append_only` (rejects UPDATE/DELETE) is added by HEZ-9.
+    // Append-only trigger is in the custom migration.
   ],
 );

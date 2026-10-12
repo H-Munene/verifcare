@@ -5,10 +5,7 @@ export interface StepperProps {
   currentStepIndex: number;
 }
 
-// Horizontal numbered-step indicator (inspired by a standard e-commerce checkout stepper): a
-// filled accent circle for the current and completed steps (completed ones show a checkmark), an
-// outlined circle for steps not yet reached, connected by a line that fills in accent color behind
-// completed steps.
+// Horizontal numbered steps. Completed steps show a checkmark.
 export function Stepper({ steps, currentStepIndex }: StepperProps) {
   return (
     <div className="ds-stepper">

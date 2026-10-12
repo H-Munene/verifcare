@@ -48,11 +48,8 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   }
 }
 
-/// Mirrors AuthContext.tsx's mount-time behavior: checks for an already-valid cached session
-/// before deciding whether to land on WelcomeScreen or HomeScreen first. If the cached session is
-/// role-less (someone confirmed sign-up but the app closed before POST /users completed),
-/// finishes registration silently rather than sending them back through the sign-up chain -
-/// same fix completeSelfRegistrationIfNeeded gives the plain Login screen.
+/// Picks the start screen from the cached session. A role-less session (registration was never
+/// finished) gets registered on the spot.
 class _RootScreen extends StatefulWidget {
   final CognitoAuthService authService;
   final UsersApi usersApi;
@@ -89,7 +86,7 @@ class _RootScreenState extends State<_RootScreen> {
           session,
         );
       } catch (_) {
-        // Leave identity null - falls back to the welcome screen rather than getting stuck.
+        // Fall back to the welcome screen.
         identity = null;
       }
     }
@@ -181,11 +178,7 @@ class _RootScreenState extends State<_RootScreen> {
     );
   }
 
-  // No in-app verification-code chain (2026-09-14, user request - see SignUpScreen's own
-  // comment): SignUpScreen creates the account and tells the user it needs manual confirmation,
-  // then pops itself back to Welcome. Signing in afterward (once confirmed) goes through
-  // LoginScreen, whose _onAuthenticated already knows how to finish self-registration for a
-  // role-less identity via completeSelfRegistrationIfNeeded.
+  // Sign-up returns to Welcome; once the account is confirmed, LoginScreen finishes registration.
   void _pushSignUp(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => SignUpScreen(authService: widget.authService)),

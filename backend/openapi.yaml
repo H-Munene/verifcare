@@ -3,7 +3,7 @@ info:
   title: Mzazi Care API
   version: '1.0'
   description: |
-    The public-facing API for the Mzazi Care `api` AWS Lambda function (Linear HEZ-12).
+    The public-facing API for the Mzazi Care `api` AWS Lambda function.
 
     Consumed by three separate client apps: the admin/supervisor web app, the caregiver mobile
     app, and the family member mobile app. Authentication is via AWS Cognito - clients obtain a
@@ -11,7 +11,7 @@ info:
     the token and reads the `role` custom claim (`supervisor` / `caregiver` / `family_member`) for
     authorization. There is no `/login` endpoint here.
 
-    Conventions used throughout, decided 2026-09-09 (see docs/project-state.md):
+    Conventions:
       - Every path is prefixed `/v1`.
       - Errors are RFC 7807 Problem Details (`application/problem+json`) - see `Problem` below.
       - List endpoints are cursor-paginated (`cursor` + `limit` query params, `nextCursor` in the
@@ -21,10 +21,6 @@ info:
         issues, not proxied through the API - see the `*/upload-url` endpoints.
       - Field names in request/response bodies are camelCase, mapping 1:1 to the snake_case columns
         in docs/schema.sql / backend/src/db/schema.ts (e.g. `phoneNumber` <-> `phone_number`).
-
-    This spec covers the full surface of milestone "3. Backend - Node.js/Express API" (Linear
-    HEZ-27 through HEZ-42). Endpoint-by-endpoint implementation against this contract is each of
-    those issues' job, not this one's.
 
 servers:
   - url: /v1
@@ -478,8 +474,7 @@ paths:
       summary: Schedule a visit
       description: |
         Rejected with `409 Conflict` if it would double-book the caregiver or dependant into an
-        overlapping window - surfaces `backend/drizzle`'s `excl_visit_schedules_*_overlap`
-        constraint violations as a clean API error rather than a raw DB error (Linear HEZ-32).
+        overlapping window (the `excl_visit_schedules_*_overlap` constraints).
       operationId: createVisitSchedule
       requestBody:
         required: true

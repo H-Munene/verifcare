@@ -1,6 +1,4 @@
-// Single place that knows the `casing: 'snake_case'` rule shared by every runtime Drizzle client
-// in this project (local dev, tests, and the Lambda-deployed api). See schema.ts's and
-// drizzle.config.ts's header comments for why this must match the migrations exactly.
+// `casing` must match drizzle.config.ts.
 
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Pool } from 'pg';

@@ -7,8 +7,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
 }
 
-// Inputs share the same 32px height as buttons so toolbars and forms line up (per the design
-// system spec) - see components.css's --control-height usage.
+// Same height as buttons (--control-height).
 export function Input({ label, hint, error, id, className, ...rest }: InputProps) {
   const classes = ['ds-input', error ? 'ds-input--error' : undefined, className]
     .filter(Boolean)

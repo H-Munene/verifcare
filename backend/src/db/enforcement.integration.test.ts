@@ -1,10 +1,5 @@
-// Integration tests for the DB-level enforcement that lives outside schema.ts (Linear HEZ-11),
-// automating the manual checks described in backend/drizzle/README.md and first performed by hand
-// for HEZ-9 (see docs/project-state.md, "Custom Drizzle migrations").
-//
-// Requires a real, disposable Postgres database - set TEST_DATABASE_URL (see .env.example). Skips
-// itself (rather than failing) when that isn't set, so `npm test` still works without a database
-// configured; wiring a real Postgres into CI so this actually runs there is separate infra work.
+// Integration tests for the DB-level enforcement in the hand-written migrations (triggers,
+// EXCLUDE constraints). Needs TEST_DATABASE_URL; skipped when it isn't set.
 
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -110,7 +105,7 @@ async function insertVisitSchedule(params: {
 
 const hasTestDb = Boolean(getTestDatabaseUrl());
 
-describe.skipIf(!hasTestDb)('DB-level enforcement (HEZ-9 objects, verified via HEZ-11)', () => {
+describe.skipIf(!hasTestDb)('DB-level enforcement', () => {
   beforeAll(async () => {
     await setupTestDb();
   }, 30_000);

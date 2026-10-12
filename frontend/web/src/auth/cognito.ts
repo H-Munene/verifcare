@@ -1,9 +1,4 @@
-// Thin wrapper around amazon-cognito-identity-js for exactly the flow this app's Cognito app
-// client supports: SRP username/password sign-in (ALLOW_USER_SRP_AUTH), no OAuth Hosted UI.
-// amazon-cognito-identity-js was chosen over full AWS Amplify specifically because this app needs
-// nothing beyond SRP sign-in and session/token refresh - Amplify's Auth/API/Storage/DataStore
-// surface would be unused weight, matching this project's existing preference for lean, purpose-
-// fit dependencies (e.g. aws-jwt-verify on the backend).
+// Thin wrapper around amazon-cognito-identity-js: SRP sign-in and session refresh, no Hosted UI.
 
 import {
   AuthenticationDetails,
@@ -23,10 +18,7 @@ export interface IdentityClaims {
   role: 'supervisor' | 'caregiver' | 'family_member' | undefined;
 }
 
-// Client-side decode only, for display purposes (the current user's email/role in the app shell) -
-// never trusted as an authorization decision. The backend independently re-verifies every token's
-// signature on every request (see backend/src/auth/verifier.ts) regardless of what this app does
-// with the decoded claims.
+// Display only; the backend verifies the token on every request.
 export function decodeIdentity(idToken: string): IdentityClaims {
   const payloadSegment = idToken.split('.')[1];
   if (!payloadSegment) {
@@ -50,12 +42,8 @@ export function decodeIdentity(idToken: string): IdentityClaims {
   };
 }
 
-// A console- or AdminCreateUser-created account always starts with a temporary password (the
-// Cognito console has no "set a permanent password" action - confirmed against AWS's own
-// AdminSetUserPassword docs, that's API/CLI-only). Signing in with one returns this challenge
-// instead of a session; the app must prompt for a new password before the account is usable. Only
-// truly required attributes belong in `completeNewPassword`'s second argument - per AWS's own
-// RespondToAuthChallenge docs: "you can't modify a required attribute that already has a value."
+// Returned when signing in with a temporary password (any admin-created account). Only pass
+// required attributes that don't have a value yet to completeNewPassword.
 export interface NewPasswordRequiredResult {
   type: 'newPasswordRequired';
   requiredAttributes: string[];
@@ -97,10 +85,7 @@ export function signIn(email: string, password: string): Promise<SignInResult> {
   });
 }
 
-// Resolves the current session's ID token, transparently refreshing it via the library's own
-// getSession() if the cached access token has expired but the refresh token is still valid.
-// Resolves to null if there is no signed-in user or the session can't be refreshed (expired
-// refresh token) - callers treat that as "not authenticated", not an error.
+// Returns the ID token, refreshing it if needed, or null if there's no usable session.
 export function getCurrentIdToken(): Promise<string | null> {
   const user = userPool.getCurrentUser();
   if (!user) {

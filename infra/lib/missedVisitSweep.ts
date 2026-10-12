@@ -25,26 +25,12 @@ export function createMissedVisitSweep(
 ): MissedVisitSweep {
   const { vpc, database, databaseSecret } = params;
 
-  // Shared across two alert sources per architecture.md's "Alerts" row
-  // (missed-visit alerts from this Lambda, cognitive-risk alerts from the
-  // api/acoustic-model flow later) - not nested under missed-visit-sweep's
-  // own naming. No email subscription created here: no real supervisor
-  // email address has been settled anywhere yet, and that's account-
-  // specific operational data, not infrastructure-as-code material. The
-  // Message Data Protection add-on confirmed during the cost-estimate work
-  // is deferred to the same follow-up issue as the real sweep logic below -
-  // its actual data-identifier/action configuration was never specified,
-  // and configuring it now would be scope creep beyond "stub the wiring."
+  // Shared by missed-visit and cognitive-risk alerts. No subscriptions yet.
   const alertsTopic = new sns.Topic(stack, "AlertsTopic", {
     topicName: "mzazi-care-alerts",
   });
 
-  // Stub only (HEZ-23) - see backend/src/missedVisitSweep.ts for why the
-  // real query/SNS-publish logic is deliberately deferred, not built here.
-  // Still VPC-attached to eu-west-1c and given the same environment
-  // variables api has, even though the stub doesn't use them yet - matches
-  // this project's consistent pattern of wiring networking/environment
-  // ahead of the code that will need it.
+  // The handler is still a stub, but it gets the same VPC and env as api.
   const missedVisitSweepFunction = new NodejsFunction(stack, "MissedVisitSweepFunction", {
     entry: path.join(__dirname, "../../backend/src/missedVisitSweep.ts"),
     projectRoot: path.join(__dirname, "../../backend"),
@@ -65,12 +51,7 @@ export function createMissedVisitSweep(
 
   database.connections.allowDefaultPortFrom(missedVisitSweepFunction);
 
-  // Every 6 hours, not hourly - confirmed with the user 2026-09-13. This
-  // changes the working assumption baked into the already-confirmed
-  // Secrets Manager (800 API calls/month) and Lambda (720 invocations/
-  // month) cost figures in project-state.md (hourly assumed ~720
-  // invocations/month; every 6 hours is ~120/month) - flagged there as
-  // needing a re-check, not recalculated here.
+  // Every 6 hours.
   new events.Rule(stack, "MissedVisitSweepSchedule", {
     schedule: events.Schedule.rate(cdk.Duration.hours(6)),
     targets: [new eventsTargets.LambdaFunction(missedVisitSweepFunction)],

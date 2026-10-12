@@ -1,5 +1,4 @@
 /docs
-# /graphify-out
 node_modules/
 dist/
 coverage/
@@ -8,9 +7,6 @@ coverage/
 .env.*
 !.env.example
 /temp_images
-# CLAUDE.md
-# /.claude
-.agents
 /acoustic-model/data
 /acoustic-model/venv/
 
@@ -18,4 +14,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
-/acoustic-model/results/**/*.local.csv
+/acoustic-model/results

@@ -42,8 +42,7 @@ describe('extractUser', () => {
   });
 
   it('throws when the payload has a role that is present but not yet assigned (undefined role)', () => {
-    // extractUser requires a role; extractIdentity does not - this confirms extractUser still
-    // rejects a brand-new self-signup's role-less token rather than silently accepting it.
+    // extractUser requires a role; extractIdentity does not.
     expect(() => extractUser({ sub: 'a1b2c3d4' })).toThrow(
       /no custom:role claim|missing.*custom:role/,
     );

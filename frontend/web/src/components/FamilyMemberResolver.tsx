@@ -6,10 +6,8 @@ import { Input } from '../design-system/Input';
 import { RadioGroup } from '../design-system/RadioGroup';
 import './FamilyMemberResolver.css';
 
-// Exactly one of cognitoSub/email is set - mirrors api/dependants.ts's AddFamilyMemberRequest
-// shape (phoneNumber/fullName are always included too, since the backend schema requires them
-// regardless of path - for the "existing" case they're ignored server-side, per HEZ-30's "existing
-// row stays authoritative" rule, but a value must still be sent).
+// Exactly one of cognitoSub/email is set. phoneNumber/fullName are required by the API even
+// though the backend ignores them for existing users.
 export interface FamilyMemberSelection {
   cognitoSub?: string;
   email?: string;
@@ -24,14 +22,9 @@ interface FamilyMemberResolverProps {
 
 type Mode = 'existing' | 'new';
 
-// Search-or-create UI for identifying a dependant's family contact - shared by
-// RegisterDependantPage (the primary contact at registration) and DependantDetailPage's
-// "+ Add Family Member" modal, since both need the identical capability. An explicit radio toggle
-// (2026-09-14, user request) picks the mode up front rather than only offering "create new" as a
-// fallback after a failed search: "Existing user" searches by email or phone (format-detected:
-// contains "@" -> email, else phone) against GET /users; "New user" goes straight to registering a
-// brand-new Cognito identity (which sends a real invitation email - see
-// backend/src/auth/cognitoAdmin.ts).
+// Picks a dependant's family contact: either search an existing user by email or phone, or enter
+// details for a new one (who gets an invitation email). Used at registration and in the
+// Add Family Member modal.
 export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolverProps) {
   const { users } = useApi();
   const [mode, setMode] = useState<Mode>('existing');

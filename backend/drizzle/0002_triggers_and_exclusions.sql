@@ -1,13 +1,7 @@
--- Hand-written (drizzle-kit generate --custom), not schema-diff-generated. Ported verbatim from
--- docs/schema.sql - see that file for the full design rationale. Must run after 0001 (the table
--- migration), since every statement here depends on tables (and 0000's functions) already existing.
--- None of this is representable in Drizzle's schema model (confirmed against the installed
--- drizzle-orm/pg-core: no exclude() export at all, and triggers aren't part of drizzle-kit's
--- generated-migration diffing), which is why it's hand-written here instead of in schema.ts.
+-- Hand-written (drizzle-kit generate --custom): triggers and EXCLUDE constraints, which Drizzle's
+-- schema can't express. Must run after 0001.
 
--- ============================================================================
 -- updated_at triggers
--- ============================================================================
 
 CREATE TRIGGER trg_users_updated_at
     BEFORE UPDATE ON users
@@ -30,12 +24,8 @@ CREATE TRIGGER trg_visit_schedules_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 --> statement-breakpoint
 
--- ============================================================================
--- visit_schedules double-booking prevention
--- Prevents the same caregiver, or the same dependant, from being booked into two overlapping
--- time windows. Cancelled visits are excluded from this check (a cancelled slot is free to
--- rebook); every other status, including `missed`, still blocks double-booking.
--- ============================================================================
+-- visit_schedules double-booking prevention, per caregiver and per dependant.
+-- Cancelled visits don't block a slot; every other status, including `missed`, does.
 
 ALTER TABLE visit_schedules ADD CONSTRAINT excl_visit_schedules_caregiver_overlap
     EXCLUDE USING gist (caregiver_id WITH =, tstzrange(scheduled_start, scheduled_end) WITH &&)
@@ -46,9 +36,7 @@ ALTER TABLE visit_schedules ADD CONSTRAINT excl_visit_schedules_dependant_overla
     WHERE (status <> 'cancelled');
 --> statement-breakpoint
 
--- ============================================================================
 -- Append-only enforcement
--- ============================================================================
 
 CREATE TRIGGER trg_verification_attempts_append_only
     BEFORE UPDATE OR DELETE ON verification_attempts

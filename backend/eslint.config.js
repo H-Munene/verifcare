@@ -23,8 +23,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
-  // eslint.config.js itself isn't part of tsconfig.json's project (it's plain JS, not .ts),
-  // so lint it without type information rather than fighting the project service over it.
+  // This file isn't in tsconfig.json, so lint it without type information.
   {
     files: ['*.config.js'],
     extends: [...tseslint.configs.recommended],

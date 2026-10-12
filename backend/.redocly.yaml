@@ -1,10 +1,6 @@
 # Lint config for openapi.yaml (`npx @redocly/cli lint openapi.yaml`).
 rules:
-  # Every operation already has a `default: Problem` response covering every error case with one
-  # consistent RFC 7807 shape (see openapi.yaml's top-level description). Forcing an explicit,
-  # identical 4XX block onto every operation on top of that would be pure duplication, not added
-  # information - deliberately overridden, not overlooked.
+  # Every operation has a `default: Problem` response, so explicit 4XX blocks would be duplication.
   operation-4xx-response: off
-  # This is closed-source, unreleased software with no chosen license yet - leaving `info.license`
-  # unset is honest; inventing one would not be.
+  # No license chosen yet.
   info-license: off

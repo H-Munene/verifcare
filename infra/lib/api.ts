@@ -39,37 +39,19 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     visitAudioBucket,
   } = params;
 
-  // acoustic-model's Lambda function is deliberately not created yet: it's a
-  // container-image Lambda, and the ECR repository above has no image in it
-  // yet (the real acoustic-model implementation is later work, Linear
-  // HEZ-43 onward) - CDK cannot create a container-image Lambda against an
-  // empty repository. api's function is created now since the Express app
-  // it wraps already exists and is tested (HEZ-7), even though it currently
-  // only has a health-check route.
+  // No acoustic-model Lambda yet: CDK can't create a container-image Lambda
+  // until the ECR repository has an image.
   const apiFunction = new NodejsFunction(stack, "ApiFunction", {
-    // An explicit absolute path, not a bare relative string: NodejsFunction
-    // normally infers the entry's base directory from the call site via
-    // the JS stack trace, but that inference failed under tsx (the app's
-    // runtime here, per cdk.json) with "Cannot find entry file" even though
-    // the relative path was mathematically correct - a tsx-specific quirk,
-    // not a real path error. __dirname is unambiguous regardless of which
-    // runtime executes this file.
+    // Absolute path: under tsx, NodejsFunction can't resolve relative entries.
     entry: path.join(__dirname, "../../backend/src/lambda.ts"),
-    // NodejsFunction also requires the entry to live under its
-    // "projectRoot" (which it otherwise defaults to infra/ itself) - since
-    // backend/ is a sibling directory with its own package.json/lockfile,
-    // not nested inside infra/, both must be pointed at backend/ explicitly.
+    // backend/ has its own lockfile, so projectRoot has to point there too.
     projectRoot: path.join(__dirname, "../../backend"),
     depsLockFilePath: path.join(__dirname, "../../backend/package-lock.json"),
     handler: "handler",
     runtime: lambda.Runtime.NODEJS_22_X,
     architecture: lambda.Architecture.ARM_64,
     vpc,
-    // Restricted to eu-west-1c specifically, not just PRIVATE_WITH_EGRESS -
-    // that alone selects the private subnet in *every* AZ (both eu-west-1c
-    // and the structural-only eu-west-1a one from HEZ-18), which would
-    // contradict the single-AZ compute intent this project has kept
-    // everywhere else (RDS included).
+    // Single AZ, like RDS. PRIVATE_WITH_EGRESS alone would also pick eu-west-1a.
     vpcSubnets: {
       subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
       subnetFilters: [ec2.SubnetFilter.availabilityZones(["eu-west-1c"])],
@@ -77,11 +59,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     environment: {
       DATABASE_SECRET_ARN: databaseSecret.secretArn,
       USER_POOL_ID: userPool.userPoolId,
-      // All three app clients (web, caregiver mobile, family-member mobile) must be passed
-      // through so the Lambda's ID token verifier accepts tokens from any of them - a real bug
-      // (2026-09-14): passing only the web client id made every mobile sign-in fail backend
-      // calls with a generic 401, even though the token itself was perfectly valid. See
-      // backend/src/config.ts and backend/src/auth/verifier.ts.
+      // The token verifier must accept tokens from all three app clients.
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       CAREGIVER_USER_POOL_CLIENT_ID: caregiverAppUserPoolClient.userPoolClientId,
       FAMILY_MEMBER_USER_POOL_CLIENT_ID: familyMemberAppUserPoolClient.userPoolClientId,
@@ -90,29 +68,16 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     },
   });
 
-  // Network-level access (the security group rule letting api reach RDS's
-  // port) - matches architecture.md's "Networking (VPC layout)" section,
-  // which is settled. IAM grants for what api's code actually reads/writes
-  // beyond the secret (S3, Rekognition) are Linear HEZ-24's explicit scope,
-  // not this one - the app doesn't touch those yet.
+  // Security group rule letting api reach RDS.
   database.connections.allowDefaultPortFrom(apiFunction);
 
-  // Lets api's Lambda-to-Drizzle connection (backend/src/db/lambdaDb.ts)
-  // resolve DB credentials at runtime - scoped to this secret's ARN and its
-  // KMS key, not a wildcard grant.
+  // For backend/src/db/lambdaDb.ts to read DB credentials at runtime.
   databaseSecret.grantRead(apiFunction);
 
-  // Lets api's POST /users complete a genuinely new self-signup by assigning
-  // custom:role server-side (HEZ-29) - the only way that attribute can be
-  // set at all now that the app client's own write access to it was removed
-  // (see infra/lib/auth.ts). Scoped to this user pool only, not a wildcard.
+  // POST /users sets custom:role server-side; app clients can't write it.
   userPool.grant(apiFunction, "cognito-idp:AdminUpdateUserAttributes");
 
-  // Lets the supervisor web app register a dependant's primary/family
-  // contact who has never touched Cognito at all, not just link an existing
-  // identity (2026-09-14, extending HEZ-30/HEZ-56's family-member linking).
-  // Scoped to this user pool only, not a wildcard - same pattern as the
-  // grant above.
+  // Lets supervisors create Cognito users for new family contacts.
   userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
 
   new cdk.CfnOutput(stack, "ApiFunctionName", {
@@ -125,19 +90,8 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     { cognitoUserPools: [userPool] },
   );
 
-  // REST API, not HTTP API: architecture.md originally chose HTTP API "for
-  // lower cost and native Cognito JWT authorizer support," but AWS WAF's
-  // WebACLAssociation does not support HTTP APIs at all - only REST APIs,
-  // ALB, AppSync, Cognito user pools, App Runner, Verified Access, and
-  // Amplify (confirmed against AWS's own CloudFormation reference and
-  // corroborated by a real "ARN isn't valid" deploy failure that persisted
-  // across multiple stage-name attempts, ruling out an ARN-formatting
-  // explanation). Switched to REST API to keep WAF, which architecture.md
-  // separately committed to keeping - REST API's Cognito authorizer is
-  // equally native, and the cost difference at this project's near-zero
-  // traffic is negligible. LambdaRestApi (proxy: true) mirrors the same
-  // "route everything to the Lambda" shape the HTTP API had; the Express
-  // app's own router still decides what to do with each path.
+  // REST API rather than HTTP API because WAF can't be attached to HTTP APIs.
+  // Proxy mode sends everything to Express.
   const restApi = new apigateway.LambdaRestApi(stack, "RestApi", {
     restApiName: "mzazi-care-api",
     handler: apiFunction,
@@ -148,16 +102,8 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     },
   });
 
-  // WAF: 1 Web ACL, one custom rate-based rule, one AWS Managed Rule Group
-  // (Amazon IP reputation list) - matches the "1 Web ACL, 2 rules, $7.01/
-  // month" figure from the confirmed cost estimate, with the AWS-maintained
-  // IP reputation list used in place of a literal second custom rule (a
-  // hand-rolled "IP reputation" rule with no real threat-intel data behind
-  // it wouldn't actually do anything - confirmed with the user 2026-09-13).
-  // Rate limit (2000 req / 5 min / IP) is a placeholder default, not yet
-  // reviewed/signed off - same caveat architecture.md already applies to
-  // its other configurable numeric defaults (geofence accuracy, audio
-  // retention).
+  // WAF: a rate-based rule plus the AWS managed IP reputation list.
+  // The rate limit (2000 req / 5 min / IP) is a placeholder, not yet reviewed.
   const webAcl = new wafv2.CfnWebACL(stack, "WebAcl", {
     scope: "REGIONAL",
     defaultAction: { allow: {} },

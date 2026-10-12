@@ -1,7 +1,6 @@
-/* Shared styling for every design-system primitive - one stylesheet so token usage stays
-   consistent and easy to audit against temp_images/claude_design_prompt_admin_webapp.md. */
+/* Styles for the design-system components. */
 
-/* ---------- Button ---------- */
+/* Button */
 
 .ds-button {
   height: var(--control-height);
@@ -57,7 +56,7 @@
   border-color: var(--color-accent-hover);
 }
 
-/* ---------- Field / Input ---------- */
+/* Field / Input */
 
 .ds-field {
   display: flex;
@@ -103,7 +102,7 @@
   color: var(--color-danger-text);
 }
 
-/* ---------- Tag / Badge ---------- */
+/* Tag / Badge */
 
 .ds-tag {
   display: inline-flex;
@@ -142,7 +141,7 @@
   color: var(--color-ink-default);
 }
 
-/* ---------- NavItem ---------- */
+/* NavItem */
 
 .ds-nav-item {
   height: 32px;
@@ -185,7 +184,7 @@
   flex-shrink: 0;
 }
 
-/* ---------- Card ---------- */
+/* Card */
 
 .ds-card {
   background: #ffffff;
@@ -194,7 +193,7 @@
   padding: 16px 20px;
 }
 
-/* ---------- Modal ---------- */
+/* Modal */
 
 .ds-modal-overlay {
   position: fixed;
@@ -223,7 +222,7 @@
   margin-bottom: 16px;
 }
 
-/* ---------- Switch ---------- */
+/* Switch */
 
 .ds-switch-row {
   display: inline-flex;
@@ -263,7 +262,7 @@
   transform: translateX(14px);
 }
 
-/* ---------- Table rows: pick one per surface, never mix ---------- */
+/* Table rows: pick one height per surface */
 
 .ds-table {
   width: 100%;
@@ -311,7 +310,7 @@
   margin-top: 2px;
 }
 
-/* ---------- Stepper ---------- */
+/* Stepper */
 
 .ds-stepper {
   display: flex;
@@ -372,7 +371,7 @@
   padding: 0 4px;
 }
 
-/* ---------- RadioGroup ---------- */
+/* RadioGroup */
 
 .ds-radio-group {
   display: flex;

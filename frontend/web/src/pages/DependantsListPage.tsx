@@ -11,8 +11,7 @@ export function DependantsListPage() {
   const { dependants } = useApi();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // Simple back/forward cursor history - this list is small and bounded (cursor pagination, per
-  // pagination.ts's design), so a plain stack is enough rather than a full pagination library.
+  // Stack of previous cursors for the Back button.
   const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([undefined]);
   const currentCursor = cursorStack[cursorStack.length - 1];
 

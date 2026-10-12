@@ -1,48 +1,17 @@
 // POST/GET /dependants, GET/PATCH /dependants/{dependantId},
 // POST/GET /dependants/{dependantId}/family-members,
-// PATCH /dependants/{dependantId}/family-members/{userId} (HEZ-30).
+// PATCH /dependants/{dependantId}/family-members/{userId}.
 //
-// Ownership/RBAC rules (confirmed with the user before implementing, not assumed - see
-// project-state.md's HEZ-30 entry for the full reasoning behind each):
-// - caregiver is forbidden on every route in this file - caregiver-to-dependant visibility
-//   belongs with visit scheduling (HEZ-32+), not this issue.
-// - POST /dependants: supervisor or family_member. A non-supervisor caller may only name
-//   themselves (primaryFamilyMember.cognitoSub === caller.sub) as the primary contact, mirroring
-//   routes/users.ts's POST /users self-only rule.
-// - GET /dependants (list) / GET /dependants/{id}: supervisor sees everything; family_member sees
-//   only dependants linked to them via dependant_family_members.
-// - PATCH /dependants/{id}: supervisor (any field, including status), or the dependant's
-//   primary-contact family member (any field except status - offboarding stays supervisor-only,
-//   mirroring PATCH /users). A linked-but-non-primary family member may not update at all.
-// - POST /dependants/{id}/family-members: supervisor, or any existing linked family member of
-//   that dependant - architecture.md's own stated rule ("later members are added by an existing
-//   linked family member or by a supervisor").
-// - GET /dependants/{id}/family-members: supervisor, or a family_member linked to that dependant.
-// - PATCH /dependants/{id}/family-members/{userId}: supervisor-only. Architecture.md's rule above
-//   only covers adding a new link, not editing one; the user chose the more conservative option
-//   for editing.
+// Access rules (caregivers are forbidden throughout):
+// - POST /dependants: supervisor or family_member. A family member can only name themselves as
+//   the primary contact.
+// - GET /dependants, GET /dependants/{id}: supervisors see all; family members only linked ones.
+// - PATCH /dependants/{id}: supervisor, or the primary contact (who can't change status).
+// - POST /dependants/{id}/family-members: supervisor or any linked family member.
+// - GET /dependants/{id}/family-members: supervisor or any linked family member.
+// - PATCH /dependants/{id}/family-members/{userId}: supervisor-only.
 //
-// New-family-member-user handling (resolveFamilyMemberIdentity, shared by POST /dependants and
-// POST /dependants/{id}/family-members - both need to resolve a submitted cognitoSub the same way):
-// - No existing users row for that cognitoSub: assign the Cognito custom:role attribute
-//   (cognitoAdmin.assignRole) BEFORE the DB insert, same ordering as routes/users.ts/
-//   routes/caregivers.ts, so a failed insert still leaves a retry that can recover. This is
-//   required for correctness, not just consistency: requireAuth/requireRole only ever read the
-//   JWT's custom:role claim, never the DB, so a users row created without also setting this
-//   attribute would leave that person permanently unable to authenticate as a family_member (and
-//   unable to self-heal via POST /users, which would 409 on the now-existing cognitoSub).
-// - An existing users row with a role other than family_member: reject with 409 - a
-//   supervisor/caregiver account can't also be linked as a dependant's family contact.
-// - An existing users row with role family_member: reuse it as-is. The request's phoneNumber/
-//   fullName are only used when creating a brand-new row - an unrelated linking action must not
-//   be able to silently overwrite someone else's own profile (editable only via that person's own
-//   PATCH /users/{id}), which would reopen the same class of gap HEZ-29's privilege-escalation fix
-//   closed.
-//
-// Reassigning isPrimaryContact to a different family member (via either the add-link or
-// edit-link endpoint) auto-demotes the dependant's current primary contact in the same
-// transaction - this is what openapi.yaml's own description of the PATCH endpoint already implies
-// ("reassigning isPrimaryContact... enforced by a partial unique index").
+// Making someone the primary contact demotes the current one in the same transaction.
 
 import { and, asc, eq } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
@@ -123,9 +92,7 @@ function toFamilyMemberResponse(
   };
 }
 
-// Explicit column map (not a bare .select()) so a joined query (the family_member branch of
-// GET /dependants) returns the same flat shape as an unjoined one - same reasoning as
-// routes/caregivers.ts's caregiverSelection().
+// Explicit columns so the joined query returns the same flat shape as the plain one.
 function dependantColumns() {
   return {
     id: schema.dependants.id,
@@ -146,12 +113,7 @@ function dependantColumns() {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-// Exactly one of cognitoSub/email identifies the family member - cognitoSub links an identity
-// that already exists in Cognito (resolved by the frontend's search-by-phone/email against our
-// own users table, or supplied directly by any other caller that already knows it); email creates
-// a brand-new Cognito identity from scratch for someone who has never touched Cognito at all
-// (2026-09-14, extending the original cognitoSub-only design - see resolveFamilyMemberIdentity
-// below for the full resolution rules for each).
+// Exactly one of cognitoSub (link an existing Cognito user) or email (create a new one).
 const addFamilyMemberRequestSchema = z
   .object({
     cognitoSub: z.string().min(1).optional(),
@@ -202,8 +164,7 @@ const listDependantsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-// Express 5's params type allows string | string[], so these aren't plain strings on their own -
-// validated the same way any other input is, via parseOrSendProblem.
+// Express 5 types params as string | string[], so validate rather than cast.
 const dependantIdParamSchema = z.string().uuid();
 const familyMemberUserIdParamSchema = z.string().uuid();
 
@@ -220,9 +181,7 @@ function getDb(res: Response): Db | undefined {
   return db;
 }
 
-// Looks up whether callerSub is linked to dependantId, returning both the caller's own users row
-// (needed by callers for addedBy/registeredBy-style columns) and the link row itself (needed to
-// check isPrimaryContact). Returns undefined if the caller has no users row, or no link exists.
+// Returns the caller's users row and their link to the dependant, or undefined if not linked.
 async function findFamilyMemberLink(
   db: Db,
   dependantId: string,
@@ -262,35 +221,16 @@ type ResolvedFamilyMember =
   | { kind: 'existing'; userId: string }
   | { kind: 'new'; cognitoSub: string; body: AddFamilyMemberBody };
 
-// Shared by POST /dependants (primaryFamilyMember) and POST /dependants/{id}/family-members (the
-// request body itself). Sends the appropriate 400/409 response itself and returns undefined on
-// failure, matching validation.ts/auth/middleware.ts's established "send the response, return
-// undefined" pattern. Two resolution paths, per the schema's cognitoSub-xor-email requirement:
+// Resolves the family member's users row, creating it if needed. Sends a 400/409 and returns
+// undefined on failure.
 //
-// cognitoSub given (link an existing Cognito identity):
-// - An existing users row with a role other than family_member: reject with 409 - a
-//   supervisor/caregiver account can't also be linked as a dependant's family contact.
-// - An existing users row with role family_member: reuse it as-is. The request's phoneNumber/
-//   fullName are only used when creating a brand-new row - an unrelated linking action must not
-//   be able to silently overwrite someone else's own profile (editable only via that person's own
-//   PATCH /users/{id}), which would reopen the same class of gap HEZ-29's privilege-escalation fix
-//   closed.
-// - No existing users row for that cognitoSub: assign the Cognito custom:role attribute
-//   (cognitoAdmin.assignRole) BEFORE the DB insert, same ordering as routes/users.ts/
-//   routes/caregivers.ts, so a failed insert still leaves a retry that can recover. This is
-//   required for correctness, not just consistency: requireAuth/requireRole only ever read the
-//   JWT's custom:role claim, never the DB, so a users row created without also setting this
-//   attribute would leave that person permanently unable to authenticate as a family_member.
-//
-// email given (create a brand-new Cognito identity from scratch, 2026-09-14):
-// - An existing users row with that email: same existing-role-mismatch/reuse rules as the
-//   cognitoSub path above - the DB is checked first specifically so a genuine match never reaches
-//   Cognito at all (avoids creating an orphaned Cognito identity for an email that turns out to
-//   already be registered here).
-// - No existing users row: cognitoAdmin.createUser() creates the Cognito identity and sets
-//   custom:role in the same call (no separate assignRole needed, unlike the cognitoSub path),
-//   sends a real invitation email with a Cognito-generated temporary password. The new person
-//   completes sign-in via the NEW_PASSWORD_REQUIRED flow the login page already handles.
+// - Existing user who isn't a family_member: 409.
+// - Existing family_member: reused as-is. phoneNumber/fullName are only used for new rows, so
+//   linking can't overwrite someone else's profile.
+// - New, by cognitoSub: assign the Cognito role before inserting. Auth reads the role from the
+//   JWT only, so a row without it would leave the user locked out.
+// - New, by email: the DB is checked first so we don't create orphan Cognito users. createUser
+//   sets the role and emails a temporary password.
 async function resolveFamilyMemberIdentity(
   db: Db,
   cognitoAdmin: CognitoAdmin,
@@ -377,8 +317,6 @@ async function resolveFamilyMemberIdentity(
 export function createDependantsRouter(dependencies: DependantsRouterDependencies): Router {
   const router = Router();
   const { cognitoAdmin, requireAuth } = dependencies;
-  // caregiver is forbidden on every route in this file (see the file header comment); the one
-  // route that's narrower still (supervisor-only) adds its own requireRole afterward.
   router.use(requireAuth, requireRole('supervisor', 'family_member'));
 
   router.post('/', async (req, res, next) => {
@@ -464,9 +402,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           familyMemberUserId = userRow.id;
         }
 
-        // Always the primary contact, regardless of what primaryFamilyMember.isPrimaryContact
-        // said - that's what makes this the *primary* family member, per openapi.yaml's own
-        // description of this endpoint.
+        // Always primary, whatever the request said.
         await tx.insert(schema.dependantFamilyMembers).values({
           dependantId: dependant.id,
           familyMemberUserId,

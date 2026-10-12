@@ -1,22 +1,8 @@
-// Shared cursor-pagination helpers. openapi.yaml describes the cursor as opaque - this file is
-// the one place that decides what's actually inside it, so every list endpoint (starting with
-// HEZ-29's users/caregivers, and reused as-is by HEZ-30/HEZ-32's list endpoints) encodes and
-// decodes it the same way instead of each route inventing its own.
+// Cursor pagination shared by all list endpoints. The cursor is opaque to clients.
 //
-// Keyset pagination on id alone, not OFFSET/LIMIT and not (createdAt, id): project-state.md
-// already settled on cursor pagination specifically because list endpoints need to stay stable
-// under concurrent writes, which OFFSET/LIMIT does not guarantee (a row inserted or deleted
-// between two page requests shifts every subsequent offset).
-//
-// id alone, not a (createdAt, id) composite - a real bug caught by testing against a real
-// Postgres database, not assumed: every id here is architecture.md's UUID v7 primary key, which
-// is itself unique and roughly time-ordered, so it doesn't need createdAt as a tie-breaker at
-// all. Including createdAt actively caused incorrect results: Postgres timestamptz has
-// microsecond precision, but a JS Date (and therefore its toISOString() encoding in the cursor)
-// only has millisecond precision. A row whose real created_at carried a sub-millisecond fraction
-// beyond what its own cursor could represent would compare as "greater than itself" on the next
-// page's query, re-including that row instead of excluding it. Sorting and comparing on id alone
-// has no such precision mismatch, since id round-trips through the cursor exactly.
+// Keyset on id alone: ids are UUID v7, so already time-ordered. Don't add createdAt to the key -
+// timestamptz has microsecond precision but a JS Date only has milliseconds, so the boundary row
+// would repeat on the next page.
 import { sql, type SQL } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 
@@ -28,9 +14,7 @@ export function encodeCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify({ id: cursor.id })).toString('base64url');
 }
 
-// Throws on any malformed input - callers should treat this the same as any other bad request
-// (400), not a 500. A cursor is only ever produced by encodeCursor above, so a decode failure
-// means a client sent something else (stale/tampered/hand-edited), not a bug in this code.
+// Throws on malformed input; callers should return 400.
 export function decodeCursor(raw: string): Cursor {
   let parsed: unknown;
   try {
@@ -63,9 +47,7 @@ export function paginate<T>(
     const items = rowsFetched.slice(0, limit);
     const last = items.at(-1);
     if (!last) {
-      // Unreachable: this branch only runs when rowsFetched.length > limit >= 1, so items (a
-      // limit-length slice) always has at least one element - guarded explicitly rather than
-      // asserted, so a future change to this invariant fails loudly instead of silently.
+      // Unreachable while limit >= 1.
       throw new Error('paginate() invariant violated: items should never be empty here.');
     }
     return { items, nextCursor: encodeCursor(cursorOf(last)) };

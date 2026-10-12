@@ -1,10 +1,5 @@
-// Server-side role assignment for a genuinely new Cognito self-signup (HEZ-29), and server-side
-// creation of a brand-new Cognito identity for a dependant's family contact who has never touched
-// Cognito at all (2026-09-14, extending HEZ-30/HEZ-56). The only way custom:role can be set at
-// all now, since infra/lib/auth.ts removed the app client's own write access to it - a
-// self-signing-up user's own session can never set this directly, closing the privilege-
-// escalation gap that write access left open (a self-signup could otherwise set custom:role to
-// "supervisor" with zero backend involvement).
+// Server-side Cognito admin calls: assigning custom:role, and creating identities for family
+// contacts. The app client can't write custom:role, so a self-signup can't make itself supervisor.
 
 import {
   AdminCreateUserCommand,
@@ -14,14 +9,9 @@ import {
 import type { UserRole } from './verifier.js';
 
 export interface CognitoAdmin {
-  // Property-typed (not method shorthand) so this interface stays assignable from a plain object
-  // literal in tests without eslint's unbound-method check treating it as a class-style method -
-  // same reasoning as auth/verifier.ts's IdTokenVerifier.
+  // Property syntax, not methods, to keep eslint's unbound-method rule quiet in tests.
   assignRole: (sub: string, role: UserRole) => Promise<void>;
-  // Creates a brand-new Cognito identity (for someone who has never signed up or been created
-  // before) and returns its Cognito-generated sub. Sends a real invitation email with a Cognito-
-  // generated temporary password - the new person completes sign-in via the NEW_PASSWORD_REQUIRED
-  // flow the login page already handles (see auth/cognito.ts).
+  // Creates a new Cognito user and returns its sub. Cognito emails a temporary password.
   createUser: (params: {
     email: string;
     phoneNumber: string;
@@ -30,13 +20,7 @@ export interface CognitoAdmin {
   }) => Promise<string>;
 }
 
-// Classifies an AdminUpdateUserAttributes rejection caused by a cognitoSub that doesn't
-// correspond to any real Cognito user - lets a route turn this into a clean 400 instead of
-// letting the raw AWS SDK error surface as a 500 (HEZ-30, when a submitted cognitoSub is invalid
-// rather than merely unassigned a role yet). Checked against the AWS SDK v3 error-handling
-// convention (both e.name and instanceof are safe, since the SDK overrides Symbol.hasInstance for
-// modeled exceptions) - e.name is used here since importing the exception class just to compare
-// identity would be no more precise for this single check.
+// True when the cognitoSub doesn't exist in Cognito, so routes can return 400 instead of 500.
 export function isCognitoUserNotFoundError(err: unknown): boolean {
   return (
     typeof err === 'object' &&
@@ -45,11 +29,7 @@ export function isCognitoUserNotFoundError(err: unknown): boolean {
   );
 }
 
-// Classifies an AdminCreateUser rejection caused by the email already being registered in
-// Cognito - either as the Username itself (UsernameExistsException, since createUser below uses
-// the email as Username) or as an alias on a different user (AliasExistsException, possible if
-// that email was registered with a different Username at some point). Both mean the same thing to
-// a caller: this person already has a Cognito identity, use the search/link flow instead of create.
+// True when the email is already taken, as a username or an alias on another user.
 export function isCognitoUserAlreadyExistsError(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) {
     return false;
@@ -65,23 +45,15 @@ export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
       await client.send(
         new AdminUpdateUserAttributesCommand({
           UserPoolId: userPoolId,
-          // Verified against AWS's AdminUpdateUserAttributes documentation, not assumed: "If
-          // username isn't an alias attribute in your user pool, this value must be the sub of a
-          // local user." This pool's sign-in aliases are email/phone only (infra/lib/auth.ts),
-          // not username - so sub is not just "also accepted" here, it is the required value.
+          // The pool has no username alias, so Cognito requires the sub here.
           Username: sub,
           UserAttributes: [{ Name: 'custom:role', Value: role }],
         }),
       );
     },
     createUser: async ({ email, phoneNumber, fullName, role }): Promise<string> => {
-      // Username: required by the API even though this pool has no real username sign-in
-      // attribute (email/phone are aliases, not UsernameAttributes) - verified against AWS's
-      // AdminCreateUser documentation: "You can only provide a value if usernames are a valid
-      // sign-in attribute for your user pool" - Cognito accepts an opaque value here regardless,
-      // so the email is used for readability in the Cognito console's user list. The real,
-      // permanent identifier is the Cognito-generated `sub` this function returns, never
-      // `Username` - everything else in this app already keys off sub, not Username.
+      // Username is required but unused for sign-in; email just makes the console readable.
+      // The app keys everything off sub.
       const response = await client.send(
         new AdminCreateUserCommand({
           UserPoolId: userPoolId,
@@ -92,11 +64,7 @@ export function createCognitoAdmin(userPoolId: string): CognitoAdmin {
             { Name: 'name', Value: fullName },
             { Name: 'custom:role', Value: role },
           ],
-          // Explicit, not left to AWS's default: AdminCreateUser defaults DesiredDeliveryMediums
-          // to SMS when unspecified (confirmed against AWS's own docs), which would silently
-          // trigger the still-unresolved SNS/SMS-pricing-to-Kenya cost question flagged since
-          // HEZ-17. Email sidesteps that entirely. TemporaryPassword is deliberately omitted -
-          // Cognito generates one and delivers it in the invitation email.
+          // Defaults to SMS otherwise, and SMS pricing to Kenya is still unresolved.
           DesiredDeliveryMediums: ['EMAIL'],
         }),
       );

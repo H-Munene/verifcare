@@ -1,8 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500&family=Inter:wght@400;500&display=swap');
 @import './design-system/tokens.css';
 
-/* Global reset, transcribed from the wireframe canvas's own <style> block (dc.html) - flat
-   -0.15px letter-spacing throughout, even on numerals, per the design system spec. */
+/* Global reset. */
 * {
   letter-spacing: -0.15px;
   box-sizing: border-box;

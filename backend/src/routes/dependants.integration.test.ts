@@ -1,13 +1,7 @@
-// Integration tests for POST/GET /dependants, GET/PATCH /dependants/{dependantId},
-// POST/GET /dependants/{dependantId}/family-members, and
-// PATCH /dependants/{dependantId}/family-members/{userId} (HEZ-30) against a real local Postgres -
-// see users.integration.test.ts's header comment for why (real unique-constraint/transaction
-// behavior, not a faked query builder) and for the test-auth-header pattern used here too.
+// Integration tests for the /dependants routes against a real Postgres. Auth is faked the same way
+// as in users.integration.test.ts.
 //
-// Unlike routes/caregivers.ts, every handler here resolves the caller's own internal `users` row
-// (getUserByCognitoSub), including for a supervisor caller - so every test that acts as a given
-// sub must first insert a matching `users` row directly (createTestUser below), not just set an
-// auth header the way caregivers.integration.test.ts's supervisorAuth constant could get away with.
+// Every handler looks up the caller's users row, so each test caller needs one (createTestUser).
 
 import { and, eq } from 'drizzle-orm';
 import express, { type Express } from 'express';

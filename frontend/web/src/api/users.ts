@@ -1,4 +1,4 @@
-// Typed calls for /users, matching backend/src/routes/users.ts's UserResponse shape exactly.
+// Typed calls for /users.
 
 import type { ApiClient } from './client';
 
@@ -39,10 +39,7 @@ function toQueryString(params: SearchUsersParams): string {
 export function createUsersApi(client: ApiClient) {
   return {
     getUser: (userId: string) => client.get<User>(`/users/${userId}`),
-    // Exact-match search (email XOR phoneNumber) - both columns are UNIQUE in the DB, so this
-    // returns at most one result. Added 2026-09-14 so a supervisor can look up an existing user
-    // instead of needing their internal id or Cognito sub already (see
-    // components/FamilyMemberResolver.tsx, the caller of this).
+    // Exact match on email or phone; returns at most one user.
     searchUsers: (params: SearchUsersParams) =>
       client.get<UserPage>(`/users${toQueryString(params)}`),
   };
