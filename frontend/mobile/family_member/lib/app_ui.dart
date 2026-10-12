@@ -6,6 +6,7 @@ import 'api/api_client.dart';
 // the same (the two apps deliberately share no package - user decision 2026-09-24). The older
 // auth screens still use the plain Material theme.
 const primaryGreen = Color(0xFF047857);
+const primaryTint = Color(0xFFE7F5EF);
 const successGreen = Color(0xFF15B042);
 const successTint = Color(0xFFCAFCE0);
 const dangerRed = Color(0xFFE0392B);

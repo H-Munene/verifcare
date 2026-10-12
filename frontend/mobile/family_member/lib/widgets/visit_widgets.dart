@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
-const _primaryTint = Color(0xFFE7F5EF);
 const _neutralTint = Color(0xFFF0F0F0);
 
 typedef StatusStyle = ({String label, Color ink, Color tint});
@@ -11,11 +10,11 @@ typedef StatusStyle = ({String label, Color ink, Color tint});
 /// How each visit status reads to a family member. "Completed" rather than the caregiver app's
 /// "Checked out", since the family member didn't check anything out themselves.
 StatusStyle visitStatusStyle(VisitStatus status) => switch (status) {
-  'scheduled' => (label: 'Scheduled', ink: primaryGreen, tint: _primaryTint),
+  'scheduled' => (label: 'Scheduled', ink: primaryGreen, tint: primaryTint),
   'in_progress' => (
     label: 'In progress',
     ink: primaryGreen,
-    tint: _primaryTint,
+    tint: primaryTint,
   ),
   'completed' => (label: 'Completed', ink: successGreen, tint: successTint),
   'missed' => (label: 'Missed', ink: dangerRed, tint: dangerTint),
