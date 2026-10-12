@@ -52,7 +52,8 @@
   --radius-default: 7px;
   /* Text fields, selects and the sidebar's selected row are square-cornered (2026-10-12). */
   --radius-input: 0;
-  --radius-button: 10px;
+  /* Buttons of every kind are square-cornered too (user request, 2026-10-12). */
+  --radius-button: 0;
   --radius-pill: 9999px;
 
   /* Row heights - pick one per surface, never mix */
