@@ -38,7 +38,7 @@ export function createWeb(stack: cdk.Stack, props: WebProps): void {
       origin: origins.S3BucketOrigin.withOriginAccessControl(webBucket),
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
-      // HSTS, nosniff, X-Frame-Options DENY and a strict-origin-when-cross-origin referrer
+      // HSTS, nosniff, X-Frame-Options SAMEORIGIN and a strict-origin-when-cross-origin referrer
       // policy, which still sends the origin the Google Maps key's referrer check needs.
       responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.SECURITY_HEADERS,
       compress: true,
