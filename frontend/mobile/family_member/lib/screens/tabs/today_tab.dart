@@ -5,6 +5,7 @@ import '../../api/visit_schedules_api.dart';
 import '../../app_ui.dart';
 import '../../feed/visit_feed.dart';
 import '../../widgets/photo_needed_banner.dart';
+import '../../widgets/dependant_switcher.dart';
 import '../../widgets/states.dart';
 import '../../widgets/visit_widgets.dart';
 import '../upcoming_visit_screen.dart';
@@ -19,6 +20,9 @@ const _amberTint = Color(0xFFFFF4D6);
 class TodayTab extends StatefulWidget {
   final Dependant dependant;
 
+  /// Opens the dependant picker; null when there is only one dependant.
+  final VoidCallback? onSwitchDependant;
+
   /// The signed-in family member's first name for the greeting, once known.
   final String? myFirstName;
 
@@ -30,6 +34,7 @@ class TodayTab extends StatefulWidget {
   const TodayTab({
     super.key,
     required this.dependant,
+    required this.onSwitchDependant,
     required this.myFirstName,
     required this.onAddPhoto,
     required this.dependantsApi,
@@ -132,6 +137,11 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
           children: [
+            DependantSwitcher(
+              name: widget.dependant.fullName,
+              onSwitch: widget.onSwitchDependant,
+            ),
+            const SizedBox(height: 12),
             _Greeting(name: widget.myFirstName, dependantFirst: dependantFirst),
             const SizedBox(height: 16),
             if (widget.dependant.needsPhoto) ...[

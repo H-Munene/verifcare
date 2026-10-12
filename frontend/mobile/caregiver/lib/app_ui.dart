@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 // The wireframe palette (temp_images/Mzazi Care Caregiver App Wireframes.dc.html), shared by the
 // visit-flow screens. The older screens still carry their own private copies of these values.
 const primaryGreen = Color(0xFF047857);
+const primaryTint = Color(0xFFE7F5EF);
 const successGreen = Color(0xFF15B042);
 const successTint = Color(0xFFCAFCE0);
 const dangerRed = Color(0xFFE0392B);

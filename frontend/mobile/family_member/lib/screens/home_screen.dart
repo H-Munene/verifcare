@@ -11,6 +11,7 @@ import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
 import '../feed/visit_feed.dart';
+import '../widgets/auth_layout.dart';
 import '../widgets/link_requests_sheet.dart';
 import '../widgets/states.dart';
 import '../widgets/visit_widgets.dart';
@@ -22,7 +23,7 @@ import 'tabs/today_tab.dart';
 import 'tabs/visits_tab.dart';
 
 /// The signed-in app (2026-10-12 redesign, "today first", after Birdie's and Honor's family apps):
-/// one dependant at a time, picked from the app bar and remembered between launches, with four
+/// one dependant at a time, picked at the top of Today or Visits and remembered between launches, with four
 /// tabs - Today (what's happening now and recently), Visits, Family and Account. The bell holds
 /// family link requests: ones waiting for the caller's answer as a primary contact, and the
 /// outcome of the caller's own.
@@ -295,17 +296,10 @@ class _HomeScreenState extends State<HomeScreen> {
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleSpacing: 8,
-        title: selected == null
-            ? const Padding(
-                padding: EdgeInsets.only(left: 8),
-                child: Text('Mzazi Care', style: TextStyle(fontSize: 17)),
-              )
-            : _SwitcherButton(
-                name: selected.fullName,
-                canSwitch: (dependants?.length ?? 0) > 1,
-                onTap: _openSwitcher,
-              ),
+        titleSpacing: 16,
+        // The word logo, not the dependant's name (2026-10-12): whose care a tab shows is at the
+        // top of Today and Visits instead, where it can also be switched.
+        title: const Wordmark(),
         actions: [
           IconButton(
             tooltip: 'Family requests',
@@ -403,10 +397,12 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     final key = ValueKey('$tab-${selected.id}-$_version');
+    final onSwitch = dependants.length > 1 ? _openSwitcher : null;
     return switch (tab) {
       0 => TodayTab(
         key: key,
         dependant: selected,
+        onSwitchDependant: onSwitch,
         myFirstName: switch (_me?.fullName ?? widget.identity.fullName) {
           final name? => firstName(name),
           null => null,
@@ -420,6 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
       1 => VisitsTab(
         key: key,
         dependant: selected,
+        onSwitchDependant: onSwitch,
         dependantsApi: widget.dependantsApi,
         visitSchedulesApi: widget.visitSchedulesApi,
       ),
@@ -442,43 +439,6 @@ class _Padded extends StatelessWidget {
   @override
   Widget build(BuildContext context) => constrainedContent(
     ListView(padding: const EdgeInsets.all(16), children: [child]),
-  );
-}
-
-/// The selected dependant's name in the app bar; tapping it switches between dependants.
-class _SwitcherButton extends StatelessWidget {
-  final String name;
-  final bool canSwitch;
-  final VoidCallback onTap;
-
-  const _SwitcherButton({required this.name, required this.canSwitch, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: Text(
-              name,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: inkDefault,
-              ),
-            ),
-          ),
-          if (canSwitch) ...[
-            const SizedBox(width: 4),
-            const Icon(Icons.keyboard_arrow_down, color: inkSecondary),
-          ],
-        ],
-      ),
-    ),
   );
 }
 

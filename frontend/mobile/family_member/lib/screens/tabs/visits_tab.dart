@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../api/dependants_api.dart';
 import '../../api/visit_schedules_api.dart';
 import '../../app_ui.dart';
+import '../../widgets/dependant_switcher.dart';
 import '../../widgets/states.dart';
 import '../../widgets/visit_widgets.dart';
 import '../upcoming_visit_screen.dart';
@@ -12,12 +13,16 @@ import '../visit_timeline_screen.dart';
 /// first). Moved from the old dependant page's Visits tab in the 2026-10-12 redesign.
 class VisitsTab extends StatefulWidget {
   final Dependant dependant;
+
+  /// Opens the dependant picker; null when there is only one dependant.
+  final VoidCallback? onSwitchDependant;
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
 
   const VisitsTab({
     super.key,
     required this.dependant,
+    required this.onSwitchDependant,
     required this.dependantsApi,
     required this.visitSchedulesApi,
   });
@@ -113,8 +118,15 @@ class _VisitsTabState extends State<VisitsTab> with AutomaticKeepAliveClientMixi
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          children: children,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            DependantSwitcher(
+              name: widget.dependant.fullName,
+              onSwitch: widget.onSwitchDependant,
+            ),
+            const SizedBox(height: 4),
+            ...children,
+          ],
         ),
       ),
     );
