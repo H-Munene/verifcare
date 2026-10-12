@@ -10,6 +10,7 @@ import { createMigrationRunner } from "./migrationRunner";
 import { createMissedVisitSweep } from "./missedVisitSweep";
 import { createObservability } from "./observability";
 import { createCicd } from "./cicd";
+import { createWeb } from "./web";
 
 export class MzaziCareStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -48,6 +49,8 @@ export class MzaziCareStack extends cdk.Stack {
     });
 
     createMigrationRunner(this, { vpc, database, databaseSecret });
+
+    createWeb(this, { restApi, userPool, userPoolClient });
 
     createObservability(this, {
       apiFunction,

@@ -1,6 +1,6 @@
 // Fetch wrapper: adds the base URL and bearer token, and turns problem+json errors into ApiError.
 
-const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL;
+import { getConfig } from '../config';
 
 // RFC 7807 problem body.
 export interface Problem {
@@ -67,7 +67,7 @@ export function createApiClient(getIdToken: () => Promise<string | null>): ApiCl
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    return fetch(`${API_BASE_URL}${path}`, {
+    return fetch(`${getConfig().apiBaseUrl}${path}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
