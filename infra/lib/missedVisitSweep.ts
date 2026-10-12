@@ -25,12 +25,23 @@ export function createMissedVisitSweep(
 ): MissedVisitSweep {
   const { vpc, database, databaseSecret } = params;
 
-  // Shared by missed-visit and cognitive-risk alerts. No subscriptions yet.
+  // Shared across two alert sources per architecture.md's "Alerts" row
+  // (missed-visit alerts from this Lambda, cognitive-risk alerts from the
+  // api/acoustic-model flow later) - not nested under missed-visit-sweep's
+  // own naming. No email subscription created here: no real supervisor
+  // email address has been settled anywhere yet, and that's account-
+  // specific operational data, not infrastructure-as-code material. The
+  // Message Data Protection add-on confirmed during the cost-estimate work
+  // is deferred to the same follow-up issue as the real sweep logic below -
+  // its actual data-identifier/action configuration was never specified,
+  // and configuring it now would be scope creep beyond "stub the wiring."
   const alertsTopic = new sns.Topic(stack, "AlertsTopic", {
     topicName: "mzazi-care-alerts",
   });
 
-  // The handler is still a stub, but it gets the same VPC and env as api.
+  // Marks overdue scheduled/in_progress visits as missed (see
+  // backend/src/missedVisitSweep.ts). VPC-attached to eu-west-1c, same as api,
+  // since it queries RDS directly.
   const missedVisitSweepFunction = new NodejsFunction(stack, "MissedVisitSweepFunction", {
     entry: path.join(__dirname, "../../backend/src/missedVisitSweep.ts"),
     projectRoot: path.join(__dirname, "../../backend"),
@@ -38,6 +49,10 @@ export function createMissedVisitSweep(
     handler: "handler",
     runtime: lambda.Runtime.NODEJS_22_X,
     architecture: lambda.Architecture.ARM_64,
+    // Not the 3s default: a cold start fetches the DB secret and opens a TLS
+    // connection to RDS before the query runs, which can exceed 3s - the same
+    // reason migrationRunner.ts raises its own timeout.
+    timeout: cdk.Duration.seconds(30),
     vpc,
     vpcSubnets: {
       subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
@@ -50,10 +65,19 @@ export function createMissedVisitSweep(
   });
 
   database.connections.allowDefaultPortFrom(missedVisitSweepFunction);
+  // The stub never read the secret, so this grant was never added - once the
+  // real sweep logic shipped, every run failed with AccessDenied on
+  // GetSecretValue before reaching the database (found 2026-09-24).
+  databaseSecret.grantRead(missedVisitSweepFunction);
 
-  // Every 6 hours.
+  // Every 15 minutes (user decision 2026-09-24, replacing the earlier
+  // every-6-hours choice): the caregiver app's calendar turns a day red as
+  // soon as a visit is marked missed, and a 6-hour lag made that signal
+  // useless on the day. ~2,880 invocations/month stays inside the Lambda
+  // free tier; worst case (a cold start per run) is ~2,880 Secrets Manager
+  // GetSecretValue calls/month, about $0.015 - flagged in project-state.md.
   new events.Rule(stack, "MissedVisitSweepSchedule", {
-    schedule: events.Schedule.rate(cdk.Duration.hours(6)),
+    schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
     targets: [new eventsTargets.LambdaFunction(missedVisitSweepFunction)],
   });
 

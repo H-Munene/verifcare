@@ -27,6 +27,23 @@
   --color-accent-tint-bg: #e3f1fd;
   --color-accent-tint-text: #0068c9;
 
+  /* Visit states, shared by the Overview map's dots, its status tiles and the 14-day outcome
+     chart: grey upcoming, amber awaiting check-in, green checked in, red no check-in. Brightened
+     and made more vibrant at the user's request (2026-09-26), then re-validated as a set with the
+     dataviz palette checker: every pair clears both the normal-vision floor and the colour-blind
+     target (worst pair green/grey, deutan, dE 8.1). The grey is deliberately neutral. */
+  --color-state-upcoming: #a0a4ab;
+  --color-state-awaiting: #ffc107;
+  --color-state-checked-in: #00c16a;
+  --color-state-no-checkin: #e8262d;
+  --color-state-cancelled: #d4d4d4;
+  /* The same hues a step deeper for thin icon strokes on white, where the bright amber and green
+     are too faint to read. */
+  --color-state-upcoming-icon: #7d828b;
+  --color-state-awaiting-icon: #d99a00;
+  --color-state-checked-in-icon: #00a35a;
+  --color-state-no-checkin-icon: #e8262d;
+
   /* Radius ladder */
   --radius-checkbox: 4px;
   --radius-tag: 6px;

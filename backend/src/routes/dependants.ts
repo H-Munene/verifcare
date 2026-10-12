@@ -1,39 +1,91 @@
 // POST/GET /dependants, GET/PATCH /dependants/{dependantId},
 // POST/GET /dependants/{dependantId}/family-members,
-// PATCH /dependants/{dependantId}/family-members/{userId}.
+// PATCH /dependants/{dependantId}/family-members/{userId} (HEZ-30).
 //
-// Access rules (caregivers are forbidden throughout):
-// - POST /dependants: supervisor or family_member. A family member can only name themselves as
-//   the primary contact.
-// - GET /dependants, GET /dependants/{id}: supervisors see all; family members only linked ones.
-// - PATCH /dependants/{id}: supervisor, or the primary contact (who can't change status).
-// - POST /dependants/{id}/family-members: supervisor or any linked family member.
-// - GET /dependants/{id}/family-members: supervisor or any linked family member.
-// - PATCH /dependants/{id}/family-members/{userId}: supervisor-only.
+// Ownership/RBAC rules (confirmed with the user before implementing, not assumed - see
+// project-state.md's HEZ-30 entry for the full reasoning behind each):
+// - caregiver is forbidden on every route in this file - caregiver-to-dependant visibility
+//   belongs with visit scheduling (HEZ-32+), not this issue.
+// - POST /dependants: supervisor or family_member. A non-supervisor caller may only name
+//   themselves (primaryFamilyMember.cognitoSub === caller.sub) as the primary contact, mirroring
+//   routes/users.ts's POST /users self-only rule.
+// - GET /dependants (list) / GET /dependants/{id}: supervisor sees everything; family_member sees
+//   only dependants linked to them via dependant_family_members.
+// - PATCH /dependants/{id}: supervisor (any field, including status), or the dependant's
+//   primary-contact family member (any field except status - offboarding stays supervisor-only,
+//   mirroring PATCH /users). A linked-but-non-primary family member may not update at all.
+// - POST /dependants/{id}/family-members: supervisor, or any existing linked family member of
+//   that dependant - architecture.md's own stated rule ("later members are added by an existing
+//   linked family member or by a supervisor").
+// - GET /dependants/{id}/family-members: supervisor, or a family_member linked to that dependant.
+// - PATCH /dependants/{id}/family-members/{userId}: supervisor-only. Architecture.md's rule above
+//   only covers adding a new link, not editing one; the user chose the more conservative option
+//   for editing.
 //
-// Making someone the primary contact demotes the current one in the same transaction.
+// New-family-member-user handling (resolveFamilyMemberIdentity, shared by POST /dependants and
+// POST /dependants/{id}/family-members - both need to resolve a submitted cognitoSub the same way):
+// - No existing users row for that cognitoSub: assign the Cognito custom:role attribute
+//   (cognitoAdmin.assignRole) BEFORE the DB insert, same ordering as routes/users.ts/
+//   routes/caregivers.ts, so a failed insert still leaves a retry that can recover. This is
+//   required for correctness, not just consistency: requireAuth/requireRole only ever read the
+//   JWT's custom:role claim, never the DB, so a users row created without also setting this
+//   attribute would leave that person permanently unable to authenticate as a family_member (and
+//   unable to self-heal via POST /users, which would 409 on the now-existing cognitoSub).
+// - An existing users row with a role other than family_member: reject with 409 - a
+//   supervisor/caregiver account can't also be linked as a dependant's family contact.
+// - An existing users row with role family_member: reuse it as-is. The request's phoneNumber/
+//   fullName are only used when creating a brand-new row - an unrelated linking action must not
+//   be able to silently overwrite someone else's own profile (editable only via that person's own
+//   PATCH /users/{id}), which would reopen the same class of gap HEZ-29's privilege-escalation fix
+//   closed.
+//
+// Reassigning isPrimaryContact to a different family member (via either the add-link or
+// edit-link endpoint) auto-demotes the dependant's current primary contact in the same
+// transaction - this is what openapi.yaml's own description of the PATCH endpoint already implies
+// ("reassigning isPrimaryContact... enforced by a partial unique index").
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import {
+  isCognitoInvalidParameterError,
   isCognitoUserAlreadyExistsError,
   isCognitoUserNotFoundError,
   type CognitoAdmin,
 } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
+import { changedFields, recordAudit } from '../audit.js';
+import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
+import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
+import {
+  checkinPhotoStatusCondition,
+  checkinPhotoStatuses,
+  type CheckinPhotoStatus,
+} from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
+import { grantConsents, hasGivenTermsConsents } from '../db/consents.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
+import { visitStatsFor } from '../db/visitStats.js';
 import { sendProblem } from '../errors.js';
-import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
+import {
+  decodeCursor,
+  keysetCondition,
+  keysetOrder,
+  paginate,
+  resolveSort,
+  type SortKey,
+} from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 
 export interface DependantsRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
+  // Optional so existing callers/tests that don't touch biometric enrollment at all (most of them)
+  // don't need to construct one - offboarding cleanup (HEZ-85) is simply skipped without it.
+  faceCollection?: BiometricFaceCollection;
 }
 
 interface DependantResponse {
@@ -42,6 +94,10 @@ interface DependantResponse {
   dob: string;
   gender: 'male' | 'female' | null;
   homeAddressText: string | null;
+  primaryConditionSummary: string | null;
+  county: string | null;
+  constituency: string | null;
+  ward: string | null;
   geofenceLat: number;
   geofenceLng: number;
   geofenceRadiusMeters: number;
@@ -50,15 +106,25 @@ interface DependantResponse {
   registeredBy: string;
   createdAt: string;
   updatedAt: string;
+  // Where their check-in photo stands (2026-09-26) - see db/checkinPhotos.ts. Drives the family
+  // app's "photo needed" alert; a visit can only be scheduled once it's 'ready'.
+  checkinPhotoStatus: CheckinPhotoStatus;
 }
 
-function toDependantResponse(row: typeof schema.dependants.$inferSelect): DependantResponse {
+function toDependantResponse(
+  row: typeof schema.dependants.$inferSelect,
+  checkinPhotoStatus: CheckinPhotoStatus,
+): DependantResponse {
   return {
     id: row.id,
     fullName: row.fullName,
     dob: row.dob,
     gender: row.gender,
     homeAddressText: row.homeAddressText,
+    primaryConditionSummary: row.primaryConditionSummary,
+    county: row.county,
+    constituency: row.constituency,
+    ward: row.ward,
     geofenceLat: row.geofenceLat,
     geofenceLng: row.geofenceLng,
     geofenceRadiusMeters: row.geofenceRadiusMeters,
@@ -67,32 +133,144 @@ function toDependantResponse(row: typeof schema.dependants.$inferSelect): Depend
     registeredBy: row.registeredBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    checkinPhotoStatus,
+  };
+}
+
+// Every response path goes through here, so each one reports checkinPhotoStatus with one extra
+// query no matter how many dependants it returns.
+async function toDependantResponses(
+  db: Db,
+  rows: (typeof schema.dependants.$inferSelect)[],
+): Promise<DependantResponse[]> {
+  const statuses = await checkinPhotoStatuses(
+    db,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => toDependantResponse(row, statuses.get(row.id) ?? 'missing'));
+}
+
+async function toOneDependantResponse(
+  db: Db,
+  row: typeof schema.dependants.$inferSelect,
+): Promise<DependantResponse> {
+  const statuses = await checkinPhotoStatuses(db, [row.id]);
+  return toDependantResponse(row, statuses.get(row.id) ?? 'missing');
+}
+
+interface CareTaskResponse {
+  id: string;
+  dependantId: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  required: boolean;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toCareTaskResponse(row: typeof schema.dependantCareTasks.$inferSelect): CareTaskResponse {
+  return {
+    id: row.id,
+    dependantId: row.dependantId,
+    title: row.title,
+    description: row.description,
+    category: row.category,
+    required: row.required,
+    active: row.active,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
 interface DependantFamilyMemberResponse {
   dependantId: string;
   familyMemberUserId: string;
+  fullName: string;
   relationship: string | null;
   isPrimaryContact: boolean;
   addedBy: string;
   createdAt: string;
+  // The member's registration details (2026-09-26, user request: an expandable details section on
+  // web and mobile). Email and phone go to everyone who can see the list - other family members of
+  // the same dependant use them to coordinate care. The identity document goes to supervisors only
+  // (user decision): another family member has no need for it, and a national ID number is
+  // sensitive under the Kenya Data Protection Act, so it's left out of their response entirely
+  // rather than merely hidden by the app.
+  email: string | null;
+  phoneNumber: string | null;
+  addedByName: string | null;
+  idType?: string | null;
+  idNumber?: string | null;
 }
 
-function toFamilyMemberResponse(
-  row: typeof schema.dependantFamilyMembers.$inferSelect,
-): DependantFamilyMemberResponse {
-  return {
-    dependantId: row.dependantId,
-    familyMemberUserId: row.familyMemberUserId,
-    relationship: row.relationship,
-    isPrimaryContact: row.isPrimaryContact,
-    addedBy: row.addedBy,
-    createdAt: row.createdAt.toISOString(),
-  };
+/**
+ * Builds family-member responses with each member's details and the name of whoever added them,
+ * in one users query however many links. [includeIdentity]: only for a supervisor caller.
+ */
+async function familyMemberResponses(
+  db: Db,
+  links: (typeof schema.dependantFamilyMembers.$inferSelect)[],
+  includeIdentity: boolean,
+): Promise<DependantFamilyMemberResponse[]> {
+  if (links.length === 0) {
+    return [];
+  }
+  const userIds = [...new Set(links.flatMap((link) => [link.familyMemberUserId, link.addedBy]))];
+  const people = new Map(
+    (
+      await db
+        .select({
+          id: schema.users.id,
+          fullName: schema.users.fullName,
+          email: schema.users.email,
+          phoneNumber: schema.users.phoneNumber,
+          idType: schema.users.idType,
+          idNumber: schema.users.idNumber,
+        })
+        .from(schema.users)
+        .where(inArray(schema.users.id, userIds))
+    ).map((person) => [person.id, person]),
+  );
+  return links.map((link) => {
+    const member = people.get(link.familyMemberUserId);
+    if (!member) {
+      throw new Error(`No users row for linked family member ${link.familyMemberUserId}.`);
+    }
+    return {
+      dependantId: link.dependantId,
+      familyMemberUserId: link.familyMemberUserId,
+      fullName: member.fullName,
+      relationship: link.relationship,
+      isPrimaryContact: link.isPrimaryContact,
+      addedBy: link.addedBy,
+      createdAt: link.createdAt.toISOString(),
+      email: member.email,
+      phoneNumber: member.phoneNumber,
+      addedByName: people.get(link.addedBy)?.fullName ?? null,
+      ...(includeIdentity && { idType: member.idType, idNumber: member.idNumber }),
+    };
+  });
 }
 
-// Explicit columns so the joined query returns the same flat shape as the plain one.
+async function familyMemberResponse(
+  db: Db,
+  link: typeof schema.dependantFamilyMembers.$inferSelect,
+  includeIdentity: boolean,
+): Promise<DependantFamilyMemberResponse> {
+  const [response] = await familyMemberResponses(db, [link], includeIdentity);
+  if (!response) {
+    throw new Error('familyMemberResponses returned nothing for one link.');
+  }
+  return response;
+}
+
+// Explicit column map (not a bare .select()) so a joined query (the family_member branch of
+// GET /dependants) returns the same flat shape as an unjoined one - same reasoning as
+// routes/caregivers.ts's caregiverSelection().
 function dependantColumns() {
   return {
     id: schema.dependants.id,
@@ -100,6 +278,10 @@ function dependantColumns() {
     dob: schema.dependants.dob,
     gender: schema.dependants.gender,
     homeAddressText: schema.dependants.homeAddressText,
+    primaryConditionSummary: schema.dependants.primaryConditionSummary,
+    county: schema.dependants.county,
+    constituency: schema.dependants.constituency,
+    ward: schema.dependants.ward,
     geofenceLat: schema.dependants.geofenceLat,
     geofenceLng: schema.dependants.geofenceLng,
     geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
@@ -113,20 +295,60 @@ function dependantColumns() {
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
-// Exactly one of cognitoSub (link an existing Cognito user) or email (create a new one).
+// E.164 (a leading +, then 1-15 digits, first digit non-zero) - Cognito's own `phone_number`
+// attribute requires exactly this format and rejects anything else with an opaque
+// InvalidParameterException. When email is set (the "new user" path below actually calls
+// AdminCreateUser with this value), a locally-formatted number like "0712345678" used to reach
+// Cognito unvalidated and surface as a raw 500 - found via a real "Internal Server Error" report,
+// not assumed. Validating here gives a clean, immediate 400 on the exact field, instead of waiting
+// for Cognito's own rejection (still classified defensively in resolveFamilyMemberIdentity's catch
+// block below, in case some other Cognito-side rejection this regex doesn't anticipate slips
+// through).
+const E164_PHONE_NUMBER = /^\+[1-9]\d{6,14}$/;
+
+// Exactly one of cognitoSub/email identifies the family member - cognitoSub links an identity
+// that already exists in Cognito (resolved by the frontend's search-by-phone/email against our
+// own users table, or supplied directly by any other caller that already knows it); email creates
+// a brand-new Cognito identity from scratch for someone who has never touched Cognito at all
+// (2026-09-14, extending the original cognitoSub-only design - see resolveFamilyMemberIdentity
+// below for the full resolution rules for each).
 const addFamilyMemberRequestSchema = z
   .object({
     cognitoSub: z.string().min(1).optional(),
     email: z.string().email().optional(),
     phoneNumber: z.string().min(1),
     fullName: z.string().min(1),
+    idType: z.enum(['national_id', 'passport']).optional(),
+    idNumber: z.string().min(1).optional(),
     relationship: z.string().min(1).optional(),
     isPrimaryContact: z.boolean().default(false),
+  })
+  // Only enforced when email is set - that's the only path that actually calls Cognito's
+  // AdminCreateUser with this value (see resolveFamilyMemberIdentity below); the cognitoSub path
+  // (linking an existing identity) never uses body.phoneNumber at all, and the frontend resends
+  // whatever that existing user's own stored phone number happens to be (possibly empty) - a field-
+  // level regex here would wrongly reject linking an existing user over a value that's never used.
+  .refine((data) => !data.email || E164_PHONE_NUMBER.test(data.phoneNumber), {
+    message: 'phoneNumber must be in E.164 format, e.g. +254712345678.',
+    path: ['phoneNumber'],
   })
   .refine((data) => Boolean(data.cognitoSub) !== Boolean(data.email), {
     message:
       'Provide exactly one of cognitoSub (link an existing identity) or email (create a new one).',
     path: ['cognitoSub'],
+  })
+  .refine((data) => Boolean(data.idType) === Boolean(data.idNumber), {
+    message: 'idType and idNumber must be provided together.',
+    path: ['idType'],
+  })
+  // Only enforced on the email path (registering a brand-new user, the admin web app's "New
+  // user" mode) - the cognitoSub path can also create a brand-new `users` row (see
+  // resolveFamilyMemberIdentity's own comment) for a Cognito identity that was created outside
+  // this admin flow entirely, where the admin app never collects an ID document at all. Requiring
+  // it unconditionally would reject that legitimate, already-exercised path.
+  .refine((data) => !data.email || Boolean(data.idType), {
+    message: 'idType and idNumber are required when registering a brand-new user by email.',
+    path: ['idType'],
   });
 type AddFamilyMemberBody = z.infer<typeof addFamilyMemberRequestSchema>;
 
@@ -135,6 +357,13 @@ const createDependantRequestSchema = z.object({
   dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
   gender: z.enum(['male', 'female']).optional(),
   homeAddressText: z.string().min(1).optional(),
+  primaryConditionSummary: z.string().min(1).optional(),
+  // Required for every new registration (confirmed with the user, not assumed) - resolved
+  // client-side in the admin web app as the geofence pin is placed, unlike homeAddressText's own
+  // optional free-text treatment. Nullable at the DB level regardless (see schema.ts's comment).
+  county: z.string().min(1),
+  constituency: z.string().min(1),
+  ward: z.string().min(1),
   geofenceLat: z.number(),
   geofenceLng: z.number(),
   geofenceRadiusMeters: z.number().int().min(1),
@@ -146,6 +375,10 @@ const updateDependantRequestSchema = z.object({
   fullName: z.string().min(1).optional(),
   gender: z.enum(['male', 'female']).optional(),
   homeAddressText: z.string().min(1).optional(),
+  primaryConditionSummary: z.string().min(1).optional(),
+  county: z.string().min(1).optional(),
+  constituency: z.string().min(1).optional(),
+  ward: z.string().min(1).optional(),
   geofenceLat: z.number().optional(),
   geofenceLng: z.number().optional(),
   geofenceRadiusMeters: z.number().int().min(1).optional(),
@@ -153,18 +386,58 @@ const updateDependantRequestSchema = z.object({
   status: z.enum(['active', 'deactivated']).optional(),
 });
 
+const linkExistingMemberRequestSchema = z.object({
+  email: z.string().trim().email(),
+  relationship: z.string().trim().min(1).max(100).optional(),
+});
+
 const updateFamilyMemberRequestSchema = z.object({
   relationship: z.string().min(1).optional(),
   isPrimaryContact: z.boolean().optional(),
 });
 
+const careTaskIdParamSchema = z.string().uuid();
+
+const createCareTaskRequestSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+});
+
+const updateCareTaskRequestSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  required: z.boolean().optional(),
+  active: z.boolean().optional(),
+});
+
+const listCareTasksQuerySchema = z.object({
+  active: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
+});
+
+// Sortable columns (2026-09-26, the supervisor console's tables): "name" ascending, "-name"
+// descending; without one the list keeps its id order.
+const DEPENDANT_SORT_KEYS = {
+  name: { expr: schema.dependants.fullName, cast: 'text' },
+  dob: { expr: schema.dependants.dob, cast: 'date' },
+} as const satisfies Record<string, SortKey>;
+
 const listDependantsQuerySchema = z.object({
   status: z.enum(['active', 'deactivated']).optional(),
+  // Where the check-in photo stands, as in checkinPhotoStatus on each dependant.
+  photo: z.enum(['ready', 'awaiting_review', 'missing']).optional(),
+  sort: z.enum(['name', '-name', 'dob', '-dob']).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-// Express 5 types params as string | string[], so validate rather than cast.
+// Express 5's params type allows string | string[], so these aren't plain strings on their own -
+// validated the same way any other input is, via parseOrSendProblem.
 const dependantIdParamSchema = z.string().uuid();
 const familyMemberUserIdParamSchema = z.string().uuid();
 
@@ -181,8 +454,12 @@ function getDb(res: Response): Db | undefined {
   return db;
 }
 
-// Returns the caller's users row and their link to the dependant, or undefined if not linked.
-async function findFamilyMemberLink(
+// Looks up whether callerSub is linked to dependantId, returning both the caller's own users row
+// (needed by callers for addedBy/registeredBy-style columns) and the link row itself (needed to
+// check isPrimaryContact). Returns undefined if the caller has no users row, or no link exists.
+// Exported for routes/biometricEnrollments.ts (HEZ-31), which needs the exact same
+// family_member-to-dependant ownership check, not a re-derived copy of it.
+export async function findFamilyMemberLink(
   db: Db,
   dependantId: string,
   callerSub: string,
@@ -221,16 +498,35 @@ type ResolvedFamilyMember =
   | { kind: 'existing'; userId: string }
   | { kind: 'new'; cognitoSub: string; body: AddFamilyMemberBody };
 
-// Resolves the family member's users row, creating it if needed. Sends a 400/409 and returns
-// undefined on failure.
+// Shared by POST /dependants (primaryFamilyMember) and POST /dependants/{id}/family-members (the
+// request body itself). Sends the appropriate 400/409 response itself and returns undefined on
+// failure, matching validation.ts/auth/middleware.ts's established "send the response, return
+// undefined" pattern. Two resolution paths, per the schema's cognitoSub-xor-email requirement:
 //
-// - Existing user who isn't a family_member: 409.
-// - Existing family_member: reused as-is. phoneNumber/fullName are only used for new rows, so
-//   linking can't overwrite someone else's profile.
-// - New, by cognitoSub: assign the Cognito role before inserting. Auth reads the role from the
-//   JWT only, so a row without it would leave the user locked out.
-// - New, by email: the DB is checked first so we don't create orphan Cognito users. createUser
-//   sets the role and emails a temporary password.
+// cognitoSub given (link an existing Cognito identity):
+// - An existing users row with a role other than family_member: reject with 409 - a
+//   supervisor/caregiver account can't also be linked as a dependant's family contact.
+// - An existing users row with role family_member: reuse it as-is. The request's phoneNumber/
+//   fullName are only used when creating a brand-new row - an unrelated linking action must not
+//   be able to silently overwrite someone else's own profile (editable only via that person's own
+//   PATCH /users/{id}), which would reopen the same class of gap HEZ-29's privilege-escalation fix
+//   closed.
+// - No existing users row for that cognitoSub: assign the Cognito custom:role attribute
+//   (cognitoAdmin.assignRole) BEFORE the DB insert, same ordering as routes/users.ts/
+//   routes/caregivers.ts, so a failed insert still leaves a retry that can recover. This is
+//   required for correctness, not just consistency: requireAuth/requireRole only ever read the
+//   JWT's custom:role claim, never the DB, so a users row created without also setting this
+//   attribute would leave that person permanently unable to authenticate as a family_member.
+//
+// email given (create a brand-new Cognito identity from scratch, 2026-09-14):
+// - An existing users row with that email: same existing-role-mismatch/reuse rules as the
+//   cognitoSub path above - the DB is checked first specifically so a genuine match never reaches
+//   Cognito at all (avoids creating an orphaned Cognito identity for an email that turns out to
+//   already be registered here).
+// - No existing users row: cognitoAdmin.createUser() creates the Cognito identity and sets
+//   custom:role in the same call (no separate assignRole needed, unlike the cognitoSub path),
+//   sends a real invitation email with a Cognito-generated temporary password. The new person
+//   completes sign-in via the NEW_PASSWORD_REQUIRED flow the login page already handles.
 async function resolveFamilyMemberIdentity(
   db: Db,
   cognitoAdmin: CognitoAdmin,
@@ -310,13 +606,25 @@ async function resolveFamilyMemberIdentity(
       });
       return undefined;
     }
+    if (isCognitoInvalidParameterError(err)) {
+      sendProblem(res, {
+        type: 'about:blank',
+        title: 'Bad Request',
+        status: 400,
+        detail:
+          (err as { message?: string }).message ?? 'Cognito rejected one of the submitted fields.',
+      });
+      return undefined;
+    }
     throw err;
   }
 }
 
 export function createDependantsRouter(dependencies: DependantsRouterDependencies): Router {
   const router = Router();
-  const { cognitoAdmin, requireAuth } = dependencies;
+  const { cognitoAdmin, requireAuth, faceCollection } = dependencies;
+  // caregiver is forbidden on every route in this file (see the file header comment); the one
+  // route that's narrower still (supervisor-only) adds its own requireRole afterward.
   router.use(requireAuth, requireRole('supervisor', 'family_member'));
 
   router.post('/', async (req, res, next) => {
@@ -370,6 +678,10 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             dob: body.dob,
             gender: body.gender,
             homeAddressText: body.homeAddressText,
+            primaryConditionSummary: body.primaryConditionSummary,
+            county: body.county,
+            constituency: body.constituency,
+            ward: body.ward,
             geofenceLat: body.geofenceLat,
             geofenceLng: body.geofenceLng,
             geofenceRadiusMeters: body.geofenceRadiusMeters,
@@ -393,6 +705,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
+              idType: resolved.body.idType,
+              idNumber: resolved.body.idNumber,
               role: 'family_member',
             })
             .returning();
@@ -402,7 +716,9 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           familyMemberUserId = userRow.id;
         }
 
-        // Always primary, whatever the request said.
+        // Always the primary contact, regardless of what primaryFamilyMember.isPrimaryContact
+        // said - that's what makes this the *primary* family member, per openapi.yaml's own
+        // description of this endpoint.
         await tx.insert(schema.dependantFamilyMembers).values({
           dependantId: dependant.id,
           familyMemberUserId,
@@ -411,10 +727,38 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           addedBy: callerRow.id,
         });
 
+        // A primary contact who ticked the consent boxes when accepting the family app's terms
+        // consented for the dependants they register or are the primary contact for (see
+        // routes/terms.ts's header), so this new dependant gets the same consent now, granted by
+        // them - otherwise it couldn't be scheduled until they accepted the terms again. Applies
+        // when a supervisor registers the dependant for them too, since the consent is theirs.
+        if (await hasGivenTermsConsents(tx, familyMemberUserId)) {
+          await grantConsents(
+            tx,
+            [{ subjectType: 'dependant', id: dependant.id }],
+            familyMemberUserId,
+          );
+        }
+
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'dependant.create',
+          entityType: 'dependant',
+          entityId: dependant.id,
+          metadata: {
+            county: dependant.county,
+            constituency: dependant.constituency,
+            ward: dependant.ward,
+            cognitiveMonitoringEnabled: dependant.cognitiveMonitoringEnabled,
+            primaryFamilyMemberId: familyMemberUserId,
+          },
+        });
+
         return dependant;
       });
 
-      res.status(201).json(toDependantResponse(dependantRow));
+      // Just registered, so no photo yet - the photo step comes after registration.
+      res.status(201).json(toDependantResponse(dependantRow, 'missing'));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -449,10 +793,14 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (query.status) {
         conditions.push(eq(schema.dependants.status, query.status));
       }
+      if (query.photo) {
+        conditions.push(checkinPhotoStatusCondition(schema.dependants.id, query.photo));
+      }
+      const sort = resolveSort(query.sort, DEPENDANT_SORT_KEYS);
       if (query.cursor) {
         let cursor;
         try {
-          cursor = decodeCursor(query.cursor);
+          cursor = decodeCursor(query.cursor, sort?.param);
         } catch {
           sendProblem(res, {
             type: 'about:blank',
@@ -462,7 +810,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
-        conditions.push(cursorCondition(schema.dependants.id, cursor));
+        conditions.push(keysetCondition(schema.dependants.id, cursor, sort));
       }
 
       let rows;
@@ -471,7 +819,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           .select(dependantColumns())
           .from(schema.dependants)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(asc(schema.dependants.id))
+          .orderBy(...keysetOrder(schema.dependants.id, sort))
           .limit(query.limit + 1);
       } else {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -487,12 +835,16 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             eq(schema.dependants.id, schema.dependantFamilyMembers.dependantId),
           )
           .where(and(...conditions))
-          .orderBy(asc(schema.dependants.id))
+          .orderBy(...keysetOrder(schema.dependants.id, sort))
           .limit(query.limit + 1);
       }
 
-      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
-      res.status(200).json({ items: items.map(toDependantResponse), nextCursor });
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({
+        id: row.id,
+        sort: sort?.param,
+        value: sort ? (sort.param.endsWith('dob') ? row.dob : row.fullName) : undefined,
+      }));
+      res.status(200).json({ items: await toDependantResponses(db, items), nextCursor });
     } catch (err) {
       next(err);
     }
@@ -529,7 +881,47 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           return;
         }
       }
-      res.status(200).json(toDependantResponse(row));
+      res.status(200).json(await toOneDependantResponse(db, row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Visit statistics for the dependant's page (2026-09-27) - see db/visitStats.ts. The same
+  // access rule as GET /:dependantId: a supervisor, or a family member linked to this dependant,
+  // since these are facts about that dependant's own care.
+  router.get('/:dependantId/stats', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [row] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (caller.role !== 'supervisor') {
+        const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+      res.status(200).json(await visitStatsFor(db, { dependantId }, new Date()));
     } catch (err) {
       next(err);
     }
@@ -564,6 +956,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return;
       }
 
+      let actorRow: typeof schema.users.$inferSelect | undefined;
       if (caller.role !== 'supervisor') {
         if (body.status !== undefined) {
           sendProblem(res, {
@@ -571,6 +964,18 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             title: 'Forbidden',
             status: 403,
             detail: 'Only a supervisor may change a dependant’s status.',
+          });
+          return;
+        }
+        // The primary contact may move the location (e.g. after a house move), but not the
+        // radius: caregiver check-in is verified against it, so widening it would weaken that
+        // check for every future visit (user decision 2026-09-24).
+        if (body.geofenceRadiusMeters !== undefined) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'Only a supervisor may change a dependant’s geofence radius.',
           });
           return;
         }
@@ -585,17 +990,54 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
+        actorRow = found.callerRow;
+      } else {
+        actorRow = await getUserByCognitoSub(db, caller.sub);
       }
 
-      const [updated] = await db
-        .update(schema.dependants)
-        .set({ ...body, updatedAt: new Date() })
-        .where(eq(schema.dependants.id, dependantId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to dependants returned no row.');
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.dependants)
+          .set({ ...body, updatedAt: new Date() })
+          .where(eq(schema.dependants.id, dependantId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to dependants returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'dependant.update',
+          entityType: 'dependant',
+          entityId: dependantId,
+          metadata: changedFields(
+            existing,
+            row,
+            [
+              'fullName',
+              'gender',
+              'homeAddressText',
+              'primaryConditionSummary',
+              'county',
+              'constituency',
+              'ward',
+              'geofenceRadiusMeters',
+              'cognitiveMonitoringEnabled',
+              'status',
+            ],
+            // Geofence coordinates are GPS data - never copied into the log verbatim.
+            ['geofenceLat', 'geofenceLng'],
+          ),
+        });
+        return row;
+      });
+
+      // Best-effort, after the transaction above has already committed - see
+      // db/biometricOffboarding.ts's header comment for why this isn't inside it.
+      if (body.status === 'deactivated' && faceCollection) {
+        await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
       }
-      res.status(200).json(toDependantResponse(updated));
+
+      res.status(200).json(await toOneDependantResponse(db, updated));
     } catch (err) {
       next(err);
     }
@@ -649,6 +1091,19 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
+        // Adding someone as primary demotes the current primary contact (below), and editing an
+        // existing link is supervisor-only - so a non-primary member must not be able to take that
+        // role away from the current primary contact by this route instead.
+        if (body.isPrimaryContact && !found.link.isPrimaryContact) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail:
+              'Only a supervisor or the current primary contact may add a family member as the primary contact.',
+          });
+          return;
+        }
         callerRowId = found.callerRow.id;
       }
 
@@ -670,6 +1125,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               email: resolved.body.email,
               phoneNumber: resolved.body.phoneNumber,
               fullName: resolved.body.fullName,
+              idType: resolved.body.idType,
+              idNumber: resolved.body.idNumber,
               role: 'family_member',
             })
             .returning();
@@ -704,10 +1161,21 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         if (!row) {
           throw new Error('Insert into dependant_family_members returned no row.');
         }
+        await recordAudit(tx, {
+          actorUserId: callerRowId,
+          action: 'family_member.add',
+          entityType: 'family_member',
+          entityId: familyMemberUserId,
+          metadata: {
+            dependantId,
+            relationship: body.relationship ?? null,
+            isPrimaryContact: body.isPrimaryContact,
+          },
+        });
         return row;
       });
 
-      res.status(201).json(toFamilyMemberResponse(link));
+      res.status(201).json(await familyMemberResponse(db, link, caller.role === 'supervisor'));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -719,6 +1187,101 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         });
         return;
       }
+      next(err);
+    }
+  });
+
+  // POST /dependants/{id}/family-members/link (2026-09-26): the primary contact links someone who
+  // already has a Mzazi Care account, found by their exact email, straight away - no request or
+  // approval, since the primary contact is the one who would approve it. Someone without an
+  // account is told to sign up and send a link request instead (routes/familyLinkRequests.ts).
+  // Unlike POST .../family-members above, this never creates an account or a Cognito identity -
+  // that path is the supervisor's "New user" flow. Answering "no account uses that email" does
+  // reveal whether an email is registered, but only to a dependant's primary contact, and it is
+  // what linking by email needs.
+  router.post('/:dependantId/family-members/link', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const body = parseOrSendProblem(linkExistingMemberRequestSchema, req.body, res);
+    if (!body) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+    try {
+      const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+      if (!found?.link.isPrimaryContact) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Forbidden',
+          status: 403,
+          detail: "Only the dependant's primary contact can link family members.",
+        });
+        return;
+      }
+      const [member] = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(sql`lower(${schema.users.email})`, body.email.toLowerCase()),
+            eq(schema.users.role, 'family_member'),
+          ),
+        );
+      if (!member) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail:
+            'No Mzazi Care account uses that email. They can create an account in the app and ask you to link them.',
+        });
+        return;
+      }
+      const link = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.dependantFamilyMembers)
+          .values({
+            dependantId,
+            familyMemberUserId: member.id,
+            relationship: body.relationship ?? null,
+            isPrimaryContact: false,
+            addedBy: found.callerRow.id,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (!inserted) {
+          return undefined;
+        }
+        await recordAudit(tx, {
+          actorUserId: found.callerRow.id,
+          action: 'family_member.link',
+          entityType: 'family_member',
+          entityId: member.id,
+          metadata: { dependantId, relationship: body.relationship ?? null },
+        });
+        return inserted;
+      });
+      if (!link) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'That person is already linked to this dependant.',
+        });
+        return;
+      }
+      res.status(201).json(await familyMemberResponse(db, link, false));
+    } catch (err) {
       next(err);
     }
   });
@@ -755,11 +1318,11 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         }
       }
 
-      const rows = await db
+      const links = await db
         .select()
         .from(schema.dependantFamilyMembers)
         .where(eq(schema.dependantFamilyMembers.dependantId, dependantId));
-      res.status(200).json(rows.map(toFamilyMemberResponse));
+      res.status(200).json(await familyMemberResponses(db, links, caller.role === 'supervisor'));
     } catch (err) {
       next(err);
     }
@@ -789,6 +1352,11 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!db) {
         return;
       }
+      const caller = req.auth;
+      if (!caller) {
+        sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+        return;
+      }
 
       try {
         const [existing] = await db
@@ -804,6 +1372,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
           return;
         }
+        // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
 
         const updated = await db.transaction(async (tx) => {
           if (body.isPrimaryContact) {
@@ -827,12 +1397,233 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               ),
             )
             .returning();
+          if (!row) {
+            return undefined;
+          }
+          await recordAudit(tx, {
+            actorUserId: actorRow?.id ?? null,
+            action: 'family_member.update',
+            entityType: 'family_member',
+            entityId: familyMemberUserId,
+            metadata: changedFields(existing, row, ['relationship', 'isPrimaryContact']),
+          });
           return row;
         });
         if (!updated) {
           throw new Error('Update to dependant_family_members returned no row.');
         }
-        res.status(200).json(toFamilyMemberResponse(updated));
+        // Supervisor-only route (requireRole above).
+        res.status(200).json(await familyMemberResponse(db, updated, true));
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // Visit task checklist (docs/visit-task-checklist-plan.md) - the care plan itself. Authoring
+  // (POST/PATCH) is supervisor-only, matching the user's own "these will be defined by the
+  // supervisor" confirmation; GET reuses this router's own broader gate (supervisor,
+  // family_member) plus the same ownership check GET /:dependantId already uses, so a family
+  // member can see the care plan for a dependant they're linked to, not author it.
+
+  router.post('/:dependantId/care-tasks', requireRole('supervisor'), async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const body = parseOrSendProblem(createCareTaskRequestSchema, req.body, res);
+    if (!body) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [dependant] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!dependant) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+      if (!callerRow) {
+        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
+      }
+
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.dependantCareTasks)
+          .values({
+            id: uuidv7(),
+            dependantId,
+            title: body.title,
+            description: body.description,
+            category: body.category,
+            required: body.required,
+            createdBy: callerRow.id,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into dependant_care_tasks returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'care_task.create',
+          entityType: 'care_task',
+          entityId: inserted.id,
+          metadata: {
+            dependantId,
+            title: inserted.title,
+            category: inserted.category,
+            required: inserted.required,
+          },
+        });
+        return inserted;
+      });
+      res.status(201).json(toCareTaskResponse(row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:dependantId/care-tasks', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const query = parseOrSendProblem(listCareTasksQuerySchema, req.query, res);
+    if (!query) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [dependant] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!dependant) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (caller.role !== 'supervisor') {
+        const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+
+      const conditions = [eq(schema.dependantCareTasks.dependantId, dependantId)];
+      if (query.active !== undefined) {
+        conditions.push(eq(schema.dependantCareTasks.active, query.active));
+      }
+      const rows = await db
+        .select()
+        .from(schema.dependantCareTasks)
+        .where(and(...conditions))
+        .orderBy(asc(schema.dependantCareTasks.createdAt));
+      res.status(200).json(rows.map(toCareTaskResponse));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.patch(
+    '/:dependantId/care-tasks/:careTaskId',
+    requireRole('supervisor'),
+    async (req, res, next) => {
+      const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+      if (!dependantId) {
+        return;
+      }
+      const careTaskId = parseOrSendProblem(careTaskIdParamSchema, req.params.careTaskId, res);
+      if (!careTaskId) {
+        return;
+      }
+      const body = parseOrSendProblem(updateCareTaskRequestSchema, req.body, res);
+      if (!body) {
+        return;
+      }
+      const db = getDb(res);
+      if (!db) {
+        return;
+      }
+      const caller = req.auth;
+      if (!caller) {
+        sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+        return;
+      }
+
+      try {
+        const [existing] = await db
+          .select()
+          .from(schema.dependantCareTasks)
+          .where(
+            and(
+              eq(schema.dependantCareTasks.id, careTaskId),
+              eq(schema.dependantCareTasks.dependantId, dependantId),
+            ),
+          );
+        if (!existing) {
+          sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+          return;
+        }
+        // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
+
+        const row = await db.transaction(async (tx) => {
+          const [updated] = await tx
+            .update(schema.dependantCareTasks)
+            .set(body)
+            .where(
+              and(
+                eq(schema.dependantCareTasks.id, careTaskId),
+                eq(schema.dependantCareTasks.dependantId, dependantId),
+              ),
+            )
+            .returning();
+          if (!updated) {
+            return undefined;
+          }
+          await recordAudit(tx, {
+            actorUserId: actorRow?.id ?? null,
+            action: 'care_task.update',
+            entityType: 'care_task',
+            entityId: careTaskId,
+            metadata: changedFields(existing, updated, [
+              'title',
+              'description',
+              'category',
+              'required',
+              'active',
+            ]),
+          });
+          return updated;
+        });
+        if (!row) {
+          sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+          return;
+        }
+        res.status(200).json(toCareTaskResponse(row));
       } catch (err) {
         next(err);
       }

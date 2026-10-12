@@ -1,0 +1,14 @@
+.caregivers-page__toolbar {
+  display: flex;
+  align-items: center;
+  /* The title moved to the top bar; the actions sit on the right. */
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.caregivers-page__pagination {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
