@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,11 +13,11 @@ import 'package:family_member/auth/cognito_auth_service.dart';
 import 'package:family_member/main.dart';
 
 void main() {
-  testWidgets('shows the welcome screen when no session is cached', (
+  testWidgets('opens on sign-in when no session is cached', (
     WidgetTester tester,
   ) async {
     // No cached "last signed-in user" key, so CognitoAuthService.getCurrentSession() resolves to
-    // null and _RootScreen should land on WelcomeScreen rather than HomeScreen.
+    // null and _RootScreen should land on sign-in rather than HomeScreen.
     SharedPreferences.setMockInitialValues({});
 
     final authService = CognitoAuthService();
@@ -35,7 +36,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Welcome back'), findsOneWidget);
     expect(find.text('Sign in'), findsOneWidget);
-    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text("Don't have an account? Create one"), findsOneWidget);
+    // The root page has nothing to go back to.
+    expect(find.byType(BackButton), findsNothing);
   });
 }
