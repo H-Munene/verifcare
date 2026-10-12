@@ -79,7 +79,7 @@
 .ds-input {
   height: var(--control-height);
   border: 1px solid var(--color-border-structural);
-  border-radius: var(--radius-default);
+  border-radius: var(--radius-input);
   background: #ffffff;
   padding: 0 10px;
   font-family: var(--font-body);
@@ -87,10 +87,11 @@
   color: var(--color-ink-primary);
 }
 
+/* Fields never take a coloured outline or glow when focused (user decision, 2026-10-12); the
+   border only darkens to a neutral grey, so the field being typed in is still identifiable. */
 .ds-input:focus {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-tint-bg);
+  border-color: var(--color-ink-muted);
 }
 
 .ds-input-wrap {
@@ -209,7 +210,7 @@
   padding: 0 10px;
   border: none;
   background: transparent;
-  border-radius: var(--radius-default);
+  border-radius: var(--radius-input);
   font-family: var(--font-body);
   font-size: 14px;
   color: var(--color-ink-default);
@@ -556,14 +557,14 @@
   height: 30px;
   padding: 0 8px;
   border: 1px solid var(--color-border-structural);
-  border-radius: var(--radius-default);
+  border-radius: var(--radius-input);
   font: inherit;
   font-size: 13px;
 }
 
-.ds-menu__search input:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -1px;
+.ds-menu__search input:focus {
+  outline: none;
+  border-color: var(--color-ink-muted);
 }
 
 .ds-menu__rule {
@@ -927,7 +928,7 @@
   height: 34px;
   padding: 0 28px 0 12px;
   border: 1px solid var(--color-border-structural);
-  border-radius: var(--radius-default);
+  border-radius: var(--radius-input);
   background: var(--color-page-background);
   font: inherit;
   font-size: 15px;
@@ -941,17 +942,10 @@
   border-color: #cfcfcf;
 }
 
-/* The picker being worked on is tinted, as in the reference. */
+/* Same neutral focus as every other field: no coloured tint or outline. */
 .ds-time-select__field select:focus {
-  border-color: transparent;
-  background: var(--color-accent-tint-bg);
-  color: var(--color-accent-tint-text);
   outline: none;
-}
-
-.ds-time-select__field select:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
+  border-color: var(--color-ink-muted);
 }
 
 .ds-time-select__field svg {
@@ -1180,6 +1174,17 @@
   gap: 16px;
   padding: 20px 20px 16px 24px;
   border-bottom: 1px solid var(--color-border-structural);
+}
+
+/* hideTitle: just the close button, top right, with no divider under it. */
+.ds-side-panel__head--bare {
+  justify-content: flex-end;
+  padding: 12px 12px 0;
+  border-bottom: 0;
+}
+
+.ds-side-panel__head--bare + .ds-side-panel__body {
+  padding-top: 4px;
 }
 
 .ds-side-panel__eyebrow {

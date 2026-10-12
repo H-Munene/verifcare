@@ -11,7 +11,7 @@ export interface NavItemProps {
 }
 
 // 32px height, 16px leading icon (Hugeicons, replacing the wireframe's placeholder squares),
-// selected state = blue-tint fill + blue text. The icon takes the row's text colour.
+// selected state = accent-tint fill + accent text, square-cornered. The icon takes the row's text colour.
 export function NavItem({ label, icon, active, disabled, onClick }: NavItemProps) {
   const classes = [
     'ds-nav-item',

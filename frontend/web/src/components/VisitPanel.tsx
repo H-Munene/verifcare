@@ -30,17 +30,12 @@ export function VisitPanel({
   const visit = query.data;
 
   return (
+    // No visible heading (user request, 2026-10-12): the details below already name the caregiver
+    // and dependant, so the title only names the dialog for screen readers.
     <SidePanel
-      eyebrow="Visit"
+      hideTitle
       title={
-        visit ? (
-          <>
-            {visit.caregiverDisplayName} <span className="visit-panel__arrow">→</span>{' '}
-            {visit.dependantDisplayName}
-          </>
-        ) : (
-          'Visit'
-        )
+        visit ? `Visit: ${visit.caregiverDisplayName} to ${visit.dependantDisplayName}` : 'Visit'
       }
       onClose={onClose}
     >

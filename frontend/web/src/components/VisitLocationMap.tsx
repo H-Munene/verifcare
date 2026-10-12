@@ -96,7 +96,7 @@ export function VisitLocationMap({
         <Circle
           center={[home.lat, home.lng]}
           radius={radiusMeters}
-          pathOptions={{ color: '#0077e6', weight: 1.5, fillColor: '#0077e6', fillOpacity: 0.08 }}
+          pathOptions={{ color: '#047857', weight: 1.5, fillColor: '#047857', fillOpacity: 0.08 }}
         />
         <Marker
           position={[home.lat, home.lng]}

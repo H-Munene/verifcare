@@ -19,9 +19,21 @@ export interface SidePanelProps {
   children: ReactNode;
   /** Pinned under the content, e.g. actions. */
   footer?: ReactNode;
+  /**
+   * Shows no heading, only the close button, for content that already says what it is (a visit's
+   * details list the caregiver and dependant). The title still names the dialog for screen readers.
+   */
+  hideTitle?: boolean;
 }
 
-export function SidePanel({ title, eyebrow, onClose, children, footer }: SidePanelProps) {
+export function SidePanel({
+  title,
+  eyebrow,
+  onClose,
+  children,
+  footer,
+  hideTitle = false,
+}: SidePanelProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -92,13 +104,19 @@ export function SidePanel({ title, eyebrow, onClose, children, footer }: SidePan
         aria-labelledby={titleId}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="ds-side-panel__head">
-          <div className="ds-side-panel__heading">
-            {eyebrow ? <div className="ds-side-panel__eyebrow">{eyebrow}</div> : null}
-            <h2 id={titleId} className="ds-side-panel__title">
+        <div className={'ds-side-panel__head' + (hideTitle ? ' ds-side-panel__head--bare' : '')}>
+          {hideTitle ? (
+            <h2 id={titleId} className="sr-only">
               {title}
             </h2>
-          </div>
+          ) : (
+            <div className="ds-side-panel__heading">
+              {eyebrow ? <div className="ds-side-panel__eyebrow">{eyebrow}</div> : null}
+              <h2 id={titleId} className="ds-side-panel__title">
+                {title}
+              </h2>
+            </div>
+          )}
           <button
             ref={closeRef}
             type="button"

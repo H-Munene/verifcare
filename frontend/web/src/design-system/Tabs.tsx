@@ -2,7 +2,7 @@ import './components.css';
 
 // Matches temp_images/tabs_ui.PNG: uppercase labels in a row, a full-width hairline under all of
 // them, and a thicker accent-colored underline under whichever tab is active. The mockup's own
-// underline is a warm coral, not this app's one established accent blue - kept as accent blue here
+// underline is a warm coral, not this app's one established accent - kept as the accent here
 // instead of introducing a second interactive color, matching tokens.css's own "one accent...
 // never substituted" discipline that every other page in this app already follows.
 export interface TabItem {

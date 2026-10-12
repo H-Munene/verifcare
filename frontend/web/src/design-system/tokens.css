@@ -2,8 +2,10 @@
 
 :root {
   /* Color */
-  --color-accent: #0077e6;
-  --color-accent-hover: #0068c9;
+  /* Primary: emerald green (2026-10-12, replacing blue). White text on it is 5.5:1, and it stays
+     clearly darker than the bright success/checked-in greens so actions don't read as statuses. */
+  --color-accent: #047857;
+  --color-accent-hover: #065f46;
   --color-success-text: #15b042;
   --color-success-tint: #cafce0;
   --color-danger-text: #e0392b;
@@ -24,8 +26,8 @@
   --color-page-background: #ffffff;
 
   /* Accent tint, for tags and chart fills */
-  --color-accent-tint-bg: #e3f1fd;
-  --color-accent-tint-text: #0068c9;
+  --color-accent-tint-bg: #e7f5ef;
+  --color-accent-tint-text: #047857;
 
   /* Visit states, shared by the Overview map's dots, its status tiles and the 14-day outcome
      chart: grey upcoming, amber awaiting check-in, green checked in, red no check-in. Brightened
@@ -48,6 +50,8 @@
   --radius-checkbox: 4px;
   --radius-tag: 6px;
   --radius-default: 7px;
+  /* Text fields, selects and the sidebar's selected row are square-cornered (2026-10-12). */
+  --radius-input: 0;
   --radius-button: 10px;
   --radius-pill: 9999px;
 
