@@ -17,7 +17,6 @@ import 'screens/join_family_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/dependant_wizard_screen.dart';
 import 'screens/sign_up_screen.dart';
-import 'screens/welcome_screen.dart';
 
 void main() {
   final authService = CognitoAuthService();
@@ -227,27 +226,17 @@ class _RootScreenState extends State<_RootScreen> {
         ),
       );
     }
-    return WelcomeScreen(
-      onSignIn: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => LoginScreen(
-              authService: widget.authService,
-              usersApi: widget.usersApi,
-              onAuthenticated: _onAuthenticated,
-              onCreateAccountInstead: () {
-                Navigator.of(context).pop();
-                _pushSignUp(context);
-              },
-            ),
-          ),
-        );
-      },
-      onSignUp: () => _pushSignUp(context),
+    // Signed out, the app opens straight on sign-in (2026-10-12: the Welcome screen was removed at
+    // the user's request); creating an account is one tap away from here.
+    return LoginScreen(
+      authService: widget.authService,
+      usersApi: widget.usersApi,
+      onAuthenticated: _onAuthenticated,
+      onCreateAccountInstead: () => _pushSignUp(context),
     );
   }
 
-  // Sign-up returns to Welcome; once the account is confirmed, LoginScreen finishes registration.
+  // Sign-up returns to sign-in; once the account is confirmed, LoginScreen finishes registration.
   void _pushSignUp(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(

@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../design-system/Button';
 import { Input, PasswordInput } from '../design-system/Input';
+import botanical from '../assets/signin-botanical.jpg';
 import './LoginPage.css';
 
 // The pool's password policy (infra/lib/auth.ts leaves Cognito's default), shown under new-password
@@ -36,36 +37,51 @@ export function LoginPage() {
   }
 
   return (
+    // Split layout (2026-10-12): the form on the left, read first; the botanical illustration fills
+    // a full-height panel on the right, which suits its tall portrait shape. On narrow screens the
+    // illustration becomes a short band above the form.
     <div className="login-page">
-      <div className="login-page__card">
-        <div className="login-page__title">Mzazi Care</div>
-        <div className="login-page__subtitle">
-          {view.kind === 'reset' ? 'Reset password' : 'Supervisor sign in'}
+      <main className="login-page__main">
+        <div className="login-page__wordmark">MZAZI CARE</div>
+        <div className="login-page__card">
+          <h1 className="login-page__title">
+            {view.kind === 'reset'
+              ? 'Reset your password'
+              : view.kind === 'newPassword'
+                ? 'Set a new password'
+                : 'Welcome back'}
+          </h1>
+          {view.kind === 'signIn' ? (
+            <p className="login-page__subtitle">Sign in to continue.</p>
+          ) : null}
+          {view.kind === 'newPassword' ? (
+            <NewPasswordForm challenge={view.challenge} />
+          ) : view.kind === 'reset' ? (
+            <ResetPasswordForm
+              email={email}
+              onEmailChange={setEmail}
+              codeAlreadySent={view.codeAlreadySent}
+              onDone={() =>
+                setView({
+                  kind: 'signIn',
+                  notice: 'Password changed. Sign in with your new password.',
+                })
+              }
+              onCancel={() => setView({ kind: 'signIn' })}
+            />
+          ) : (
+            <SignInForm
+              email={email}
+              onEmailChange={setEmail}
+              notice={view.notice}
+              onNewPasswordRequired={(challenge) => setView({ kind: 'newPassword', challenge })}
+              onForgotPassword={(codeAlreadySent) => setView({ kind: 'reset', codeAlreadySent })}
+            />
+          )}
         </div>
-        {view.kind === 'newPassword' ? (
-          <NewPasswordForm challenge={view.challenge} />
-        ) : view.kind === 'reset' ? (
-          <ResetPasswordForm
-            email={email}
-            onEmailChange={setEmail}
-            codeAlreadySent={view.codeAlreadySent}
-            onDone={() =>
-              setView({
-                kind: 'signIn',
-                notice: 'Password changed. Sign in with your new password.',
-              })
-            }
-            onCancel={() => setView({ kind: 'signIn' })}
-          />
-        ) : (
-          <SignInForm
-            email={email}
-            onEmailChange={setEmail}
-            notice={view.notice}
-            onNewPasswordRequired={(challenge) => setView({ kind: 'newPassword', challenge })}
-            onForgotPassword={(codeAlreadySent) => setView({ kind: 'reset', codeAlreadySent })}
-          />
-        )}
+      </main>
+      <div className="login-page__art" aria-hidden="true">
+        <img src={botanical} alt="" />
       </div>
     </div>
   );
