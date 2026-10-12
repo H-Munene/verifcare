@@ -4,8 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config.dart';
 
-// Ported from frontend/web/src/api/client.ts: matches backend/openapi.yaml's Problem schema and
-// backend/src/errors.ts's sendProblem() exactly.
+// RFC 7807 problem body.
 class Problem {
   final String type;
   final String title;
@@ -42,9 +41,8 @@ class ApiException implements Exception {
 
 typedef GetIdToken = Future<String?> Function();
 
-/// Typed HTTP wrapper: base URL from AppConfig.apiBaseUrl, attaches the bearer ID token, parses
-/// RFC 7807 error bodies into ApiException instead of letting callers deal with raw responses -
-/// same contract as frontend/web/src/api/client.ts, ported to Dart.
+/// HTTP wrapper: adds the base URL and bearer token, and turns problem+json errors into
+/// ApiException.
 class ApiClient {
   final GetIdToken _getIdToken;
 

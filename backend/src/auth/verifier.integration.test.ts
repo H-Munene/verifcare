@@ -1,11 +1,6 @@
-// Exercises real RS256 signature verification through aws-jwt-verify's CognitoJwtVerifier - the
-// same construction verifier.ts's createIdTokenVerifier() uses (userPoolId, tokenUse: 'id',
-// clientId) - rather than only testing against a fully-mocked verifier (middleware.test.ts covers
-// that). A real RSA keypair signs a test JWT locally; CognitoJwtVerifier.cacheJwks() preloads the
-// matching public key so no network call to a real Cognito JWKS endpoint is needed. This exists to
-// catch a real, easy-to-get-wrong class of mistake (wrong tokenUse, wrong clientId/audience
-// matching, wrong issuer format) that a fully-mocked verifier test cannot catch, since it never
-// exercises the real verification logic at all.
+// Runs real RS256 verification through CognitoJwtVerifier with a locally generated key, preloaded
+// via cacheJwks() so there's no network call. Catches tokenUse/audience/issuer mistakes that the
+// mocked tests in middleware.test.ts can't.
 
 import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
@@ -20,11 +15,6 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url');
 }
 
-// generateKeyPairSync('rsa', { modulusLength: 2048 }) (no encoding options) returns KeyObject, not
-// a PEM string - node:crypto's sign() accepts either, so this worked at runtime all along, but the
-// parameter's declared type here was wrong (a pre-existing type error, not caught by npm run build
-// since tsconfig.build.json excludes test files, nor by `npm test` since Vitest's esbuild
-// transform doesn't type-check - only found by running tsc -p tsconfig.json directly).
 function signTestIdToken(privateKey: KeyObject, claims: Record<string, unknown>): string {
   const header = { alg: 'RS256', kid: KEY_ID, typ: 'JWT' };
   const now = Math.floor(Date.now() / 1000);
@@ -90,11 +80,7 @@ describe('CognitoJwtVerifier with tokenUse: id (real RS256 verification)', () =>
   });
 
   it('accepts a token whose audience matches one of several configured client ids', async () => {
-    // Regression test for a real bug (2026-09-14): verifier.ts's createIdTokenVerifier() used to
-    // accept only a single clientId, so tokens issued to any app client other than the one
-    // configured (the web app's) were rejected as unverifiable - every mobile app sign-in failed
-    // backend calls with a generic 401, even with a perfectly valid token. clientId here mirrors
-    // that fix: an array of every accepted app client, exactly as createIdTokenVerifier now takes.
+    // Tokens from any configured app client must verify, not just the web client's.
     const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const jwk = publicKey.export({ format: 'jwk' }) as { kty: string; n: string; e: string };
     const otherClientId = 'other-app-client-id';
@@ -106,8 +92,7 @@ describe('CognitoJwtVerifier with tokenUse: id (real RS256 verification)', () =>
     });
     verifier.cacheJwks({ keys: [{ ...jwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }] });
 
-    // Signed for the second client id, not the first - proves any of the configured ids works,
-    // not just the first entry in the array.
+    // Signed for the second client id.
     const header = { alg: 'RS256', kid: KEY_ID, typ: 'JWT' };
     const now = Math.floor(Date.now() / 1000);
     const payload = {

@@ -4,11 +4,8 @@ import 'package:flutter/material.dart';
 import '../auth/cognito_auth_service.dart';
 import '../utils/kenyan_phone.dart';
 
-/// Creates the Cognito account and stops there - no in-app verification-code step. Cognito's
-/// default (non-SES) email delivery proved unreliable in testing (2026-09-14: a real sign-up's
-/// code never arrived), so for now accounts are confirmed manually (e.g.
-/// `aws cognito-idp admin-confirm-sign-up`) instead of through the app. Revisit once this project
-/// has a real Amazon SES configuration for the user pool.
+/// Creates the Cognito account. There's no verification-code step yet; accounts are confirmed
+/// manually until SES is set up.
 class SignUpScreen extends StatefulWidget {
   final CognitoAuthService authService;
 
@@ -52,7 +49,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _error = null;
     });
     final email = _emailController.text.trim();
-    // Already validated by the field's own validator below, so this can't be null here.
+    // The field validator already rejected invalid numbers.
     final phoneNumber = normalizeKenyanPhoneNumber(_phoneController.text)!;
     try {
       await widget.authService.signUp(
@@ -131,9 +128,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   labelText: 'Phone number',
                   hintText: '0712345678',
                 ),
-                // Accepts any common Kenyan local format (0712345678, 254712345678,
-                // +254712345678) and normalizes it to Cognito's required E.164 shape at submit
-                // time - see normalizeKenyanPhoneNumber. This POC is Kenya-only by design.
+                // Accepts 0712345678, 254712345678 or +254712345678; normalized to E.164.
                 validator: (value) {
                   final trimmed = value?.trim() ?? '';
                   if (trimmed.isEmpty) {

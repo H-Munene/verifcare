@@ -20,21 +20,14 @@ export function createStorage(stack: cdk.Stack): Storage {
     removalPolicy: cdk.RemovalPolicy.RETAIN,
   });
 
-  // No bucketName set: S3 bucket names are globally unique across all AWS
-  // accounts, not just this one, so a literal "biometric-enrollments" would
-  // very likely collide with an unrelated bucket somewhere else and fail to
-  // deploy. Letting CloudFormation generate the physical name (derived from
-  // the stack/logical id) guarantees uniqueness; architecture.md's bucket
-  // "names" are the construct ids/labels below, not literal S3 bucket names.
+  // Bucket names are left to CloudFormation since they must be globally unique.
   const biometricEnrollmentsBucket = new s3.Bucket(stack, "BiometricEnrollmentsBucket", {
     encryption: s3.BucketEncryption.KMS,
     encryptionKey: biometricEnrollmentsKey,
     blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
     enforceSSL: true,
     removalPolicy: cdk.RemovalPolicy.RETAIN,
-    // No lifecycle rule - per architecture.md's Retention section, deletion
-    // here is application-triggered on caregiver/dependant offboarding, not
-    // a calendar-based S3 rule (unlike visit-audio below).
+    // No lifecycle rule: the app deletes these on offboarding.
   });
 
   const visitAudioBucket = new s3.Bucket(stack, "VisitAudioBucket", {

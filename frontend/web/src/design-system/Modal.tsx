@@ -7,8 +7,6 @@ export interface ModalProps {
   children: ReactNode;
 }
 
-// Real shadow only for things that float above the page - dropdown menus, popovers, and modals,
-// per the design system spec's elevation rules.
 export function Modal({ title, onClose, children }: ModalProps) {
   return (
     <div className="ds-modal-overlay" onClick={onClose}>

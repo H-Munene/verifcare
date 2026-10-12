@@ -2,8 +2,7 @@ import * as cdk from "aws-cdk-lib/core";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 
 export function createRegistry(stack: cdk.Stack): ecr.Repository {
-  // acoustic-model only - api stays a plain zip-based Lambda, no ECR
-  // involvement, per architecture.md's "Container registry" row.
+  // Only acoustic-model is a container image; api is a zip Lambda.
   const acousticModelRepository = new ecr.Repository(stack, "AcousticModelRepository", {
     repositoryName: "acoustic-model",
     imageScanOnPush: true,

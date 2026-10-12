@@ -4,10 +4,7 @@ import '../api/dependants_api.dart';
 import '../auth/cognito_auth_service.dart';
 import 'register_dependant_screen.dart';
 
-/// AppBar shows identity.email ?? identity.sub, matching the caregiver app and the web app's
-/// AppShell display convention. A "+ Register a dependant" action makes "skip for now" during
-/// registration an actual reachable-later path, not a dead end - same screen as the optional
-/// post-registration step, not new scope.
+/// Home screen, with a way to register a dependant if that was skipped during sign-up.
 class HomeScreen extends StatelessWidget {
   final CognitoAuthService authService;
   final DependantsApi dependantsApi;

@@ -1,10 +1,8 @@
-// Typed fetch wrapper: base URL from VITE_API_BASE_URL, attaches the bearer token from
-// AuthContext, and parses RFC 7807 error bodies (backend/src/errors.ts's sendProblem() shape)
-// into a typed ApiError instead of letting callers deal with raw Response objects.
+// Fetch wrapper: adds the base URL and bearer token, and turns problem+json errors into ApiError.
 
 const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL;
 
-// Matches backend/openapi.yaml's Problem schema and backend/src/errors.ts's sendProblem() exactly.
+// RFC 7807 problem body.
 export interface Problem {
   type: string;
   title: string;
@@ -45,8 +43,6 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-// getIdToken is injected (not imported from auth/AuthContext directly) so this module stays a
-// plain, test-friendly function rather than reaching into React context from outside a component.
 export function createApiClient(getIdToken: () => Promise<string | null>): ApiClient {
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await getIdToken();

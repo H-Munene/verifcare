@@ -1,6 +1,4 @@
-// Typed request/response shapes and calls for /dependants, matching
-// backend/src/routes/dependants.ts's actual DependantResponse/DependantFamilyMemberResponse
-// interfaces and backend/openapi.yaml exactly - not re-derived from scratch.
+// Typed calls for /dependants.
 
 import type { ApiClient } from './client';
 
@@ -37,10 +35,7 @@ export interface DependantFamilyMember {
   createdAt: string;
 }
 
-// Exactly one of cognitoSub/email must be set - cognitoSub links an existing Cognito identity;
-// email creates a brand-new one from scratch (2026-09-14, see backend/openapi.yaml's
-// AddFamilyMemberRequest for the full contract). Built by components/FamilyMemberResolver.tsx,
-// not typed directly by hand in any page.
+// Exactly one of cognitoSub (existing user) or email (new user) must be set.
 export interface AddFamilyMemberRequest {
   cognitoSub?: string;
   email?: string;

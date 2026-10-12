@@ -1,6 +1,4 @@
-// Shared setup for integration tests that need a real Postgres connection (Linear HEZ-11).
-// Not used by the app itself - see db/client.ts's createDb() (HEZ-27) for the runtime client,
-// which this file now reuses so the `casing: 'snake_case'` convention lives in exactly one place.
+// Shared setup for integration tests that need a real Postgres connection.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,8 +10,6 @@ import { createDb, type Db } from './client.js';
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(dirname, '../../drizzle');
 
-// Every table name, for the truncate-between-tests helper below. Kept as a plain list rather than
-// derived from `schema` reflectively, so it stays an explicit, reviewable part of this file.
 const allTableNames = [
   'users',
   'caregivers',

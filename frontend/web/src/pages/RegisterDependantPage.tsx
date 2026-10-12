@@ -16,26 +16,13 @@ import { Stepper } from '../design-system/Stepper';
 import { Switch } from '../design-system/Switch';
 import './RegisterDependantPage.css';
 
-// Handles both registration (no :dependantId in the route) and editing (wireframe page 5 combines
-// both into one form, and PATCH /dependants/{id} already existed from HEZ-30, so this costs
-// nothing extra). The primaryFamilyMember mini-form only appears when registering - later family
-// members are added from the Dependant Detail page (DependantDetailPage.tsx, HEZ-56), matching
-// architecture.md's "first family member is linked atomically at registration, later members
-// added separately" design.
+// Register (no :dependantId) or edit a dependant, as a stepper: Details -> Geofence ->
+// Primary Contact. The primary contact step is registration-only; later family members are added
+// from DependantDetailPage.
 //
-// Presented as a stepper (2026-09-14, user request - modeled on a standard e-commerce checkout
-// stepper) rather than one long scrolling form: Details -> Geofence -> Primary Contact
-// (registration only; editing has no primary-contact step, since that's not part of
-// PATCH /dependants/{id} at all - it's managed from DependantDetailPage instead).
+// TODO: consent capture, once the backend has an endpoint for it.
 //
-// Consent capture (biometric-verification / audio-cognitive-monitoring, shown in the wireframe)
-// is deliberately not built here - HEZ-40 ("Consent capture endpoints") is a separate, not-yet-
-// built backend issue with no field on CreateDependantRequest for it at all.
-//
-// This outer component only decides *when* to render the form - DependantForm below is not
-// rendered until the existing dependant (in edit mode) has actually loaded, so its field state can
-// be initialized directly from real data via plain useState, with no effect needed to sync fetched
-// data into local state after the fact (the react-hooks/set-state-in-effect anti-pattern).
+// DependantForm only renders once the dependant has loaded, so it can seed its state directly.
 export function RegisterDependantPage() {
   const { dependantId } = useParams<{ dependantId: string }>();
   const isEdit = Boolean(dependantId);
@@ -74,10 +61,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   const [homeAddressText, setHomeAddressText] = useState(initial?.homeAddressText ?? '');
   const [geofenceLat, setGeofenceLat] = useState(initial ? String(initial.geofenceLat) : '');
   const [geofenceLng, setGeofenceLng] = useState(initial ? String(initial.geofenceLng) : '');
-  // 20m default - confirmed with the user 2026-09-14 (originally proposed at 10m, revised up after
-  // flagging that typical smartphone GPS accuracy, ~5m under open sky and substantially worse
-  // indoors/urban, leaves too thin a margin at 10m against a genuinely-present caregiver). See
-  // docs/project-state.md and architecture.md's "geofence accuracy threshold" open item.
+  // 20m leaves room for phone GPS error, which gets much worse indoors.
   const [geofenceRadiusMeters, setGeofenceRadiusMeters] = useState(
     initial ? String(initial.geofenceRadiusMeters) : '20',
   );
@@ -106,9 +90,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     },
   });
 
-  // Per-step validity, gating the "Next step" button the same way the final Save button was
-  // already gated - a step's own required fields must be filled before moving on, rather than
-  // discovering a validation problem only after reaching the end.
+  // Required fields per step, gating "Next step".
   const detailsValid = fullName.trim() !== '' && dob !== '';
   const geofenceValid = geofenceLat !== '' && geofenceLng !== '' && geofenceRadiusMeters !== '';
   const primaryContactValid = Boolean(primarySelection);
@@ -117,9 +99,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!isLastStep) {
-      // Defensive only - the submit button doesn't exist in the DOM before the last step, so this
-      // shouldn't normally fire, but an Enter keypress in some browsers can still submit a form
-      // with no visible submit button.
+      // Enter can still submit the form before the last step in some browsers.
       return;
     }
 
@@ -204,9 +184,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         {step === 1 ? (
           <Card className="register-dependant-page__section">
             <div className="register-dependant-page__geofence">
-              {/* Placeholder for the embedded Google Maps pin-drag picker - no platform-restricted
-                  API key has been created yet (see docs/project-state.md). Lat/lng/radius are
-                  still fully editable as plain number inputs. */}
+              {/* TODO: Google Maps pin picker, once there's an API key. */}
               <div className="register-dependant-page__map-placeholder">Map (placeholder)</div>
               <div className="register-dependant-page__geofence-fields">
                 <Input

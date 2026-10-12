@@ -10,17 +10,12 @@ export default tseslint.config(
     ignores: ['dist/', 'node_modules/'],
   },
   js.configs.recommended,
-  // Type-checked rules for application source plus the root-level *.config.ts files
-  // (vite.config.ts) - mirrors backend/eslint.config.js's split between type-checked src and
-  // plain-JS config files.
+  // Type-checked rules for src and vite.config.ts.
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [
       ...tseslint.configs.recommendedTypeChecked,
-      // eslint-plugin-react-hooks's top-level `configs['recommended-latest']` is still in the
-      // legacy eslintrc shape (`plugins: ["react-hooks"]`, a string array) - `configs.flat.*` is
-      // the actual flat-config-compatible export (confirmed by inspecting the installed package,
-      // not assumed from its docs).
+      // The top-level `configs['recommended-latest']` is still eslintrc-shaped; use `flat`.
       reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
     ],

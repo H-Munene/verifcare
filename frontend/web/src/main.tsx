@@ -1,4 +1,4 @@
-// Must be the very first import - see polyfills.ts's header comment for why.
+// Must be the first import.
 import './polyfills.ts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

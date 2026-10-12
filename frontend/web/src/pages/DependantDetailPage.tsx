@@ -17,9 +17,7 @@ import { Switch } from '../design-system/Switch';
 import { Tag } from '../design-system/Tag';
 import './DependantDetailPage.css';
 
-// Wireframe page 6 (Dependant Detail). Visit History and Cognitive Trend render as honest empty
-// states rather than faked data - HEZ-32 (visit scheduling) and the audio/cognitive-risk pipeline
-// don't exist yet, so there is genuinely nothing to show there.
+// Visit History and Cognitive Trend are empty states until scheduling and audio analysis exist.
 export function DependantDetailPage() {
   const { dependantId } = useParams<{ dependantId: string }>();
   const { dependants } = useApi();
@@ -91,7 +89,7 @@ export function DependantDetailPage() {
       <section className="dependant-detail__section">
         <h2 className="dependant-detail__section-title">Visit History</h2>
         <p className="dependant-detail__empty">
-          No visits yet - visit scheduling has not been built yet (Linear HEZ-32).
+          No visits yet - visit scheduling has not been built yet.
         </p>
       </section>
 
@@ -109,10 +107,7 @@ export function DependantDetailPage() {
   );
 }
 
-// The family-members endpoint only returns familyMemberUserId (an internal UUID), not a display
-// name (matches backend/openapi.yaml's DependantFamilyMember schema exactly) - resolved here via
-// GET /users/{id} (supervisor-only, which matches this app's exclusive supervisor use case)
-// instead of showing the raw UUID.
+// The family-members endpoint only returns user ids, so names are fetched via GET /users/{id}.
 function FamilyMemberRow({
   dependantId,
   member,
@@ -128,9 +123,7 @@ function FamilyMemberRow({
     queryFn: () => users.getUser(member.familyMemberUserId),
   });
 
-  // PATCH .../family-members/{userId} is supervisor-only (HEZ-30) - matches this app's exclusive
-  // supervisor use case, but still gated on the caller's actual role rather than assumed, the same
-  // way RegisterDependantPage gates the status field.
+  // Editing a family-member link is supervisor-only.
   const makePrimaryMutation = useMutation({
     mutationFn: () =>
       dependants.updateFamilyMember(dependantId, member.familyMemberUserId, {

@@ -1,8 +1,6 @@
 import 'api_client.dart';
 
-/// POST /dependants - matches backend/src/routes/dependants.ts's createDependantRequestSchema.
-/// A family_member caller may only name themselves as primaryFamilyMember (enforced server-side);
-/// this app never builds a request naming anyone else.
+/// POST /dependants. The caller must be the primary family member.
 class DependantsApi {
   final ApiClient _client;
   DependantsApi(this._client);

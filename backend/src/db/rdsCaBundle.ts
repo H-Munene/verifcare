@@ -1,16 +1,6 @@
-// The Amazon RDS certificate authority bundle for eu-west-1 (the only region this project's RDS
-// instance runs in), used to validate the server's certificate chain when connecting over TLS
-// (drizzle client construction in lambdaDb.ts). Source, fetched 2026-09-13:
+// RDS CA bundle for eu-west-1, from
 // https://truststore.pki.rds.amazonaws.com/eu-west-1/eu-west-1-bundle.pem
-//
-// Embedded as a plain string constant (rather than a separate .pem asset file) so it bundles like
-// any other TypeScript module - no esbuild loader/commandHooks configuration needed in
-// infra/lib/api.ts's NodejsFunction.
-//
-// This rarely needs updating: RDS rotates the server's leaf certificate automatically without any
-// client-side change (per AWS's certificate-authorities docs, the g1 root CAs "support automatic
-// server certificate rotation"). Only re-fetch this if AWS deprecates one of these root CAs
-// entirely - a multi-year-scale event, not routine maintenance.
+// Inlined so esbuild bundles it without extra config. Only needs updating if AWS retires a root CA.
 export const RDS_CA_BUNDLE_PEM = `-----BEGIN CERTIFICATE-----
 MIID/zCCAuegAwIBAgIRAMgnyikWz46xY6yRgiYwZ3swDQYJKoZIhvcNAQELBQAw
 gZcxCzAJBgNVBAYTAlVTMSIwIAYDVQQKDBlBbWF6b24gV2ViIFNlcnZpY2VzLCBJ

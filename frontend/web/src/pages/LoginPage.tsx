@@ -51,8 +51,7 @@ function SignInForm({
       if (result.type === 'newPasswordRequired') {
         onNewPasswordRequired(result);
       }
-      // On success, AuthContext's identity state updates and LoginPage redirects on its next
-      // render - nothing further to do here.
+      // On success, AuthContext updates and this page redirects.
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed.');
     } finally {
@@ -94,13 +93,8 @@ function SignInForm({
   );
 }
 
-// Shown when signing in with a temporary password (always true for a console- or
-// AdminCreateUser-created account - the Cognito console has no "set a permanent password" action,
-// confirmed against AWS's own AdminSetUserPassword docs). `challenge.requiredAttributes` lists any
-// attribute Cognito still needs a value for - this pool only marks `name` (fullname) as required
-// (infra/lib/auth.ts), so that's the only one handled here; a user created with a name already set
-// won't have it in the list at all, per AWS's documented rule that an already-valued required
-// attribute can't be resubmitted in this challenge response.
+// Shown after signing in with a temporary password. `name` is the only required attribute in
+// this pool, so it's the only one we may need to ask for.
 function NewPasswordForm({ challenge }: { challenge: NewPasswordRequiredResult }) {
   const { completeNewPassword } = useAuth();
   const needsName = challenge.requiredAttributes.includes('name');
@@ -120,8 +114,7 @@ function NewPasswordForm({ challenge }: { challenge: NewPasswordRequiredResult }
     setSubmitting(true);
     try {
       await completeNewPassword(challenge, newPassword, needsName ? { name: fullName } : undefined);
-      // On success, AuthContext's identity state updates and LoginPage redirects on its next
-      // render - nothing further to do here.
+      // On success, AuthContext updates and this page redirects.
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not set the new password.');
     } finally {

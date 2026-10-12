@@ -1,11 +1,5 @@
-// Local dev seed script (Linear HEZ-13). Populates DATABASE_URL with realistic sample data:
-// a supervisor, three caregivers, three family members, three dependants, and a spread of visit
-// schedules (completed, in-progress, missed, cancelled, scheduled) with their verification
-// attempts, biometric enrollments, consent records, audio records, and notifications.
-//
-// Idempotent: truncates every table first, so it's safe to re-run. Refuses to run against
-// anything that isn't obviously a local database, as a guard against ever pointing this at a real
-// deployed one by accident.
+// Seeds DATABASE_URL with sample users, dependants and visits in every status.
+// Truncates everything first, and only runs against a local database.
 //
 // Usage: npm run db:seed
 
@@ -16,10 +10,9 @@ import { createDb } from './client.js';
 import * as schema from './schema.js';
 
 try {
-  // Same file drizzle-kit and vitest already auto-load - see vitest.setup.ts's comment.
   process.loadEnvFile();
 } catch {
-  // No .env file present - fine, DATABASE_URL is presumably set some other way.
+  // No .env file; DATABASE_URL may be set elsewhere.
 }
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -65,7 +58,7 @@ async function main() {
   console.log(`Seeding ${databaseUrl}...`);
   await db.execute(sql.raw(`TRUNCATE TABLE ${ALL_TABLES.join(', ')} CASCADE`));
 
-  // --- Users -----------------------------------------------------------------------------
+  // Users
 
   const [supervisor] = await db
     .insert(schema.users)
@@ -115,7 +108,7 @@ async function main() {
     familyMemberUsers.push(user!);
   }
 
-  // --- Dependants --------------------------------------------------------------------------
+  // Dependants
 
   const dependantSeeds = [
     {
@@ -169,7 +162,7 @@ async function main() {
     });
   }
 
-  // --- Biometric enrollments (3 reference images each, caregivers + dependants) ------------
+  // Biometric enrollments, 3 reference images each
 
   for (const caregiver of caregivers) {
     for (const imageOrder of [1, 2, 3] as const) {
@@ -196,7 +189,7 @@ async function main() {
     }
   }
 
-  // --- Consent records ---------------------------------------------------------------------
+  // Consent records
 
   for (const [i, caregiver] of caregivers.entries()) {
     await db.insert(schema.consentRecords).values({
@@ -223,7 +216,7 @@ async function main() {
     }
   }
 
-  // --- Visit schedules, spread across statuses ---------------------------------------------
+  // Visit schedules, one per status
 
   // Completed, 3 days ago: caregiver[0] + dependant[0] (cognitive monitoring on -> has audio).
   const [completedVisit] = await db
@@ -373,8 +366,8 @@ async function main() {
     createdBy: supervisor!.id,
   });
 
-  // In progress: caregiver[2] + dependant[0], checked in 20 minutes ago, includes one failed
-  // geofence attempt before the successful retry (realistic failure-path data).
+  // In progress: caregiver[2] + dependant[0], checked in 20 minutes ago after one failed
+  // geofence attempt.
   const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
   const [inProgressVisit] = await db
     .insert(schema.visitSchedules)
@@ -428,7 +421,7 @@ async function main() {
     dependantLivenessPassed: true,
   });
 
-  // --- A cognitive-risk notification, acknowledged, tied to the first completed visit's audio.
+  // An acknowledged cognitive-risk notification for the first completed visit's audio.
 
   const [audioRecordForNotification] = await db
     .select()

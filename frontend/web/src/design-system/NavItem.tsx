@@ -8,9 +8,7 @@ export interface NavItemProps {
   onClick?: () => void;
 }
 
-// 32px height, 14px leading icon (a simple geometric placeholder square, per the wireframe's own
-// disclosed assumption - "Icons are simple geometric placeholders, not final iconography"),
-// selected state = blue-tint fill + blue text.
+// The icon is a placeholder square for now.
 export function NavItem({ label, active, disabled, onClick }: NavItemProps) {
   const classes = [
     'ds-nav-item',

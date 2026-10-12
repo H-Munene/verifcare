@@ -1,12 +1,7 @@
-// Integration tests for POST/GET /users, GET/PATCH /users/{userId} (HEZ-29) against a real local
-// Postgres, matching db/enforcement.integration.test.ts's established pattern (TEST_DATABASE_URL,
-// describe.skipIf(!hasTestDb)) - RBAC/ownership logic and real unique-constraint 409 handling are
-// exactly the kind of thing worth proving against a real database, not a faked query builder.
+// Integration tests for the /users routes against a real Postgres (needs TEST_DATABASE_URL).
 //
-// requireAuth/requireVerifiedIdentity are replaced here with a small test-only middleware that
-// reads req.auth/req.identity from a header the test sets directly - real JWT verification is
-// already covered by auth/middleware.test.ts; these tests are about the route handlers' own
-// business logic (ownership, role rules, pagination, conflict handling), not token verification.
+// Auth middleware is swapped for one that reads req.auth/req.identity from a test header; JWT
+// verification itself is covered in auth/middleware.test.ts.
 
 import express, { type Express } from 'express';
 import request from 'supertest';
@@ -271,7 +266,7 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
       expect(response.items[0]).toMatchObject({ fullName: 'User 1' });
     });
 
-    it('filters by an exact email match, added 2026-09-14 for the supervisor-search-by-email/phone flow', async () => {
+    it('filters by an exact email match', async () => {
       await request(app)
         .post('/users')
         .set('x-test-auth', testAuthHeader({ sub: 'email-sub', role: undefined, email: undefined }))

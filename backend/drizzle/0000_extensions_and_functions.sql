@@ -1,7 +1,5 @@
--- Hand-written (drizzle-kit generate --custom), not schema-diff-generated. Ported verbatim from
--- docs/schema.sql's "Extensions & helper functions" section - see that file for the full design
--- rationale. Must run before 0001 (the table migration), since uuid_generate_v7() is referenced
--- as a column default on every table.
+-- Hand-written (drizzle-kit generate --custom). Must run before 0001, since every table uses
+-- uuid_generate_v7() as a default.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 --> statement-breakpoint

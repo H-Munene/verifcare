@@ -1,8 +1,6 @@
 import 'api_client.dart';
 
-/// POST /users - completes self-registration for a brand-new Cognito self-signup. Restricted
-/// server-side (backend/src/routes/users.ts) to the caller's own cognitoSub and role:
-/// family_member for any non-supervisor caller, which is exactly this app's use case.
+/// POST /users: completes self-registration as a family_member.
 class UsersApi {
   final ApiClient _client;
   UsersApi(this._client);

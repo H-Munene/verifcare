@@ -5,13 +5,8 @@ import '../api/users_api.dart';
 import '../auth/cognito_auth_service.dart';
 import '../auth/registration.dart';
 
-/// Serves two kinds of returning users, distinguished only after a successful sign-in: someone
-/// whose identity already has role: family_member (a supervisor created it, or they finished
-/// registration previously) goes straight to Home; someone who confirmed a sign-up but never
-/// finished registration (closed the app first) has their registration completed here instead of
-/// forcing them back through the sign-up chain. Also handles NEW_PASSWORD_REQUIRED - real for this
-/// app, since a supervisor can create a family member's Cognito identity via AdminCreateUser
-/// (issuing a temporary password) from the web app's "New user" path.
+/// Signs in and goes to Home, finishing registration first if it was never completed. Also
+/// handles the temporary-password challenge for supervisor-created accounts.
 class LoginScreen extends StatefulWidget {
   final CognitoAuthService authService;
   final UsersApi usersApi;

@@ -2,10 +2,7 @@ import express from 'express';
 import serverlessHttp from 'serverless-http';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-// lambda.ts's module-level code calls getLambdaDb(), which would otherwise make a real network
-// call to Secrets Manager (and this machine has real, valid AWS credentials configured - see
-// docs/project-state.md's AWS Agent Toolkit entry - so an unmocked call would not just fail fast,
-// it could genuinely reach AWS). Mocked here so this test never touches the network.
+// lambda.ts calls getLambdaDb() on import; mock it so tests never reach Secrets Manager.
 vi.mock('@aws-sdk/client-secrets-manager', () => ({
   SecretsManagerClient: vi.fn().mockImplementation(function SecretsManagerClient() {
     return {
@@ -15,12 +12,8 @@ vi.mock('@aws-sdk/client-secrets-manager', () => ({
   GetSecretValueCommand: vi.fn(),
 }));
 
-// Real risk this test exists to verify, not assume: pino-http logs a completed request by
-// listening for the response's 'finish' event, and this app runs through serverless-http's
-// synthetic (non-socket) request/response objects, not real Node http objects. If that event
-// never fired under serverless-http, requests would either hang or pino-http would silently never
-// log them - either way, a real problem this test would catch by simply failing to resolve or
-// resolve with the wrong shape.
+// pino-http relies on the response's 'finish' event, which has to fire under serverless-http's
+// synthetic request/response objects too.
 describe('Lambda handler (via serverless-http)', () => {
   let handler: typeof import('./lambda.js').handler;
 
@@ -85,20 +78,8 @@ describe('Lambda handler (via serverless-http)', () => {
   });
 });
 
-// Regression test for a real, previously undetected bug (2026-09-14): serverless-http@3.x's
-// synthetic request object stubbed its socket with `readable: false`, which makes the
-// `on-finished` package (used internally by body-parser, which express.json() wraps) report the
-// request as already finished before body-parser ever reads it - body-parser bailed out
-// immediately, leaving req.body as the raw, unparsed request Buffer instead of the parsed JSON
-// object. Every route expecting a JSON body (POST /users, /caregivers, /dependants, every PATCH)
-// was silently broken for any real client of the deployed Lambda - it went undetected for months
-// because every other backend test exercises the Express app directly via Supertest (bypassing
-// serverless-http entirely, so it never reproduces this), and the web app has only ever been
-// tested against the local dev backend (server.ts), not the deployed Lambda. This app's own
-// `app.ts`/`lambda.ts` aren't used here deliberately - a minimal standalone app isolates the
-// concern precisely (serverless-http + body-parser interaction) without needing DB/auth/Secrets
-// Manager mocking. Fixed by upgrading to serverless-http@^4.0.0, which replaces the stub with a
-// real PassThrough-backed socket (confirmed by reading its source directly).
+// serverless-http 3.x stubbed the socket as unreadable, so body-parser skipped the body and
+// req.body stayed a raw Buffer. Fixed in 4.x; this guards against a regression.
 describe('serverless-http + express.json() body parsing', () => {
   it('parses a JSON POST body into req.body as a real object, not a raw Buffer', async () => {
     const probeApp = express();

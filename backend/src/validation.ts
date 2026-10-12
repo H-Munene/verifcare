@@ -1,16 +1,10 @@
-// Shared request-body/query validation, built on zod (already a dependency for config.ts's env
-// validation - reused here rather than introducing a second validation approach). The first route
-// file to need this is routes/users.ts; every later route (HEZ-30 onward) should use the same
-// helper instead of hand-rolling its own 400 response shape.
+// Shared zod validation for request bodies and query strings.
 
 import type { Response } from 'express';
 import type { z } from 'zod';
 import { sendProblem } from './errors.js';
 
-// Validates `data` against `schema`. On success returns the parsed (and, for zod, coerced/
-// defaulted) value. On failure, sends an RFC 7807 400 response itself and returns undefined - the
-// caller's route handler should check for undefined and return immediately, the same pattern
-// auth/middleware.ts's verifyBearerToken already establishes for a failed precondition.
+// Returns the parsed value, or sends a 400 problem response and returns undefined.
 export function parseOrSendProblem<T>(
   schema: z.ZodType<T>,
   data: unknown,

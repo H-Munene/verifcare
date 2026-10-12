@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/dependants_api.dart';
 import '../auth/cognito_auth_service.dart';
 
-/// Minimal form matching backend/src/routes/dependants.ts's createDependantRequestSchema.
-/// primaryFamilyMember is always the signed-in caller - a family_member caller may only name
-/// themselves as primary contact (enforced server-side too), matching this app's scope.
+/// Registers a dependant with the signed-in user as primary contact.
 class RegisterDependantScreen extends StatefulWidget {
   final DependantsApi dependantsApi;
   final IdentityClaims identity;
@@ -29,9 +27,7 @@ class _RegisterDependantScreenState extends State<RegisterDependantScreen> {
   final _homeAddressController = TextEditingController();
   final _relationshipController = TextEditingController();
 
-  // 20m default, matching the web app's settled geofence default (docs/project-state.md) -
-  // typical smartphone GPS accuracy (~5m under open sky, worse indoors) leaves too thin a margin
-  // at the originally-proposed 10m.
+  // Same 20m default as the web app, to allow for phone GPS error.
   final _latController = TextEditingController();
   final _lngController = TextEditingController();
   final _radiusController = TextEditingController(text: '20');

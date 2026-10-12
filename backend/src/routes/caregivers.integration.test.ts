@@ -1,7 +1,5 @@
-// Integration tests for POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId} (HEZ-29) against
-// a real local Postgres - see users.integration.test.ts's header comment for why (real
-// unique-constraint/transaction behavior, not a faked query builder) and for the test-auth-header
-// pattern used here too.
+// Integration tests for the /caregivers routes against a real Postgres. Auth is faked the same way
+// as in users.integration.test.ts.
 
 import express, { type Express } from 'express';
 import request from 'supertest';
