@@ -40,17 +40,12 @@ const ALL_TABLES = [
   'caregivers',
   'dependants',
   'dependant_family_members',
-  'dependant_care_tasks',
   'biometric_enrollments',
   'visit_schedules',
-  'visit_task_completions',
   'verification_events',
   'verification_attempts',
-  'visit_resolutions',
   'audio_records',
   'consent_records',
-  'terms_acceptances',
-  'family_link_requests',
   'notification_log',
   'audit_log',
 ] as const;
@@ -174,29 +169,31 @@ async function main() {
     });
   }
 
-  // --- Biometric enrollments (one active photo each, caregivers + dependants) -------------
-  // One, not three: the POC keeps one photo per person (2026-09-27), and a new photo supersedes
-  // every other active one (routes/biometricEnrollments.ts).
+  // --- Biometric enrollments (3 reference images each, caregivers + dependants) ------------
 
   for (const caregiver of caregivers) {
-    await db.insert(schema.biometricEnrollments).values({
-      subjectType: 'caregiver',
-      caregiverId: caregiver.userId,
-      s3Key: placeholderS3Key(`biometric-enrollments/caregivers/${caregiver.userId}`),
-      imageOrder: 1,
-      qualityScore: 0.87,
-      enrolledBy: supervisor!.id,
-    });
+    for (const imageOrder of [1, 2, 3] as const) {
+      await db.insert(schema.biometricEnrollments).values({
+        subjectType: 'caregiver',
+        caregiverId: caregiver.userId,
+        s3Key: placeholderS3Key(`biometric-enrollments/caregivers/${caregiver.userId}`),
+        imageOrder,
+        qualityScore: 0.85 + imageOrder * 0.02,
+        enrolledBy: supervisor!.id,
+      });
+    }
   }
   for (const dependant of dependants) {
-    await db.insert(schema.biometricEnrollments).values({
-      subjectType: 'dependant',
-      dependantId: dependant.id,
-      s3Key: placeholderS3Key(`biometric-enrollments/dependants/${dependant.id}`),
-      imageOrder: 1,
-      qualityScore: 0.82,
-      enrolledBy: supervisor!.id,
-    });
+    for (const imageOrder of [1, 2, 3] as const) {
+      await db.insert(schema.biometricEnrollments).values({
+        subjectType: 'dependant',
+        dependantId: dependant.id,
+        s3Key: placeholderS3Key(`biometric-enrollments/dependants/${dependant.id}`),
+        imageOrder,
+        qualityScore: 0.8 + imageOrder * 0.02,
+        enrolledBy: supervisor!.id,
+      });
+    }
   }
 
   // --- Consent records ---------------------------------------------------------------------

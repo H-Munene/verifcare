@@ -11,7 +11,6 @@ This diagram omits the Region/VPC/public-private subnet boundaries (diagramming 
 ## Cost Estimate
 
 ![Mzazi Care AWS cost estimate](assets/mzazi_care_cost_estimate.PNG)
-Given the serveless architecture, the primary cost driver is on the NAT Gateway as it is charged hourly regardless of usage
 
 ## Local development
 
@@ -49,4 +48,7 @@ npm install
 npm run dev
 ```
 
-Opens at `http://localhost:5173`. Authenticates against the real, deployed Cognito User Pool
+Opens at `http://localhost:5173`. Authenticates against the real, deployed Cognito User Pool (no
+local Cognito emulator exists in this project) - see `docs/project-state.md`'s HEZ-52/53/55/56
+entry for the AWS CLI steps to bootstrap a first real supervisor account if the User Pool has no
+users yet.

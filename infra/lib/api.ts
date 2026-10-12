@@ -4,8 +4,6 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import * as iam from "aws-cdk-lib/aws-iam";
-import * as rekognition from "aws-cdk-lib/aws-rekognition";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
@@ -21,8 +19,6 @@ export interface ApiParams {
   familyMemberAppUserPoolClient: cognito.UserPoolClient;
   biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
-  checkinLivenessFramesBucket: s3.Bucket;
-  biometricFacesCollection: rekognition.CfnCollection;
 }
 
 export interface Api {
@@ -41,8 +37,6 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     familyMemberAppUserPoolClient,
     biometricEnrollmentsBucket,
     visitAudioBucket,
-    checkinLivenessFramesBucket,
-    biometricFacesCollection,
   } = params;
 
   // acoustic-model's Lambda function is deliberately not created yet: it's a
@@ -89,21 +83,18 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       // calls with a generic 401, even though the token itself was perfectly valid. See
       // backend/src/config.ts and backend/src/auth/verifier.ts.
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
-      CAREGIVER_USER_POOL_CLIENT_ID:
-        caregiverAppUserPoolClient.userPoolClientId,
-      FAMILY_MEMBER_USER_POOL_CLIENT_ID:
-        familyMemberAppUserPoolClient.userPoolClientId,
+      CAREGIVER_USER_POOL_CLIENT_ID: caregiverAppUserPoolClient.userPoolClientId,
+      FAMILY_MEMBER_USER_POOL_CLIENT_ID: familyMemberAppUserPoolClient.userPoolClientId,
       BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
-      BIOMETRIC_FACES_COLLECTION_ID: biometricFacesCollection.collectionId,
-      CHECKIN_LIVENESS_FRAMES_BUCKET_NAME:
-        checkinLivenessFramesBucket.bucketName,
     },
   });
 
   // Network-level access (the security group rule letting api reach RDS's
   // port) - matches architecture.md's "Networking (VPC layout)" section,
-  // which is settled.
+  // which is settled. IAM grants for what api's code actually reads/writes
+  // beyond the secret (S3, Rekognition) are Linear HEZ-24's explicit scope,
+  // not this one - the app doesn't touch those yet.
   database.connections.allowDefaultPortFrom(apiFunction);
 
   // Lets api's Lambda-to-Drizzle connection (backend/src/db/lambdaDb.ts)
@@ -120,63 +111,9 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // Lets the supervisor web app register a dependant's primary/family
   // contact who has never touched Cognito at all, not just link an existing
   // identity (2026-09-14, extending HEZ-30/HEZ-56's family-member linking).
-  // Also used by POST /caregivers (2026-09-22, HEZ-54) - a caregiver never
-  // self-registers, so every caregiver's Cognito identity is created here
-  // too, not just linked. Scoped to this user pool only, not a wildcard -
-  // same pattern as the grant above.
+  // Scoped to this user pool only, not a wildcard - same pattern as the
+  // grant above.
   userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
-
-  // Lets api's biometric-enrollment upload flow (HEZ-31) sign a presigned PUT
-  // URL that S3 will actually honor - a presigned URL is only valid if the
-  // signing principal's own IAM policy allows the signed action, so grantPut
-  // is required even though the Lambda itself never uploads the bytes.
-  // grantRead covers both the confirm-time HeadObject existence check and
-  // Rekognition's own need to read the S3 object when the Lambda calls
-  // DetectFaces with an S3Object reference instead of downloading the image.
-  biometricEnrollmentsBucket.grantPut(apiFunction);
-  biometricEnrollmentsBucket.grantRead(apiFunction);
-
-  // Lets api's check-in liveness flow (HEZ-34) sign presigned PUT URLs for capture frames
-  // (grantPut, same "the signing principal needs its own PutObject permission" reasoning as
-  // biometricEnrollmentsBucket above), run DetectFaces/CompareFaces against them via S3Object
-  // references (grantRead), and delete each frame right after it's processed - pass or fail, these
-  // frames are never needed again, per infra/lib/storage.ts's own retention reasoning
-  // (grantDelete, a grant biometricEnrollmentsBucket deliberately does NOT have, since enrollment
-  // images are deleted only via the application's offboarding path, not a general-purpose delete).
-  checkinLivenessFramesBucket.grantPut(apiFunction);
-  checkinLivenessFramesBucket.grantRead(apiFunction);
-  checkinLivenessFramesBucket.grantDelete(apiFunction);
-
-  // Lets api's biometric-enrollment confirm endpoint (HEZ-31) and check-in liveness endpoint
-  // (HEZ-34) call Rekognition DetectFaces/CompareFaces. Neither action supports resource-level
-  // permissions (confirmed against AWS's Service Authorization Reference for DetectFaces when
-  // HEZ-31 was built - CompareFaces is the same class of plain image-comparison API, with no
-  // resource type listed there either, so it requires Resource: "*" the same way), so the only
-  // controllable least-privilege axis is the action list itself - scoped to exactly these two
-  // actions, not a wildcard "rekognition:*" grant.
-  apiFunction.addToRolePolicy(
-    new iam.PolicyStatement({
-      actions: ["rekognition:DetectFaces", "rekognition:CompareFaces"],
-      resources: ["*"],
-    }),
-  );
-
-  // Lets api's biometric-enrollment confirm/approve endpoints (HEZ-85) search and add to the
-  // enrollment-uniqueness Rekognition Collection, and lets offboarding cleanup remove from it.
-  // Unlike DetectFaces above, these three actions DO support resource-level permissions scoped to
-  // a specific collection (confirmed directly against AWS's own "How Amazon Rekognition works with
-  // IAM" guide, which gives exactly this ARN shape as a real example) - scoped to this one
-  // collection, not every collection in the account.
-  apiFunction.addToRolePolicy(
-    new iam.PolicyStatement({
-      actions: [
-        "rekognition:IndexFaces",
-        "rekognition:SearchFacesByImage",
-        "rekognition:DeleteFaces",
-      ],
-      resources: [biometricFacesCollection.attrArn],
-    }),
-  );
 
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,
@@ -201,30 +138,10 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // traffic is negligible. LambdaRestApi (proxy: true) mirrors the same
   // "route everything to the Lambda" shape the HTTP API had; the Express
   // app's own router still decides what to do with each path.
-  // A browser's CORS preflight is an unauthenticated OPTIONS request by definition - without this,
-  // it would hit the same Cognito-authorized proxy method every other verb does and get rejected
-  // before ever reaching Express, which is exactly the gap frontend/web/.env's own comment flagged
-  // ("pointing this at the real deployed ApiUrl... needs a CORS entry added... first - not done
-  // yet"). `defaultCorsPreflightOptions` makes CDK add a separate, unauthenticated mock OPTIONS
-  // integration per resource just for this. Origin left wide open deliberately, not restricted to
-  // one deployed frontend origin: this API's real authorization boundary is the Cognito JWT
-  // authorizer on every actual method, never CORS itself (a non-browser client can already call it
-  // from anywhere regardless of these headers) - the same reasoning app.ts's own permissive cors()
-  // and storage.ts's biometric-enrollments bucket CORS already rely on. X-Checkin-Session-Token
-  // added on top of the default header allowlist since the check-in flow (HEZ-33/34/35) sends it
-  // as a real custom header, not one of API Gateway's own CORS defaults.
   const restApi = new apigateway.LambdaRestApi(stack, "RestApi", {
     restApiName: "mzazi-care-api",
     handler: apiFunction,
     proxy: true,
-    defaultCorsPreflightOptions: {
-      allowOrigins: apigateway.Cors.ALL_ORIGINS,
-      allowMethods: apigateway.Cors.ALL_METHODS,
-      allowHeaders: [
-        ...apigateway.Cors.DEFAULT_HEADERS,
-        "X-Checkin-Session-Token",
-      ],
-    },
     defaultMethodOptions: {
       authorizationType: apigateway.AuthorizationType.COGNITO,
       authorizer: cognitoAuthorizer,

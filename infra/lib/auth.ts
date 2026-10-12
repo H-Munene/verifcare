@@ -20,19 +20,8 @@ export function createAuth(stack: cdk.Stack): Auth {
     customAttributes: {
       role: new cognito.StringAttribute({ minLen: 1, maxLen: 20, mutable: true }),
     },
-    // Password-reset codes go by email only (2026-09-26, mobile forgot-password flow). Left unset,
-    // Cognito tries a verified phone number first - this pool's recovery order was
-    // verified_phone_number, then verified_email - which would text Kenyan numbers (the still-open
-    // SMS pricing question since HEZ-17) instead of emailing the address the user just typed.
-    accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
     removalPolicy: cdk.RemovalPolicy.RETAIN,
   });
-
-  // On every app client below (2026-09-26, user decision): an unknown email gets the same answer
-  // as a known one, so the public forgot-password and sign-in calls can't be used to find out
-  // which emails are registered. ForgotPassword then "succeeds" for an unknown email without
-  // sending anything, and sign-in with an unknown email reads as a wrong email or password.
-  const preventUserExistenceErrors = true;
 
   const userPoolClient = userPool.addClient("UserPoolClient", {
     authFlows: {
@@ -40,7 +29,6 @@ export function createAuth(stack: cdk.Stack): Auth {
     },
     generateSecret: false,
     disableOAuth: true,
-    preventUserExistenceErrors,
     // custom:role is deliberately excluded from this client's writable attributes (HEZ-29,
     // 2026-09-13, a real finding not a hypothetical): without this, Cognito's default lets ANY
     // self-signing-up user set custom:role to anything - including "supervisor" - via the public
@@ -68,7 +56,6 @@ export function createAuth(stack: cdk.Stack): Auth {
     },
     generateSecret: false,
     disableOAuth: true,
-    preventUserExistenceErrors,
     writeAttributes: new cognito.ClientAttributes().withStandardAttributes({ fullname: true }),
   });
 
@@ -96,7 +83,6 @@ export function createAuth(stack: cdk.Stack): Auth {
     },
     generateSecret: false,
     disableOAuth: true,
-    preventUserExistenceErrors,
     writeAttributes: new cognito.ClientAttributes().withStandardAttributes({
       fullname: true,
       email: true,

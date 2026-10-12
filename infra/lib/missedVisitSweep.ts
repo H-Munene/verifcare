@@ -39,9 +39,12 @@ export function createMissedVisitSweep(
     topicName: "mzazi-care-alerts",
   });
 
-  // Marks overdue scheduled/in_progress visits as missed (see
-  // backend/src/missedVisitSweep.ts). VPC-attached to eu-west-1c, same as api,
-  // since it queries RDS directly.
+  // Stub only (HEZ-23) - see backend/src/missedVisitSweep.ts for why the
+  // real query/SNS-publish logic is deliberately deferred, not built here.
+  // Still VPC-attached to eu-west-1c and given the same environment
+  // variables api has, even though the stub doesn't use them yet - matches
+  // this project's consistent pattern of wiring networking/environment
+  // ahead of the code that will need it.
   const missedVisitSweepFunction = new NodejsFunction(stack, "MissedVisitSweepFunction", {
     entry: path.join(__dirname, "../../backend/src/missedVisitSweep.ts"),
     projectRoot: path.join(__dirname, "../../backend"),
@@ -49,10 +52,6 @@ export function createMissedVisitSweep(
     handler: "handler",
     runtime: lambda.Runtime.NODEJS_22_X,
     architecture: lambda.Architecture.ARM_64,
-    // Not the 3s default: a cold start fetches the DB secret and opens a TLS
-    // connection to RDS before the query runs, which can exceed 3s - the same
-    // reason migrationRunner.ts raises its own timeout.
-    timeout: cdk.Duration.seconds(30),
     vpc,
     vpcSubnets: {
       subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
@@ -65,19 +64,15 @@ export function createMissedVisitSweep(
   });
 
   database.connections.allowDefaultPortFrom(missedVisitSweepFunction);
-  // The stub never read the secret, so this grant was never added - once the
-  // real sweep logic shipped, every run failed with AccessDenied on
-  // GetSecretValue before reaching the database (found 2026-09-24).
-  databaseSecret.grantRead(missedVisitSweepFunction);
 
-  // Every 15 minutes (user decision 2026-09-24, replacing the earlier
-  // every-6-hours choice): the caregiver app's calendar turns a day red as
-  // soon as a visit is marked missed, and a 6-hour lag made that signal
-  // useless on the day. ~2,880 invocations/month stays inside the Lambda
-  // free tier; worst case (a cold start per run) is ~2,880 Secrets Manager
-  // GetSecretValue calls/month, about $0.015 - flagged in project-state.md.
+  // Every 6 hours, not hourly - confirmed with the user 2026-09-13. This
+  // changes the working assumption baked into the already-confirmed
+  // Secrets Manager (800 API calls/month) and Lambda (720 invocations/
+  // month) cost figures in project-state.md (hourly assumed ~720
+  // invocations/month; every 6 hours is ~120/month) - flagged there as
+  // needing a re-check, not recalculated here.
   new events.Rule(stack, "MissedVisitSweepSchedule", {
-    schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+    schedule: events.Schedule.rate(cdk.Duration.hours(6)),
     targets: [new eventsTargets.LambdaFunction(missedVisitSweepFunction)],
   });
 

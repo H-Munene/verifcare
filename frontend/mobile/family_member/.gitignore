@@ -43,9 +43,3 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
-
-# Desktop platform folders (user decision, 2026-09-27): the apps ship only on Android and iOS,
-# and `flutter pub get` regenerates plugin registrants in these on every dependency change.
-/linux/
-/macos/
-/windows/

@@ -1,0 +1,21 @@
+model,config,params,inner_roc_auc_person,rank
+logistic_regression,0,{'model__C': np.float64(0.0745934328572655)},0.6097164351851853,2
+logistic_regression,1,{'model__C': np.float64(56.69849511478853)},0.5969518849206349,19
+logistic_regression,2,{'model__C': np.float64(4.5705630998014515)},0.602485119047619,11
+logistic_regression,3,{'model__C': np.float64(0.9846738873614566)},0.5994113756613757,14
+logistic_regression,4,{'model__C': np.float64(0.006026889128682512)},0.6089500661375662,4
+logistic_regression,5,{'model__C': np.float64(0.0060252157362038605)},0.6089500661375662,4
+logistic_regression,6,{'model__C': np.float64(0.0019517224641449498)},0.5989790013227513,16
+logistic_regression,7,{'model__C': np.float64(21.42302175774105)},0.5971511243386244,18
+logistic_regression,8,{'model__C': np.float64(1.0129197956845732)},0.6005224867724869,12
+logistic_regression,9,{'model__C': np.float64(3.4702669886504163)},0.6056431878306879,10
+logistic_regression,10,{'model__C': np.float64(0.001267425589893723)},0.5989798280423281,15
+logistic_regression,11,{'model__C': np.float64(70.72114131472235)},0.5973239087301586,17
+logistic_regression,12,{'model__C': np.float64(14.528246637516036)},0.5995651455026455,13
+logistic_regression,13,{'model__C': np.float64(0.011526449540315618)},0.6125925925925927,1
+logistic_regression,14,{'model__C': np.float64(0.008111941985431923)},0.6091865079365079,3
+logistic_regression,15,{'model__C': np.float64(0.008260808399079604)},0.6086276455026455,6
+logistic_regression,16,{'model__C': np.float64(0.033205591037519584)},0.6066278108465609,9
+logistic_regression,17,{'model__C': np.float64(0.4205156450913872)},0.5962061838624338,20
+logistic_regression,18,{'model__C': np.float64(0.14445251022763064)},0.6072420634920634,7
+logistic_regression,19,{'model__C': np.float64(0.028585493941961918)},0.6071875,8
