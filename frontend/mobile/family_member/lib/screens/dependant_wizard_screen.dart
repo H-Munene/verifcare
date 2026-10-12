@@ -876,8 +876,8 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
                 center: pin,
                 radius: standardGeofenceRadiusMeters.toDouble(),
                 strokeWidth: 2,
-                strokeColor: primaryBlue,
-                fillColor: primaryBlue.withValues(alpha: 0.12),
+                strokeColor: primaryGreen,
+                fillColor: primaryGreen.withValues(alpha: 0.12),
               ),
           },
         ),
@@ -889,7 +889,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
             shape: const CircleBorder(side: BorderSide(color: borderColor)),
             elevation: 2,
             child: IconButton(
-              icon: const Icon(Icons.my_location, color: primaryBlue),
+              icon: const Icon(Icons.my_location, color: primaryGreen),
               tooltip: 'My location',
               onPressed: _goToMyLocation,
             ),
@@ -1056,9 +1056,9 @@ class _StepHeader extends StatelessWidget {
     // Editing: every step is filled in, so the others show as reachable (tinted) rather than as
     // done or not-yet-reached.
     final (Color background, Color foreground) = switch ((onTap, i)) {
-      (_, _) when i == current => (primaryBlue, Colors.white),
-      (final _?, _) => (primaryBlue.withValues(alpha: 0.12), primaryBlue),
-      (null, _) when i < current => (primaryBlue, Colors.white),
+      (_, _) when i == current => (primaryGreen, Colors.white),
+      (final _?, _) => (primaryGreen.withValues(alpha: 0.12), primaryGreen),
+      (null, _) when i < current => (primaryGreen, Colors.white),
       (null, _) => (borderColor, inkSecondary),
     };
     final column = Column(

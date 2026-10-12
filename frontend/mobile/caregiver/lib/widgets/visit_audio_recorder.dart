@@ -265,7 +265,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
           levels: _levels.length > _barCount
               ? _levels.sublist(_levels.length - _barCount)
               : _levels,
-          activeColor: primaryBlue,
+          activeColor: primaryGreen,
         ),
         const SizedBox(height: 12),
         Text(
@@ -352,7 +352,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
             ),
             const SizedBox(width: 20),
             Material(
-              color: primaryBlue,
+              color: primaryGreen,
               shape: const CircleBorder(),
               child: InkWell(
                 customBorder: const CircleBorder(),

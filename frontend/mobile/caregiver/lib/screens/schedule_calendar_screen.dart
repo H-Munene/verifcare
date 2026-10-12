@@ -5,7 +5,7 @@ import '../api/visit_schedules_api.dart';
 
 // Colors ported 1:1 from temp_images/Mzazi Care Caregiver App Wireframes.dc.html's #m3b section -
 // this app has no design-system package, so tokens are plain consts instead of a theme extension.
-const _primaryBlue = Color(0xFF0077E6);
+const _primaryGreen = Color(0xFF047857);
 const _successGreen = Color(0xFF15B042);
 const _dangerRed = Color(0xFFE0392B);
 const _inkDark = Color(0xFF292929);
@@ -173,21 +173,21 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
   static bool _isMissed(String status) =>
       status == 'missed' || status == 'investigated';
 
-  // scheduled/in_progress, and any future status the client doesn't know yet, fall to blue.
+  // scheduled/in_progress, and any future status the client doesn't know yet, fall to the primary green.
   Color _statusDotColor(String status) => switch (status) {
     'completed' => _successGreen,
     'cancelled' || 'missed' || 'investigated' => _dangerRed,
-    _ => _primaryBlue,
+    _ => _primaryGreen,
   };
 
   // A day's circle (user spec 2026-09-24): red if any visit that day was missed, green once every
-  // visit is completed, otherwise blue. Cancelled visits don't count; null = no visits to show.
+  // visit is completed, otherwise the primary green. Cancelled visits don't count; null = no visits to show.
   Color? _dayColor(DateTime day) {
     final visits = _visitsOn(day).where((v) => v.status != 'cancelled');
     if (visits.isEmpty) return null;
     if (visits.any((v) => _isMissed(v.status))) return _dangerRed;
     if (visits.every((v) => v.status == 'completed')) return _successGreen;
-    return _primaryBlue;
+    return _primaryGreen;
   }
 
   // Same wording as the admin web app's Visits page for the two check-in states.
@@ -206,7 +206,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
       body: SafeArea(
         child: _loading
             ? const Center(
-                child: CircularProgressIndicator(color: _primaryBlue),
+                child: CircularProgressIndicator(color: _primaryGreen),
               )
             : _error != null
             ? _buildError()
@@ -406,7 +406,7 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: dayColor ?? _primaryBlue,
+          color: dayColor ?? _primaryGreen,
           shape: BoxShape.circle,
         ),
         alignment: Alignment.center,

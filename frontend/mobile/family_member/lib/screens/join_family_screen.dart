@@ -141,7 +141,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   }
 
   List<Widget> _buildSent() => [
-    const Icon(Icons.mark_email_read_outlined, size: 40, color: primaryBlue),
+    const Icon(Icons.mark_email_read_outlined, size: 40, color: primaryGreen),
     const SizedBox(height: 12),
     const Text(
       'Request sent',

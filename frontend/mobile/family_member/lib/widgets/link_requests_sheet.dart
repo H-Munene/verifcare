@@ -305,7 +305,7 @@ class _OutgoingTile extends StatelessWidget {
         request.unread
             ? Icons.notifications_active_outlined
             : Icons.outgoing_mail,
-        color: request.unread ? primaryBlue : inkTertiary,
+        color: request.unread ? primaryGreen : inkTertiary,
       ),
       title: Text(
         'To ${request.targetContact}',

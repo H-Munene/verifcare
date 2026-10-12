@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 // The wireframe palette (temp_images/Mzazi Care Caregiver App Wireframes.dc.html), shared by the
 // visit-flow screens. The older screens still carry their own private copies of these values.
-const primaryBlue = Color(0xFF0077E6);
+const primaryGreen = Color(0xFF047857);
 const successGreen = Color(0xFF15B042);
 const successTint = Color(0xFFCAFCE0);
 const dangerRed = Color(0xFFE0392B);
@@ -14,9 +14,9 @@ const borderColor = Color(0xFFE5E5E5);
 const waveformIdle = Color(0xFFE5E5E5);
 
 final pillButtonStyle = ElevatedButton.styleFrom(
-  backgroundColor: primaryBlue,
+  backgroundColor: primaryGreen,
   foregroundColor: Colors.white,
-  disabledBackgroundColor: primaryBlue.withValues(alpha: 0.4),
+  disabledBackgroundColor: primaryGreen.withValues(alpha: 0.4),
   disabledForegroundColor: Colors.white,
   minimumSize: const Size.fromHeight(44),
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),

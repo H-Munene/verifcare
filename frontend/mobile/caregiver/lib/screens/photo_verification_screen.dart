@@ -267,7 +267,7 @@ class _PhotoButton extends StatelessWidget {
       _PhotoState.verifying => const SizedBox(
         width: 22,
         height: 22,
-        child: CircularProgressIndicator(strokeWidth: 2, color: primaryBlue),
+        child: CircularProgressIndicator(strokeWidth: 2, color: primaryGreen),
       ),
       _PhotoState.verified => const Icon(
         Icons.check_circle,

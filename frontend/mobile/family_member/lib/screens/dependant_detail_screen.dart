@@ -304,8 +304,8 @@ class _TabBarHeader extends SliverPersistentHeaderDelegate {
       const ColoredBox(
         color: Colors.white,
         child: TabBar(
-          labelColor: primaryBlue,
-          indicatorColor: primaryBlue,
+          labelColor: primaryGreen,
+          indicatorColor: primaryGreen,
           unselectedLabelColor: inkSecondary,
           tabs: [
             Tab(text: 'Visits'),
@@ -702,8 +702,8 @@ class _FamilyMemberTile extends StatelessWidget {
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           leading: CircleAvatar(
-            backgroundColor: const Color(0xFFE6F1FC),
-            foregroundColor: primaryBlue,
+            backgroundColor: const Color(0xFFE7F5EF),
+            foregroundColor: primaryGreen,
             child: Text(_initials(member.fullName)),
           ),
           title: Text(
@@ -723,7 +723,7 @@ class _FamilyMemberTile extends StatelessWidget {
                     text: 'Primary contact',
                     style: TextStyle(
                       fontWeight: FontWeight.w500,
-                      color: primaryBlue,
+                      color: primaryGreen,
                     ),
                   ),
                 ],

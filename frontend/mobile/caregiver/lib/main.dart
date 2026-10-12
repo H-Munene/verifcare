@@ -31,7 +31,12 @@ class MzaziCareCaregiverApp extends StatelessWidget {
     return MaterialApp(
       title: 'Mzazi Care - Caregiver',
       theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF0077E6),
+        // Emerald, matching the web console (2026-10-12). fromSeed's primary is pinned to it exactly;
+        // a bare colorSchemeSeed would shift buttons to a generated tone of it.
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF047857),
+          primary: const Color(0xFF047857),
+        ),
         useMaterial3: true,
       ),
       home: _RootScreen(authService: authService),
@@ -301,7 +306,7 @@ class _OngoingVisitBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: primaryBlue,
+      color: primaryGreen,
       child: InkWell(
         onTap: onTap,
         child: SafeArea(

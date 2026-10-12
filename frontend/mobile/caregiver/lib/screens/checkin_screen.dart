@@ -15,7 +15,7 @@ import '../api/visit_schedules_api.dart';
 import '../location.dart';
 import 'photo_verification_screen.dart';
 
-const _primaryBlue = Color(0xFF0077E6);
+const _primaryGreen = Color(0xFF047857);
 const _successGreen = Color(0xFF15B042);
 const _successTint = Color(0xFFCAFCE0);
 const _dangerRed = Color(0xFFE0392B);
@@ -335,7 +335,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               Polyline(
                 polylineId: const PolylineId('route-home'),
                 points: route.points,
-                color: _primaryBlue,
+                color: _primaryGreen,
                 width: 5,
               ),
           },
@@ -345,8 +345,8 @@ class _CheckInScreenState extends State<CheckInScreen> {
               center: center,
               radius: ctx.geofenceRadiusMeters.toDouble(),
               strokeWidth: 2,
-              strokeColor: _primaryBlue,
-              fillColor: _primaryBlue.withValues(alpha: 0.12),
+              strokeColor: _primaryGreen,
+              fillColor: _primaryGreen.withValues(alpha: 0.12),
             ),
           },
           myLocationButtonEnabled: false,
@@ -395,7 +395,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               const SizedBox(height: 8),
               _RoundIconButton(
                 icon: Icons.my_location,
-                iconColor: _primaryBlue,
+                iconColor: _primaryGreen,
                 onTap: () {
                   final pos = _currentPosition;
                   if (pos != null) {
@@ -581,9 +581,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
           child: ElevatedButton(
             onPressed: submitting ? null : _submitCheckin,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryBlue,
+              backgroundColor: _primaryGreen,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: _primaryBlue.withValues(alpha: 0.6),
+              disabledBackgroundColor: _primaryGreen.withValues(alpha: 0.6),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(999),
               ),
@@ -769,7 +769,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               // Reached only by backing out of the photo step while the session is still valid.
               onPressed: _openPhotoVerification,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryBlue,
+                backgroundColor: _primaryGreen,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(999),

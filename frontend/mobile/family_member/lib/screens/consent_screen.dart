@@ -216,7 +216,7 @@ class _TermsView extends StatelessWidget {
         horizontalTitleGap: 8,
         visualDensity: VisualDensity.compact,
         controlAffinity: ListTileControlAffinity.leading,
-        activeColor: primaryBlue,
+        activeColor: primaryGreen,
         title: Text(
           label,
           style: const TextStyle(fontSize: 13, height: 1.35, color: inkDefault),
@@ -258,7 +258,7 @@ class _TermsView extends StatelessWidget {
                     ),
                     if (notice case final notice?) ...[
                       const SizedBox(height: 12),
-                      _Banner(text: notice, tint: const Color(0xFFE6F1FC)),
+                      _Banner(text: notice, tint: const Color(0xFFE7F5EF)),
                     ],
                     for (final section in terms.sections) ...[
                       const SizedBox(height: 20),
