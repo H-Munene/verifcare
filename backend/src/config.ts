@@ -1,29 +1,17 @@
-// Central, validated env-var config for this service's entry points (server.ts, lambda.ts).
-// Deliberately NOT imported by app.ts or any file app.test.ts pulls in - loadConfig() throws on
-// invalid/missing env vars, and app.ts must stay importable with zero env vars set (app.test.ts
-// calls createApp() directly, with nothing configured). Each real entry point calls loadConfig()
-// explicitly, once, early in its own startup - not as an import-time side effect.
+// Validated env config for server.ts and lambda.ts. Keep it out of app.ts so tests can import the
+// app without any env vars set.
 
 import { z } from 'zod';
 
 const envSchema = z
   .object({
     PORT: z.coerce.number().int().positive().default(3000),
-    // Local dev (server.ts) uses DATABASE_URL directly. The deployed Lambda (lambda.ts,
-    // via lambdaDb.ts) resolves credentials from Secrets Manager instead, via
-    // DATABASE_SECRET_ARN - never both in the same running process.
+    // DATABASE_URL locally; DATABASE_SECRET_ARN in Lambda.
     DATABASE_URL: z.string().min(1).optional(),
     DATABASE_SECRET_ARN: z.string().min(1).optional(),
-    // The Cognito User Pool JWTs are verified against (auth/verifier.ts). There is no local
-    // Cognito emulator in this project's stack, so both server.ts and lambda.ts point at the same
-    // real, deployed user pool.
+    // Local dev uses the deployed user pool too.
     USER_POOL_ID: z.string().min(1),
-    // One app client per client application (web, caregiver mobile, family-member mobile - see
-    // infra/lib/auth.ts), all sharing this one user pool. All three must be accepted here, not
-    // just the web client - a real bug found 2026-09-14: the verifier only accepted
-    // USER_POOL_CLIENT_ID, so every ID token issued to either mobile app failed
-    // aws-jwt-verify's clientId/audience check and got the generic 401 "invalid, expired, or
-    // malformed" response, even though the token itself was perfectly valid.
+    // One app client each for web, caregiver mobile and family-member mobile.
     USER_POOL_CLIENT_ID: z.string().min(1),
     CAREGIVER_USER_POOL_CLIENT_ID: z.string().min(1),
     FAMILY_MEMBER_USER_POOL_CLIENT_ID: z.string().min(1),
@@ -64,7 +52,6 @@ export interface Config {
   databaseUrl: string | undefined;
   databaseSecretArn: string | undefined;
   userPoolId: string;
-  // Every app client the ID token verifier must accept - see the schema comment above.
   userPoolClientIds: [string, string, string];
   biometricEnrollmentsBucketName: string;
   biometricFacesCollectionId: string;

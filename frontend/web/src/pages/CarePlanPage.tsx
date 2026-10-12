@@ -1,3 +1,10 @@
+import {
+  AlertCircleIcon,
+  CheckmarkBadge01Icon,
+  Tag01Icon,
+  Task01Icon,
+} from '@hugeicons/core-free-icons';
+import { TableFrame, Th } from '../design-system/Table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -11,6 +18,7 @@ import { Input, Label } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
 import { Switch } from '../design-system/Switch';
 import './CarePlanPage.css';
+import { TableSkeleton } from '../design-system/Skeleton';
 
 // docs/visit-task-checklist-plan.md section 4: a dedicated Care Plan screen, separate from
 // dependant registration, per the user's own explicit choice - supervisor-authored tasks that the
@@ -72,62 +80,66 @@ export function CarePlanPage() {
         </Button>
       </div>
 
-      {tasksQuery.isLoading ? <p>Loading...</p> : null}
+      {tasksQuery.isLoading ? <TableSkeleton columns={5} /> : null}
       {tasksQuery.isError ? <p>Failed to load this dependant's care plan.</p> : null}
 
       {tasksQuery.data ? (
-        <table className="ds-table ds-table--table-cell">
-          <thead>
-            <tr>
-              <th>Task</th>
-              <th>Category</th>
-              <th>Required</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasksQuery.data.map((task) => (
-              <tr key={task.id}>
-                <td>
-                  <div className="care-plan-page__task-title">{task.title}</div>
-                  {task.description ? (
-                    <div className="care-plan-page__task-description">{task.description}</div>
-                  ) : null}
-                </td>
-                <td>{task.category ?? '-'}</td>
-                <td>
-                  <Badge tone={task.required ? 'success' : 'neutral'}>
-                    {task.required ? 'Required' : 'Optional'}
-                  </Badge>
-                </td>
-                <td>
-                  <Badge tone={task.active ? 'success' : 'neutral'}>
-                    {task.active ? 'Active' : 'Retired'}
-                  </Badge>
-                </td>
-                <td className="care-plan-page__row-actions">
-                  <Button onClick={() => setModalState({ mode: 'edit', task })}>Edit</Button>
-                  <Button
-                    disabled={toggleActiveMutation.isPending}
-                    onClick={() =>
-                      toggleActiveMutation.mutate({ taskId: task.id, active: !task.active })
-                    }
-                  >
-                    {task.active ? 'Retire' : 'Reactivate'}
-                  </Button>
-                </td>
-              </tr>
-            ))}
-            {tasksQuery.data.length === 0 ? (
+        <TableFrame>
+          <table className="ds-table ds-table--table-cell">
+            <thead>
               <tr>
-                <td colSpan={5} className="care-plan-page__empty">
-                  No care-plan tasks yet.
-                </td>
+                <Th icon={Task01Icon}>Task</Th>
+                <Th icon={Tag01Icon}>Category</Th>
+                <Th icon={AlertCircleIcon}>Required</Th>
+                <Th icon={CheckmarkBadge01Icon}>Status</Th>
+                <Th>
+                  <span className="sr-only">Actions</span>
+                </Th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {tasksQuery.data.map((task) => (
+                <tr key={task.id}>
+                  <td>
+                    <div className="care-plan-page__task-title">{task.title}</div>
+                    {task.description ? (
+                      <div className="care-plan-page__task-description">{task.description}</div>
+                    ) : null}
+                  </td>
+                  <td>{task.category ?? '-'}</td>
+                  <td>
+                    <Badge tone={task.required ? 'success' : 'neutral'}>
+                      {task.required ? 'Required' : 'Optional'}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Badge tone={task.active ? 'success' : 'neutral'}>
+                      {task.active ? 'Active' : 'Retired'}
+                    </Badge>
+                  </td>
+                  <td className="care-plan-page__row-actions">
+                    <Button onClick={() => setModalState({ mode: 'edit', task })}>Edit</Button>
+                    <Button
+                      disabled={toggleActiveMutation.isPending}
+                      onClick={() =>
+                        toggleActiveMutation.mutate({ taskId: task.id, active: !task.active })
+                      }
+                    >
+                      {task.active ? 'Retire' : 'Reactivate'}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {tasksQuery.data.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="ds-table__empty">
+                    No care-plan tasks yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </TableFrame>
       ) : null}
 
       {toggleActiveMutation.error ? (

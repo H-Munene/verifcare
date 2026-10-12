@@ -3,6 +3,8 @@ import { useAuth } from '../auth/AuthContext';
 import { createBiometricEnrollmentsApi } from './biometricEnrollments';
 import { createCaregiversApi } from './caregivers';
 import { createApiClient } from './client';
+import { createComplianceApi } from './compliance';
+import { createDashboardApi } from './dashboard';
 import { createDependantsApi } from './dependants';
 import { createUsersApi } from './users';
 import { createVisitSchedulesApi } from './visitSchedules';
@@ -17,5 +19,15 @@ export function useApi() {
   const users = useMemo(() => createUsersApi(client), [client]);
   const biometricEnrollments = useMemo(() => createBiometricEnrollmentsApi(client), [client]);
   const visitSchedules = useMemo(() => createVisitSchedulesApi(client), [client]);
-  return { dependants, caregivers, users, biometricEnrollments, visitSchedules };
+  const dashboard = useMemo(() => createDashboardApi(client), [client]);
+  const compliance = useMemo(() => createComplianceApi(client), [client]);
+  return {
+    dependants,
+    caregivers,
+    users,
+    biometricEnrollments,
+    visitSchedules,
+    dashboard,
+    compliance,
+  };
 }

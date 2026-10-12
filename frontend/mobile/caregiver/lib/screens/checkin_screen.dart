@@ -1,6 +1,6 @@
 // Screen 04/05 of the wireframes (temp_images/Mzazi Care Caregiver App Wireframes.dc.html) - the
-// geofence check-in map and its bottom sheet. Only the geofence step: caregiver/dependant liveness
-// (screens 06/07) are separate, later work per the plan doc, not built here.
+// geofence check-in map and its bottom sheet. A passing geofence check moves straight on to
+// PhotoVerificationScreen (the caregiver/dependant photo step).
 
 import 'dart:async';
 
@@ -10,7 +10,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../api/api_client.dart';
 import '../api/checkin_api.dart';
+import '../api/directions_api.dart';
 import '../api/visit_schedules_api.dart';
+import '../location.dart';
+import 'photo_verification_screen.dart';
 
 const _primaryBlue = Color(0xFF0077E6);
 const _successGreen = Color(0xFF15B042);
@@ -39,6 +42,8 @@ class CheckInScreen extends StatefulWidget {
   final VisitSchedulesApi visitSchedulesApi;
   final CheckinApi checkinApi;
   final VoidCallback onBack;
+  // Both photos verified and the caregiver tapped Proceed - the visit is now in progress.
+  final VoidCallback onCheckedIn;
 
   const CheckInScreen({
     super.key,
@@ -46,6 +51,7 @@ class CheckInScreen extends StatefulWidget {
     required this.visitSchedulesApi,
     required this.checkinApi,
     required this.onBack,
+    required this.onCheckedIn,
   });
 
   @override
@@ -62,6 +68,12 @@ class _CheckInScreenState extends State<CheckInScreen> {
   StreamSubscription<Position>? _positionSubscription;
   Position? _currentPosition;
   String? _locationErrorMessage;
+
+  // The route to the dependant's home (2026-09-26, user request), when a Directions key is set.
+  final _directions = DirectionsApi();
+  DirectionsRoute? _route;
+  LatLng? _routeOrigin;
+  bool _routeLoading = false;
 
   Problem? _lastFailureProblem;
   GeofenceCheckinResult? _result;
@@ -111,26 +123,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
   }
 
   Future<void> _startLocationUpdates() async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    final unavailable = await locationUnavailableReason('check in');
+    if (unavailable != null) {
       if (!mounted) return;
-      setState(() {
-        _locationErrorMessage = permission == LocationPermission.deniedForever
-            ? 'Location permission permanently denied. Enable it in device settings to check in.'
-            : 'Location permission is required to check in.';
-      });
-      return;
-    }
-
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      if (!mounted) return;
-      setState(() {
-        _locationErrorMessage = 'Turn on device location services to check in.';
-      });
+      setState(() => _locationErrorMessage = unavailable);
       return;
     }
 
@@ -145,12 +141,54 @@ class _CheckInScreenState extends State<CheckInScreen> {
         ).listen((position) {
           if (!mounted) return;
           setState(() => _currentPosition = position);
+          unawaited(_refreshRoute(position));
           _mapController?.animateCamera(
             CameraUpdate.newLatLng(
               LatLng(position.latitude, position.longitude),
             ),
           );
         });
+  }
+
+  // Fetched when the position first arrives and again after moving more than 150 m, rather than
+  // on every GPS update (each call is a billed Directions request). Not fetched once inside the
+  // home's check-in circle, where there's nowhere left to go.
+  Future<void> _refreshRoute(Position position) async {
+    final ctx = _context;
+    if (!DirectionsApi.enabled || ctx == null || _routeLoading) return;
+    final here = LatLng(position.latitude, position.longitude);
+    final origin = _routeOrigin;
+    if (origin != null &&
+        Geolocator.distanceBetween(
+              origin.latitude,
+              origin.longitude,
+              here.latitude,
+              here.longitude,
+            ) <
+            150) {
+      return;
+    }
+    final distance = _liveDistanceMeters;
+    if (distance != null && distance <= ctx.geofenceRadiusMeters) {
+      if (_route != null) setState(() => _route = null);
+      return;
+    }
+    _routeLoading = true;
+    try {
+      final route = await _directions.route(
+        here,
+        LatLng(ctx.geofenceLat, ctx.geofenceLng),
+      );
+      if (!mounted) return;
+      setState(() {
+        _route = route;
+        _routeOrigin = here;
+      });
+    } catch (_) {
+      // No route is fine - the map and check-in work without it.
+    } finally {
+      _routeLoading = false;
+    }
   }
 
   double? get _liveDistanceMeters {
@@ -189,6 +227,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
         _result = result;
         _state = _SheetState.success;
       });
+      unawaited(_openPhotoVerification());
     } on ApiException catch (e) {
       if (!mounted) return;
       if (e.problem.status == 422) {
@@ -211,6 +250,22 @@ class _CheckInScreenState extends State<CheckInScreen> {
         _genericErrorMessage = e.toString();
         _state = _SheetState.genericError;
       });
+    }
+  }
+
+  Future<void> _openPhotoVerification() async {
+    final sessionExpired = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PhotoVerificationScreen(
+          visit: widget.visit,
+          checkinApi: widget.checkinApi,
+          session: _result!,
+          onProceed: widget.onCheckedIn,
+        ),
+      ),
+    );
+    if (sessionExpired == true && mounted) {
+      setState(() => _state = _SheetState.ready);
     }
   }
 
@@ -275,6 +330,15 @@ class _CheckInScreenState extends State<CheckInScreen> {
           initialCameraPosition: CameraPosition(target: center, zoom: 16),
           onMapCreated: (controller) => _mapController = controller,
           markers: markers,
+          polylines: {
+            if (_route case final route?)
+              Polyline(
+                polylineId: const PolylineId('route-home'),
+                points: route.points,
+                color: _primaryBlue,
+                width: 5,
+              ),
+          },
           circles: {
             Circle(
               circleId: const CircleId('geofence'),
@@ -292,6 +356,36 @@ class _CheckInScreenState extends State<CheckInScreen> {
           left: 16,
           child: _RoundIconButton(icon: Icons.arrow_back, onTap: widget.onBack),
         ),
+        if (_route case final route?)
+          Positioned(
+            top: 20,
+            left: 72,
+            right: 72,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x22000000), blurRadius: 6),
+                  ],
+                ),
+                child: Text(
+                  route.summary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ),
         Positioned(
           top: 16,
           right: 16,
@@ -665,14 +759,15 @@ class _CheckInScreenState extends State<CheckInScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Valid until ${result.expiresAt.toLocal()}',
+            'Valid until ${TimeOfDay.fromDateTime(result.expiresAt.toLocal()).format(context)}',
             style: const TextStyle(fontSize: 12, color: _inkTertiary),
           ),
           const SizedBox(height: 12),
           SizedBox(
             height: 40,
             child: ElevatedButton(
-              onPressed: widget.onBack,
+              // Reached only by backing out of the photo step while the session is still valid.
+              onPressed: _openPhotoVerification,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryBlue,
                 foregroundColor: Colors.white,
@@ -681,7 +776,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 ),
                 elevation: 0,
               ),
-              child: const Text('Done'),
+              child: const Text('Continue to photos'),
             ),
           ),
         ],

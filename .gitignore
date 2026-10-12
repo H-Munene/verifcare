@@ -1,10 +1,4 @@
 /docs
-
-# graphify knowledge graph (local dev aid, auto-rebuilt by .git/hooks/post-commit and
-# post-checkout) - kept local-only, same convention as /docs above, not pushed to the remote.
-/graphify-out
-
-# Node.js / TypeScript (applies to any package in this repo: backend/, infra/, frontend/web/)
 node_modules/
 dist/
 coverage/
@@ -14,11 +8,15 @@ coverage/
 !.env.example
 /temp_images
 
-# aws lambda invoke's own local output file (e.g. MigrationRunnerFunction invocations) - never
-# meaningful to commit, just whatever the last invoke happened to return. Not scoped to one
-# directory since `aws lambda invoke` gets run from wherever it's convenient (infra/, repo root).
-out.json
+/acoustic-model/data
+/acoustic-model/venv/
+/acoustic-model/results
 
-CLAUDE.md
-/.claude
-.agents
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+out.json
+skills-lock.json

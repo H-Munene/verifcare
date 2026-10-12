@@ -42,16 +42,29 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
+import type { AuthenticatedUser } from '../auth/verifier.js';
+import { changedFields, recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
+import { isCheckinPhoto } from '../db/checkinPhotos.js';
+import { assessVisit, visitRecords, visitResolutionHistory } from '../db/complianceReports.js';
 import type { Db } from '../db/client.js';
+import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
-import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
+import { haversineDistanceMeters } from '../geo.js';
+import {
+  decodeCursor,
+  keysetCondition,
+  keysetOrder,
+  paginate,
+  resolveSort,
+  type SortKey,
+} from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 import { findFamilyMemberLink } from './dependants.js';
 
@@ -62,6 +75,9 @@ interface VerificationEventResponse {
   checkinGpsLat: number | null;
   checkinGpsLng: number | null;
   distanceFromGeofenceMeters: number | null;
+  checkoutGpsLat: number | null;
+  checkoutGpsLng: number | null;
+  checkoutDistanceFromGeofenceMeters: number | null;
   caregiverMatchConfidence: number | null;
   dependantMatchConfidence: number | null;
   caregiverLivenessPassed: boolean | null;
@@ -78,6 +94,9 @@ function toVerificationEventResponse(
     checkinGpsLat: row.checkinGpsLat,
     checkinGpsLng: row.checkinGpsLng,
     distanceFromGeofenceMeters: row.distanceFromGeofenceMeters,
+    checkoutGpsLat: row.checkoutGpsLat,
+    checkoutGpsLng: row.checkoutGpsLng,
+    checkoutDistanceFromGeofenceMeters: row.checkoutDistanceFromGeofenceMeters,
     caregiverMatchConfidence:
       row.caregiverMatchConfidence === null ? null : Number(row.caregiverMatchConfidence),
     dependantMatchConfidence:
@@ -219,7 +238,17 @@ const updateVisitScheduleRequestSchema = z.object({
   status: visitStatusSchema.optional(),
 });
 
+// Sortable columns (2026-09-26, the supervisor console's tables). Truncated to milliseconds so
+// the value round-trips exactly through the cursor (see pagination.ts's header).
+const VISIT_SORT_KEYS = {
+  scheduledStart: {
+    expr: sql`date_trunc('milliseconds', ${schema.visitSchedules.scheduledStart})`,
+    cast: 'timestamptz',
+  },
+} as const satisfies Record<string, SortKey>;
+
 const listVisitSchedulesQuerySchema = z.object({
+  sort: z.enum(['scheduledStart', '-scheduledStart']).optional(),
   status: visitStatusSchema.optional(),
   caregiverId: z.string().uuid().optional(),
   dependantId: z.string().uuid().optional(),
@@ -233,6 +262,81 @@ const listVisitSchedulesQuerySchema = z.object({
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
 const visitScheduleIdParamSchema = z.string().uuid();
 
+// The caregiver's GPS fix at checkout. Named and bounded exactly like check-in's geofence request
+// (routes/checkin.ts), so the app sends the same shape for both ends of a visit.
+const checkoutRequestSchema = z.object({
+  gpsLat: z.number().min(-90).max(90),
+  gpsLng: z.number().min(-180).max(180),
+});
+
+// Scheduling guardrail (2026-09-26, user request): a visit can't be scheduled or rescheduled until
+// both the caregiver and the dependant have a photo check-in can verify against - otherwise the
+// visit is bound to fail at the door with 'not_enrolled'. "Has a photo" is db/checkinPhotos.ts's
+// isCheckinPhoto, the same rule check-in's face match and the apps' "photo needed" alert use.
+// Returns the Problem detail, or null when both have one.
+async function missingPhotoDetail(
+  db: Db,
+  caregiverId: string,
+  dependantId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ subjectType: schema.biometricEnrollments.subjectType })
+    .from(schema.biometricEnrollments)
+    .where(
+      and(
+        isCheckinPhoto,
+        or(
+          eq(schema.biometricEnrollments.caregiverId, caregiverId),
+          eq(schema.biometricEnrollments.dependantId, dependantId),
+        ),
+      ),
+    );
+  const has = new Set(rows.map((row) => row.subjectType));
+  const missing = [
+    has.has('caregiver') ? null : 'the caregiver',
+    has.has('dependant') ? null : 'the dependant',
+  ].filter((who): who is string => who !== null);
+  if (missing.length === 0) {
+    return null;
+  }
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} a photo for check-in. Add the photo first (a photo awaiting review doesn't count yet).`;
+}
+
+// Consent guardrail (2026-09-27, user request): a visit can't be scheduled or rescheduled until
+// both the caregiver and the dependant have an active (unrevoked) biometric_verification consent -
+// check-in photographs both of them, so a visit without that consent could only be carried out by
+// processing someone's biometric data without their consent. Same structure as the photo guardrail
+// above; "has consent" is db/consents.ts's rule, shared with the consent screen that grants it.
+// Returns the Problem detail, or null when both have consented.
+async function missingConsentDetail(
+  db: Db,
+  caregiverId: string,
+  dependantId: string,
+): Promise<string | null> {
+  const consented = await subjectsWithActiveConsent(
+    db,
+    [
+      { subjectType: 'caregiver', id: caregiverId },
+      { subjectType: 'dependant', id: dependantId },
+    ],
+    'biometric_verification',
+  );
+  const missing = [
+    consented.has(caregiverId) ? null : 'the caregiver',
+    consented.has(dependantId) ? null : "the dependant (through their family's primary contact)",
+  ].filter((who): who is string => who !== null);
+  if (missing.length === 0) {
+    return null;
+  }
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to photo identity verification. Consent is given by accepting the terms in the Mzazi Care app.`;
+}
+
+// Shared by both guardrails: each means "this visit can't go ahead as scheduled", not a malformed
+// request.
+function sendUnschedulable(res: Response, detail: string): void {
+  sendProblem(res, { type: 'about:blank', title: 'Unprocessable Entity', status: 422, detail });
+}
+
 function getDb(res: Response): Db | undefined {
   const db = res.req.app.locals.db as Db | undefined;
   if (!db) {
@@ -244,6 +348,29 @@ function getDb(res: Response): Db | undefined {
     });
   }
   return db;
+}
+
+// The read rule shared by GET /{id}, /verification and /task-outcomes: a supervisor sees any
+// visit, a caregiver only their own, a family_member only visits for a dependant they're linked
+// to. Sends the 403 itself and returns false, the same "send the response, return a falsy
+// sentinel" style used elsewhere in this router.
+async function canReadVisit(
+  db: Db,
+  visit: typeof schema.visitSchedules.$inferSelect,
+  caller: AuthenticatedUser,
+  res: Response,
+): Promise<boolean> {
+  let allowed = true;
+  if (caller.role === 'caregiver') {
+    const callerRow = await getUserByCognitoSub(db, caller.sub);
+    allowed = callerRow !== undefined && visit.caregiverId === callerRow.id;
+  } else if (caller.role === 'family_member') {
+    allowed = (await findFamilyMemberLink(db, visit.dependantId, caller.sub)) !== undefined;
+  }
+  if (!allowed) {
+    sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+  }
+  return allowed;
 }
 
 // Maps an EXCLUDE-constraint violation to a specific, readable detail message rather than a
@@ -317,25 +444,51 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
+      const photoDetail = await missingPhotoDetail(db, body.caregiverId, body.dependantId);
+      if (photoDetail) {
+        sendUnschedulable(res, photoDetail);
+        return;
+      }
+      const consentDetail = await missingConsentDetail(db, body.caregiverId, body.dependantId);
+      if (consentDetail) {
+        sendUnschedulable(res, consentDetail);
+        return;
+      }
+
       const callerRow = await getUserByCognitoSub(db, caller.sub);
       if (!callerRow) {
         throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
 
-      const [row] = await db
-        .insert(schema.visitSchedules)
-        .values({
-          id: uuidv7(),
-          caregiverId: body.caregiverId,
-          dependantId: body.dependantId,
-          scheduledStart: new Date(body.scheduledStart),
-          scheduledEnd: new Date(body.scheduledEnd),
-          createdBy: callerRow.id,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into visit_schedules returned no row.');
-      }
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.visitSchedules)
+          .values({
+            id: uuidv7(),
+            caregiverId: body.caregiverId,
+            dependantId: body.dependantId,
+            scheduledStart: new Date(body.scheduledStart),
+            scheduledEnd: new Date(body.scheduledEnd),
+            createdBy: callerRow.id,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into visit_schedules returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'visit_schedule.create',
+          entityType: 'visit_schedule',
+          entityId: inserted.id,
+          metadata: {
+            caregiverId: body.caregiverId,
+            dependantId: body.dependantId,
+            scheduledStart: body.scheduledStart,
+            scheduledEnd: body.scheduledEnd,
+          },
+        });
+        return inserted;
+      });
       const [response] = await attachDisplayNames(db, [row]);
       res.status(201).json(response);
     } catch (err) {
@@ -388,10 +541,11 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           lte(schema.visitSchedules.scheduledStart, new Date(query.scheduledStartTo)),
         );
       }
+      const sort = resolveSort(query.sort, VISIT_SORT_KEYS);
       if (query.cursor) {
         let cursor;
         try {
-          cursor = decodeCursor(query.cursor);
+          cursor = decodeCursor(query.cursor, sort?.param);
         } catch {
           sendProblem(res, {
             type: 'about:blank',
@@ -401,7 +555,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           });
           return;
         }
-        conditions.push(cursorCondition(schema.visitSchedules.id, cursor));
+        conditions.push(keysetCondition(schema.visitSchedules.id, cursor, sort));
       }
 
       let rows: (typeof schema.visitSchedules.$inferSelect)[];
@@ -410,7 +564,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           .select()
           .from(schema.visitSchedules)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(asc(schema.visitSchedules.id))
+          .orderBy(...keysetOrder(schema.visitSchedules.id, sort))
           .limit(query.limit + 1);
       } else if (caller.role === 'caregiver') {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -422,7 +576,7 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           .select()
           .from(schema.visitSchedules)
           .where(and(...conditions))
-          .orderBy(asc(schema.visitSchedules.id))
+          .orderBy(...keysetOrder(schema.visitSchedules.id, sort))
           .limit(query.limit + 1);
       } else {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -438,12 +592,16 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
             eq(schema.visitSchedules.dependantId, schema.dependantFamilyMembers.dependantId),
           )
           .where(and(...conditions))
-          .orderBy(asc(schema.visitSchedules.id))
+          .orderBy(...keysetOrder(schema.visitSchedules.id, sort))
           .limit(query.limit + 1);
         rows = joined.map((r) => r.visitSchedule);
       }
 
-      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({
+        id: row.id,
+        sort: sort?.param,
+        value: sort ? row.scheduledStart.toISOString() : undefined,
+      }));
       res.status(200).json({ items: await attachDisplayNames(db, items), nextCursor });
     } catch (err) {
       next(err);
@@ -478,19 +636,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
         return;
       }
-
-      if (caller.role === 'caregiver') {
-        const callerRow = await getUserByCognitoSub(db, caller.sub);
-        if (!callerRow || row.caregiverId !== callerRow.id) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
-      } else if (caller.role === 'family_member') {
-        const found = await findFamilyMemberLink(db, row.dependantId, caller.sub);
-        if (!found) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
+      if (!(await canReadVisit(db, row, caller, res))) {
+        return;
       }
 
       const [response] = await attachDisplayNames(db, [row]);
@@ -533,19 +680,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
         return;
       }
-
-      if (caller.role === 'caregiver') {
-        const callerRow = await getUserByCognitoSub(db, caller.sub);
-        if (!callerRow || visit.caregiverId !== callerRow.id) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
-      } else if (caller.role === 'family_member') {
-        const found = await findFamilyMemberLink(db, visit.dependantId, caller.sub);
-        if (!found) {
-          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-          return;
-        }
+      if (!(await canReadVisit(db, visit, caller, res))) {
+        return;
       }
 
       const [event] = await db
@@ -558,10 +694,102 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         .where(eq(schema.verificationAttempts.visitScheduleId, visitScheduleId))
         .orderBy(asc(schema.verificationAttempts.attemptedAt));
 
+      // Sensitive read (the Compliance tab's audit log, per the product owner) - only for a
+      // supervisor or family member looking at someone else's check-in data, not a caregiver
+      // reading their own visit's own trail.
+      if (caller.role !== 'caregiver') {
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
+        await recordAudit(db, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'verification.view',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+        });
+      }
+
+      // How an exception was resolved (the Compliance tab): supervisors only, since resolution
+      // notes are the agency's internal account, not something a family member or caregiver sees.
+      let compliance = {};
+      if (caller.role === 'supervisor') {
+        const [record] = await visitRecords(db, { visitScheduleId });
+        compliance = {
+          exceptionKinds: record ? assessVisit(record, new Date()).exceptionKinds : [],
+          resolutions: await visitResolutionHistory(db, visitScheduleId),
+        };
+      }
+
       res.status(200).json({
         event: event ? toVerificationEventResponse(event) : null,
         attempts: attempts.map(toVerificationAttemptResponse),
+        ...compliance,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /{id}/task-outcomes: what the caregiver recorded for each care task on this visit, for any
+  // visit status. GET .../tasks (routes/visitTasks.ts) is the caregiver's own working view and only
+  // exists while a visit is in_progress, so once a visit ended nobody - not even a supervisor -
+  // could read these back. Only recorded outcomes are returned (not the live care plan), so a task
+  // deactivated after the visit still shows what was done, and a never-started visit returns [].
+  // Lives in this router, not visitTasks.ts: the check-in router mounted between the two rejects
+  // every non-caregiver request that reaches it.
+  router.get('/:visitScheduleId/task-outcomes', async (req, res, next) => {
+    const visitScheduleId = parseOrSendProblem(
+      visitScheduleIdParamSchema,
+      req.params.visitScheduleId,
+      res,
+    );
+    if (!visitScheduleId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [visit] = await db
+        .select()
+        .from(schema.visitSchedules)
+        .where(eq(schema.visitSchedules.id, visitScheduleId));
+      if (!visit) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (!(await canReadVisit(db, visit, caller, res))) {
+        return;
+      }
+
+      const rows = await db
+        .select({ task: schema.dependantCareTasks, completion: schema.visitTaskCompletions })
+        .from(schema.visitTaskCompletions)
+        .innerJoin(
+          schema.dependantCareTasks,
+          eq(schema.dependantCareTasks.id, schema.visitTaskCompletions.careTaskId),
+        )
+        .where(eq(schema.visitTaskCompletions.visitScheduleId, visitScheduleId))
+        .orderBy(asc(schema.dependantCareTasks.createdAt));
+
+      res.status(200).json(
+        rows.map(({ task, completion }) => ({
+          careTaskId: task.id,
+          title: task.title,
+          description: task.description,
+          category: task.category,
+          required: task.required,
+          status: completion.status,
+          reason: completion.reason,
+          notes: completion.notes,
+          completedAt: completion.completedAt.toISOString(),
+        })),
+      );
     } catch (err) {
       next(err);
     }
@@ -623,19 +851,56 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
-      const [updated] = await db
-        .update(schema.visitSchedules)
-        .set({
-          ...(body.scheduledStart !== undefined && { scheduledStart: mergedStart }),
-          ...(body.scheduledEnd !== undefined && { scheduledEnd: mergedEnd }),
-          ...(body.status !== undefined && { status: body.status }),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.visitSchedules.id, visitScheduleId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to visit_schedules returned no row.');
+      // Moving a visit is scheduling it again, so the photo and consent guardrails apply; a
+      // status-only change (e.g. cancelling) doesn't, so an existing visit can always be cancelled
+      // - including after a consent is withdrawn, which is exactly when cancelling is needed.
+      if (body.scheduledStart !== undefined || body.scheduledEnd !== undefined) {
+        const photoDetail = await missingPhotoDetail(
+          db,
+          existing.caregiverId,
+          existing.dependantId,
+        );
+        if (photoDetail) {
+          sendUnschedulable(res, photoDetail);
+          return;
+        }
+        const consentDetail = await missingConsentDetail(
+          db,
+          existing.caregiverId,
+          existing.dependantId,
+        );
+        if (consentDetail) {
+          sendUnschedulable(res, consentDetail);
+          return;
+        }
       }
+
+      // A read, so it needn't be inside the transaction below.
+      const callerRow = await getUserByCognitoSub(db, caller.sub);
+
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.visitSchedules)
+          .set({
+            ...(body.scheduledStart !== undefined && { scheduledStart: mergedStart }),
+            ...(body.scheduledEnd !== undefined && { scheduledEnd: mergedEnd }),
+            ...(body.status !== undefined && { status: body.status }),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.visitSchedules.id, visitScheduleId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to visit_schedules returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow?.id ?? null,
+          action: 'visit_schedule.update',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+          metadata: changedFields(existing, row, ['scheduledStart', 'scheduledEnd', 'status']),
+        });
+        return row;
+      });
       const [response] = await attachDisplayNames(db, [updated]);
       res.status(200).json(response);
     } catch (err) {
@@ -654,6 +919,13 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
 
   // POST /{id}/checkout (HEZ-39): the final step of the check-in flow (architecture.md step 5) -
   // sets verification_events.checkout_at and flips visit_schedules.status to 'completed'.
+  //
+  // Checkout must happen inside the dependant's geofence radius (2026-09-27, user request), measured
+  // with the same distance function and radius check-in uses: otherwise a caregiver could check in,
+  // leave, and check out later from anywhere, and the recorded visit length would say nothing about
+  // time actually spent at the home. The fix and its distance are stored on verification_events
+  // as the record of where checkout happened. Accuracy and mock-location aren't checked here
+  // (check-in checks them); only the position was asked for.
   // Deliberately does not depend on HEZ-38 (audio upload + acoustic-model call), which is
   // separately deferred (milestone 4) - nothing here checks for an audio_records row.
   router.post('/:visitScheduleId/checkout', async (req, res, next) => {
@@ -663,6 +935,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       res,
     );
     if (!visitScheduleId) {
+      return;
+    }
+    const body = parseOrSendProblem(checkoutRequestSchema, req.body, res);
+    if (!body) {
       return;
     }
     const db = getDb(res);
@@ -712,6 +988,33 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
+      const [dependant] = await db
+        .select({
+          geofenceLat: schema.dependants.geofenceLat,
+          geofenceLng: schema.dependants.geofenceLng,
+          geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
+        })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, visit.dependantId));
+      if (!dependant) {
+        throw new Error(`visit_schedules ${visitScheduleId} references a nonexistent dependant.`);
+      }
+      const distanceMeters = haversineDistanceMeters(
+        body.gpsLat,
+        body.gpsLng,
+        dependant.geofenceLat,
+        dependant.geofenceLng,
+      );
+      if (distanceMeters > dependant.geofenceRadiusMeters) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: `You're ${Math.round(distanceMeters)} m from the dependant's home, outside its ${dependant.geofenceRadiusMeters} m check-out radius. Check out from the home.`,
+        });
+        return;
+      }
+
       // Visit task checklist (docs/visit-task-checklist-plan.md): a required, active task with no
       // visit_task_completions row for this visit blocks checkout outright, per the user's own
       // explicit choice (not just a warning) - "addressed" means any status was recorded
@@ -748,13 +1051,27 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       const [updated] = await db.transaction(async (tx) => {
         await tx
           .update(schema.verificationEvents)
-          .set({ checkoutAt: now })
+          .set({
+            checkoutAt: now,
+            checkoutGpsLat: body.gpsLat,
+            checkoutGpsLng: body.gpsLng,
+            checkoutDistanceFromGeofenceMeters: distanceMeters,
+          })
           .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
-        return tx
+        const rows = await tx
           .update(schema.visitSchedules)
           .set({ status: 'completed', updatedAt: now })
           .where(eq(schema.visitSchedules.id, visitScheduleId))
           .returning();
+        // Distance, not the raw GPS fix itself, which is never copied into the log verbatim.
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'visit.checkout',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+          metadata: { distanceMeters: Math.round(distanceMeters) },
+        });
+        return rows;
       });
       if (!updated) {
         throw new Error('Update to visit_schedules returned no row.');

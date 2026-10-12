@@ -4,6 +4,7 @@
 // module shape.
 
 import type { ApiClient } from './client';
+import type { ExceptionKind, VisitResolution } from './compliance';
 
 export type VisitStatus =
   'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled' | 'investigated';
@@ -49,6 +50,12 @@ export interface VerificationAttempt {
 export interface VerificationAudit {
   event: VerificationEvent | null;
   attempts: VerificationAttempt[];
+  /**
+   * How the visit's exception was resolved, newest first, and why it is one (empty when it
+   * isn't). Optional: an API deployed before the Compliance tab doesn't send them.
+   */
+  resolutions?: VisitResolution[];
+  exceptionKinds?: ExceptionKind[];
 }
 
 export interface VisitSchedulePage {
@@ -75,6 +82,7 @@ export interface ListVisitSchedulesParams {
   dependantId?: string;
   scheduledStartFrom?: string;
   scheduledStartTo?: string;
+  sort?: 'scheduledStart' | '-scheduledStart';
   cursor?: string;
   limit?: number;
 }

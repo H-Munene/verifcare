@@ -1,7 +1,5 @@
-/// Normalizes a Kenyan phone number entered in any common local format into Cognito's required
-/// E.164 shape (+254XXXXXXXXX), so "0741405735", "254741405735", and "+254741405735" all resolve
-/// to the same value. This POC is deliberately Kenya-only - no other country codes are recognized.
-/// Returns null if the input doesn't match any recognized Kenyan format.
+/// Normalizes a Kenyan number ("0741405735", "254741405735", "+254741405735") to E.164
+/// (+254XXXXXXXXX). Returns null for anything else.
 String? normalizeKenyanPhoneNumber(String input) {
   final cleaned = input.trim().replaceAll(RegExp(r'[\s\-()]'), '');
 
@@ -16,8 +14,7 @@ String? normalizeKenyanPhoneNumber(String input) {
     nationalNumber = cleaned;
   }
 
-  // Kenyan mobile numbers start with 7 or 1 (landline prefixes are deliberately not accepted -
-  // this app only ever needs to reach the family member's own mobile).
+  // Mobile numbers only: they start with 7 or 1.
   if (nationalNumber == null || !RegExp(r'^[17]\d{8}$').hasMatch(nationalNumber)) {
     return null;
   }

@@ -2,13 +2,8 @@ import * as cdk from "aws-cdk-lib/core";
 import * as iam from "aws-cdk-lib/aws-iam";
 
 export function createCicd(stack: cdk.Stack): void {
-  // GitHub Actions OIDC federation for CI/CD (HEZ-26), not static AWS
-  // access keys stored as GitHub secrets. The trust condition scopes this
-  // role to exactly this repo's main branch - nothing else can assume it.
-  // Its only permission is assuming the four roles `cdk bootstrap` already
-  // created (HEZ-15) - those already have everything needed to deploy, so
-  // this role just needs the ability to hop into them, not broad
-  // permissions of its own.
+  // GitHub Actions OIDC role, assumable only from this repo's main branch.
+  // It can only assume the cdk bootstrap roles, which do the actual deploy.
   const githubOidcProvider = new iam.OpenIdConnectProvider(stack, "GitHubOidcProvider", {
     url: "https://token.actions.githubusercontent.com",
     clientIds: ["sts.amazonaws.com"],

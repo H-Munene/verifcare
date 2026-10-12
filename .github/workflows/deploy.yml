@@ -20,10 +20,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: infra/package-lock.json
+          cache-dependency-path: |
+            infra/package-lock.json
+            backend/package-lock.json
+            frontend/web/package-lock.json
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: eu-west-1
       - run: npm ci
+      # Synth bundles the Lambdas from backend/ and builds frontend/web (cdk.json's "build"),
+      # so both need their deps installed, the same as the CI infra job.
+      - run: npm ci
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend/web
       - run: npx cdk deploy --require-approval never

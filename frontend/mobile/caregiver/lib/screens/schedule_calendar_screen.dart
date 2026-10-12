@@ -55,11 +55,15 @@ const _weekdayFullUpper = [
 class ScheduleCalendarScreen extends StatefulWidget {
   final VisitSchedulesApi visitSchedulesApi;
   final void Function(VisitSchedule visit) onSelectVisit;
+  // Bumped by the shell whenever a visit flow (check-in, checkout) returns, so the calendar
+  // re-fetches statuses instead of showing the pre-visit ones.
+  final int refreshToken;
 
   const ScheduleCalendarScreen({
     super.key,
     required this.visitSchedulesApi,
     required this.onSelectVisit,
+    this.refreshToken = 0,
   });
 
   @override
@@ -82,9 +86,17 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
     _loadVisits();
   }
 
-  Future<void> _loadVisits() async {
+  @override
+  void didUpdateWidget(ScheduleCalendarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _loadVisits(showSpinner: false);
+    }
+  }
+
+  Future<void> _loadVisits({bool showSpinner = true}) async {
     setState(() {
-      _loading = true;
+      _loading = showSpinner;
       _error = null;
     });
     try {
@@ -94,11 +106,13 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
       final page = await widget.visitSchedulesApi.listVisitSchedules(
         const ListVisitSchedulesParams(limit: 100),
       );
+      if (!mounted) return;
       setState(() {
         _visits = page.items;
         _loading = false;
       });
     } on ApiException catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.problem.detail ?? e.problem.title;
         _loading = false;
@@ -156,25 +170,34 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
     return '$hour12:$minute $period';
   }
 
-  Color _statusDotColor(String status) {
-    switch (status) {
-      case 'completed':
-        return _successGreen;
-      case 'cancelled':
-      case 'missed':
-      case 'investigated':
-        return _dangerRed;
-      default:
-        // scheduled/in_progress, and any future status value the client doesn't know about yet.
-        return _primaryBlue;
-    }
+  static bool _isMissed(String status) =>
+      status == 'missed' || status == 'investigated';
+
+  // scheduled/in_progress, and any future status the client doesn't know yet, fall to blue.
+  Color _statusDotColor(String status) => switch (status) {
+    'completed' => _successGreen,
+    'cancelled' || 'missed' || 'investigated' => _dangerRed,
+    _ => _primaryBlue,
+  };
+
+  // A day's circle (user spec 2026-09-24): red if any visit that day was missed, green once every
+  // visit is completed, otherwise blue. Cancelled visits don't count; null = no visits to show.
+  Color? _dayColor(DateTime day) {
+    final visits = _visitsOn(day).where((v) => v.status != 'cancelled');
+    if (visits.isEmpty) return null;
+    if (visits.any((v) => _isMissed(v.status))) return _dangerRed;
+    if (visits.every((v) => v.status == 'completed')) return _successGreen;
+    return _primaryBlue;
   }
 
-  String _statusLabel(String status) {
-    if (status == 'in_progress') return 'In progress';
-    if (status.isEmpty) return status;
-    return '${status[0].toUpperCase()}${status.substring(1).replaceAll('_', ' ')}';
-  }
+  // Same wording as the admin web app's Visits page for the two check-in states.
+  String _statusLabel(String status) => switch (status) {
+    'in_progress' => 'Checked in',
+    'completed' => 'Checked out',
+    '' => status,
+    _ =>
+      '${status[0].toUpperCase()}${status.substring(1).replaceAll('_', ' ')}',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -375,16 +398,15 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
     final isCurrentMonth =
         day.month == _focusedMonth.month && day.year == _focusedMonth.year;
     final isSelected = _isSameDay(day, _selectedDay);
-    final hasActiveVisit =
-        isCurrentMonth && _visitsOn(day).any((v) => v.status != 'cancelled');
+    final dayColor = isCurrentMonth ? _dayColor(day) : null;
 
     Widget circle;
     if (isSelected) {
       circle = Container(
         width: 32,
         height: 32,
-        decoration: const BoxDecoration(
-          color: _primaryBlue,
+        decoration: BoxDecoration(
+          color: dayColor ?? _primaryBlue,
           shape: BoxShape.circle,
         ),
         alignment: Alignment.center,
@@ -404,13 +426,13 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
           ),
         ),
       );
-    } else if (hasActiveVisit) {
+    } else if (dayColor != null) {
       circle = Container(
         width: 32,
         height: 32,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: _primaryBlue, width: 1.5),
+          border: Border.all(color: dayColor, width: 1.5),
         ),
         alignment: Alignment.center,
         child: Text(

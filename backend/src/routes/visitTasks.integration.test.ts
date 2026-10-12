@@ -265,6 +265,15 @@ describe.skipIf(!hasTestDb)(
           .send({ status: 'completed' });
 
         expect(response.status).toBe(200);
+
+        const [audit] = await getDb().select().from(schema.auditLog);
+        expect(audit).toMatchObject({
+          action: 'visit_task.record',
+          entityType: 'visit_schedule',
+          entityId: visit.id,
+          actorUserId: caregiver.userId,
+          metadata: { careTaskId: task.id, status: 'completed', reason: null },
+        });
       });
 
       it('rejects not_completed with no reason (matches the DB CHECK)', async () => {

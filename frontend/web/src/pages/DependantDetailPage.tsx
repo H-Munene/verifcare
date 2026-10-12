@@ -2,23 +2,25 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client';
-import type { DependantFamilyMember } from '../api/dependants';
 import { useApi } from '../api/useApi';
-import { useAuth } from '../auth/AuthContext';
 import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
+import { FamilyMembersTable } from '../components/FamilyMembersTable';
 import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
 } from '../components/FamilyMemberResolver';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { Input } from '../design-system/Input';
 import { Modal } from '../design-system/Modal';
 import { Switch } from '../design-system/Switch';
 import { Tabs } from '../design-system/Tabs';
-import { Tag } from '../design-system/Tag';
 import './DependantDetailPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
+import { BirthdayCakeIcon, Location01Icon, UserIcon } from '@hugeicons/core-free-icons';
+import { MetaList } from '../design-system/MetaList';
 
 type DetailTab = 'family' | 'enrollment' | 'visits' | 'cognitive';
 
@@ -36,6 +38,24 @@ const TABS = [
 // nothing to show there; Visit History is real now (VisitHistoryList, shared with
 // CaregiverDetailPage's identical tab), since HEZ-32/HEZ-42's visit-schedule/verification-audit
 // endpoints exist and are already consumed by VisitsPage/VisitDetailPage.
+/** A calendar date (YYYY-MM-DD) as e.g. "22 Sep 2026"; noon UTC keeps the day in every zone. */
+function readableDate(date: string): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** Whole years since a YYYY-MM-DD birth date. */
+function ageInYears(dob: string): number {
+  const [y = 0, m = 1, d = 1] = dob.split('-').map(Number);
+  const now = new Date();
+  const hadBirthday = now.getMonth() + 1 > m || (now.getMonth() + 1 === m && now.getDate() >= d);
+  return now.getFullYear() - y - (hadBirthday ? 0 : 1);
+}
+
 export function DependantDetailPage() {
   const { dependantId } = useParams<{ dependantId: string }>();
   const { dependants } = useApi();
@@ -47,6 +67,10 @@ export function DependantDetailPage() {
     queryKey: ['dependant', dependantId],
     queryFn: () => dependants.getDependant(dependantId!),
   });
+  const statsQuery = useQuery({
+    queryKey: ['dependant', dependantId, 'stats'],
+    queryFn: () => dependants.getDependantStats(dependantId!),
+  });
   const familyMembersQuery = useQuery({
     queryKey: ['dependant', dependantId, 'family-members'],
     queryFn: () => dependants.listFamilyMembers(dependantId!),
@@ -54,7 +78,7 @@ export function DependantDetailPage() {
   });
 
   if (dependantQuery.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (dependantQuery.isError || !dependantQuery.data) {
     return <p>Failed to load this dependant.</p>;
@@ -71,10 +95,25 @@ export function DependantDetailPage() {
               {dependant.status}
             </Badge>
           </div>
-          <div className="dependant-detail__meta">
-            {dependant.gender ?? 'Unspecified'} · DOB {dependant.dob} · Geofence radius{' '}
-            {dependant.geofenceRadiusMeters}m
-          </div>
+          <MetaList
+            items={[
+              {
+                icon: UserIcon,
+                children: dependant.gender
+                  ? dependant.gender.charAt(0).toUpperCase() + dependant.gender.slice(1)
+                  : 'Gender not recorded',
+              },
+              {
+                icon: BirthdayCakeIcon,
+                children: `Born ${readableDate(dependant.dob)} (${ageInYears(dependant.dob)} years)`,
+              },
+              {
+                icon: Location01Icon,
+                children: `${dependant.geofenceRadiusMeters} m check-in radius`,
+                title: 'How close to the home a caregiver must be to check in or out',
+              },
+            ]}
+          />
         </div>
         <div className="dependant-detail__header-actions">
           <Button
@@ -95,11 +134,14 @@ export function DependantDetailPage() {
         </div>
       </div>
 
-      <Tabs
-        tabs={TABS}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as DetailTab)}
+      <VisitStatsTiles
+        stats={statsQuery.data}
+        isLoading={statsQuery.isLoading}
+        isError={statsQuery.isError}
+        perspective="dependant"
       />
+
+      <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
 
       <div className="dependant-detail__tab-panel">
         {activeTab === 'family' ? (
@@ -108,24 +150,22 @@ export function DependantDetailPage() {
               <h2 className="dependant-detail__section-title">Family Members</h2>
               <Button onClick={() => setAddingMember(true)}>+ Add Family Member</Button>
             </div>
-            {familyMembersQuery.data?.length ? (
-              <div className="ds-card">
-                {familyMembersQuery.data.map((member) => (
-                  <FamilyMemberRow
-                    key={member.familyMemberUserId}
-                    dependantId={dependant.id}
-                    member={member}
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="dependant-detail__empty">No family members linked yet.</p>
-            )}
+            <FamilyMembersTable
+              dependantId={dependant.id}
+              dependantName={dependant.fullName}
+              members={familyMembersQuery.data}
+              isLoading={familyMembersQuery.isLoading}
+              isError={familyMembersQuery.isError}
+            />
           </section>
         ) : null}
 
         {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection subjectType="dependant" subjectId={dependant.id} />
+          <BiometricEnrollmentSection
+            subjectType="dependant"
+            subjectId={dependant.id}
+            subjectName={dependant.fullName}
+          />
         ) : null}
 
         {activeTab === 'visits' ? <VisitHistoryList dependantId={dependant.id} /> : null}
@@ -139,63 +179,6 @@ export function DependantDetailPage() {
 
       {addingMember ? (
         <AddFamilyMemberModal dependantId={dependant.id} onClose={() => setAddingMember(false)} />
-      ) : null}
-    </div>
-  );
-}
-
-// The family-members endpoint only returns familyMemberUserId (an internal UUID), not a display
-// name (matches backend/openapi.yaml's DependantFamilyMember schema exactly) - resolved here via
-// GET /users/{id} (supervisor-only, which matches this app's exclusive supervisor use case)
-// instead of showing the raw UUID.
-function FamilyMemberRow({
-  dependantId,
-  member,
-}: {
-  dependantId: string;
-  member: DependantFamilyMember;
-}) {
-  const { users, dependants } = useApi();
-  const { identity } = useAuth();
-  const queryClient = useQueryClient();
-  const userQuery = useQuery({
-    queryKey: ['user', member.familyMemberUserId],
-    queryFn: () => users.getUser(member.familyMemberUserId),
-  });
-
-  // PATCH .../family-members/{userId} is supervisor-only (HEZ-30) - matches this app's exclusive
-  // supervisor use case, but still gated on the caller's actual role rather than assumed, the same
-  // way RegisterDependantPage gates the status field.
-  const makePrimaryMutation = useMutation({
-    mutationFn: () =>
-      dependants.updateFamilyMember(dependantId, member.familyMemberUserId, {
-        isPrimaryContact: true,
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ['dependant', dependantId, 'family-members'],
-      });
-    },
-  });
-
-  return (
-    <div className="ds-row-store">
-      <div>
-        <div className="ds-row-store__title">
-          {userQuery.data?.fullName ??
-            (userQuery.isLoading ? 'Loading...' : member.familyMemberUserId)}
-        </div>
-        <div className="ds-row-store__caption">{member.relationship ?? 'Relationship not set'}</div>
-      </div>
-      {member.isPrimaryContact ? (
-        <Tag>Primary contact</Tag>
-      ) : identity?.role === 'supervisor' ? (
-        <Button
-          onClick={() => makePrimaryMutation.mutate()}
-          disabled={makePrimaryMutation.isPending}
-        >
-          Make primary
-        </Button>
       ) : null}
     </div>
   );

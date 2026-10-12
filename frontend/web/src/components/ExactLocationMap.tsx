@@ -9,10 +9,16 @@
 // perfectly rectangular ward.
 
 import { useMemo } from 'react';
-import { Circle, GoogleMap, Marker, Polygon, useJsApiLoader } from '@react-google-maps/api';
+// The hook-based *F components, not the class-based Circle/Marker/Polygon: under React's
+// StrictMode (main.tsx) the class versions mount twice and never remove the extra google.maps
+// overlay, which is what left a trail of old circles behind every tap or drag of the pin (the
+// user's report, 2026-09-26). The F versions clean up in an effect and move their existing
+// overlay when center/position change.
+import { CircleF, GoogleMap, MarkerF, PolygonF, useJsApiLoader } from '@react-google-maps/api';
 import { getFeatureBoundingBox, isPointInFeature, type WardFeature } from '../geo/adminBoundaries';
 import { Badge } from '../design-system/Badge';
 import './ExactLocationMap.css';
+import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 
 export interface ExactLocationMapProps {
   apiKey: string;
@@ -20,7 +26,9 @@ export interface ExactLocationMapProps {
   lat: number | null;
   lng: number | null;
   radiusMeters: number;
-  onPositionChange: (lat: number, lng: number, isInsideWard: boolean) => void;
+  // Whether the pin is inside the ward is the page's call (RegisterDependantPage derives it from
+  // the pin and the ward), so a ward changed after the pin was placed is caught too.
+  onPositionChange: (lat: number, lng: number) => void;
 }
 
 type LatLng = { lat: number; lng: number };
@@ -89,14 +97,18 @@ export function ExactLocationMap({
   );
 
   function handlePositionChange(newLat: number, newLng: number) {
-    onPositionChange(newLat, newLng, isPointInFeature(newLat, newLng, wardFeature));
+    onPositionChange(newLat, newLng);
   }
 
   if (loadError) {
     return <Badge tone="danger">Could not load Google Maps - check the API key.</Badge>;
   }
   if (!isLoaded) {
-    return <div className="exact-location-map__loading">Loading map...</div>;
+    return (
+      <SkeletonRegion label="Loading the map">
+        <Skeleton height={320} radius="var(--radius-default)" />
+      </SkeletonRegion>
+    );
   }
 
   const isValid = lat !== null && lng !== null && isPointInFeature(lat, lng, wardFeature);
@@ -119,7 +131,7 @@ export function ExactLocationMap({
         options={mapOptions}
       >
         {paths.map((polygonRings, index) => (
-          <Polygon
+          <PolygonF
             key={index}
             paths={polygonRings}
             // clickable: false - a google.maps.Polygon is clickable by default even at
@@ -131,7 +143,7 @@ export function ExactLocationMap({
         ))}
         {lat !== null && lng !== null ? (
           <>
-            <Marker
+            <MarkerF
               position={{ lat, lng }}
               draggable
               onDragEnd={(event) => {
@@ -141,15 +153,10 @@ export function ExactLocationMap({
               }}
             />
             {radiusMeters > 0 ? (
-              <Circle
-                // Keyed on the pin's own position - @react-google-maps/api's Circle wrapper doesn't
-                // reliably call the underlying google.maps.Circle's setCenter() when `center` alone
-                // changes (confirmed via a real repro: moving the pin left the old circle overlay
-                // stuck at the previous spot while the Marker itself moved correctly), so a stale
-                // circle was left behind every time an existing pin was moved. Forcing a remount on
-                // every position change guarantees the old overlay is torn down before the new one
-                // mounts, so there is only ever one circle on the map.
-                key={`${lat}-${lng}`}
+              <CircleF
+                // No remount key: CircleF moves its one circle with setCenter when the pin moves.
+                // (An earlier fix remounted the class-based Circle on every move, which under
+                // StrictMode left an orphaned overlay behind each time - the trail of circles.)
                 center={{ lat, lng }}
                 radius={radiusMeters}
                 options={{

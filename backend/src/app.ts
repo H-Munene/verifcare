@@ -14,10 +14,15 @@ import { createBiometricEnrollmentsRouter } from './routes/biometricEnrollments.
 import { createCaregiversRouter } from './routes/caregivers.js';
 import { createCheckinRouter } from './routes/checkin.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
+import { createComplianceRouter } from './routes/compliance.js';
+import { createDashboardRouter } from './routes/dashboard.js';
 import { createDependantsRouter } from './routes/dependants.js';
 import { createNotificationsRouter } from './routes/notifications.js';
+import { createTermsRouter } from './routes/terms.js';
+import { createFamilyLinkRequestsRouter } from './routes/familyLinkRequests.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
+import { createVisitResolutionsRouter } from './routes/visitResolutions.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
 
 declare global {
@@ -199,10 +204,16 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     // Visit task checklist (docs/visit-task-checklist-plan.md) - mounted at the same
     // '/visit-schedules' prefix as a separate router, same reasoning as checkin.ts above.
     app.use('/visit-schedules', createVisitTasksRouter({ requireAuth }));
+    // Exception resolutions (Compliance tab) - same prefix, separate router, same reasoning.
+    app.use('/visit-schedules', createVisitResolutionsRouter({ requireAuth }));
     // HEZ-40's consent-capture endpoints - only needs requireAuth too, same reasoning as above.
     app.use('/consent-records', createConsentRecordsRouter({ requireAuth }));
     // HEZ-41's notification list/acknowledge endpoints - only needs requireAuth too.
     app.use('/notifications', createNotificationsRouter({ requireAuth }));
+    app.use('/terms', createTermsRouter({ requireAuth }));
+    app.use('/family-link-requests', createFamilyLinkRequestsRouter({ requireAuth }));
+    app.use('/dashboard', createDashboardRouter({ requireAuth }));
+    app.use('/compliance', createComplianceRouter({ requireAuth }));
   }
 
   // No route matched. Must come after every real route, before any error-handling middleware.

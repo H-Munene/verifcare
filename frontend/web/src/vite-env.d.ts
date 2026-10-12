@@ -11,6 +11,9 @@ interface ImportMetaEnv {
   // every other VITE_ var here, so it is not a secret in the traditional sense, but an
   // unrestricted key lets anyone who copies it make calls billed to this project.
   readonly VITE_GOOGLE_MAPS_API_KEY: string;
+  // Which map the Overview uses: "osm" (OpenStreetMap, the default since 2026-09-26's experiment)
+  // or "google".
+  readonly VITE_OVERVIEW_MAP?: string;
 }
 
 interface ImportMeta {

@@ -1,10 +1,5 @@
-// Integration tests for the DB-level enforcement that lives outside schema.ts (Linear HEZ-11),
-// automating the manual checks described in backend/drizzle/README.md and first performed by hand
-// for HEZ-9 (see docs/project-state.md, "Custom Drizzle migrations").
-//
-// Requires a real, disposable Postgres database - set TEST_DATABASE_URL (see .env.example). Skips
-// itself (rather than failing) when that isn't set, so `npm test` still works without a database
-// configured; wiring a real Postgres into CI so this actually runs there is separate infra work.
+// Integration tests for the DB-level enforcement in the hand-written migrations (triggers,
+// EXCLUDE constraints). Needs TEST_DATABASE_URL; skipped when it isn't set.
 
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -13,8 +8,10 @@ import {
   auditLog,
   caregivers,
   dependants,
+  notificationLog,
   users,
   verificationAttempts,
+  visitResolutions,
   visitSchedules,
 } from './schema.js';
 import {
@@ -110,7 +107,7 @@ async function insertVisitSchedule(params: {
 
 const hasTestDb = Boolean(getTestDatabaseUrl());
 
-describe.skipIf(!hasTestDb)('DB-level enforcement (HEZ-9 objects, verified via HEZ-11)', () => {
+describe.skipIf(!hasTestDb)('DB-level enforcement', () => {
   beforeAll(async () => {
     await setupTestDb();
   }, 30_000);
@@ -226,6 +223,87 @@ describe.skipIf(!hasTestDb)('DB-level enforcement (HEZ-9 objects, verified via H
         db.delete(auditLog).where(eq(auditLog.id, entry!.id)),
       );
       expect(deleteCause.message).toMatch(/append-only/);
+    });
+
+    it('rejects UPDATE and DELETE on visit_resolutions', async () => {
+      const db = getDb();
+      const supervisor = await insertUser('supervisor');
+      const caregiver = await insertCaregiver();
+      const dependant = await insertDependant(supervisor.id);
+      const [visit] = await insertVisitSchedule({
+        caregiverId: caregiver.userId,
+        dependantId: dependant.id,
+        createdById: supervisor.id,
+        start: '2026-09-10T09:00:00Z',
+        end: '2026-09-10T10:00:00Z',
+      });
+      const [resolution] = await db
+        .insert(visitResolutions)
+        .values({
+          visitScheduleId: visit!.id,
+          outcome: 'caregiver_absent',
+          note: 'Caregiver was unwell.',
+          resolvedBy: supervisor.id,
+        })
+        .returning();
+
+      const updateCause = await getRejectionCause(
+        db
+          .update(visitResolutions)
+          .set({ note: 'Rewritten.' })
+          .where(eq(visitResolutions.id, resolution!.id)),
+      );
+      expect(updateCause.message).toMatch(/append-only/);
+
+      const deleteCause = await getRejectionCause(
+        db.delete(visitResolutions).where(eq(visitResolutions.id, resolution!.id)),
+      );
+      expect(deleteCause.message).toMatch(/append-only/);
+    });
+
+    it('rejects a visit resolution with a blank note', async () => {
+      const db = getDb();
+      const supervisor = await insertUser('supervisor');
+      const caregiver = await insertCaregiver();
+      const dependant = await insertDependant(supervisor.id);
+      const [visit] = await insertVisitSchedule({
+        caregiverId: caregiver.userId,
+        dependantId: dependant.id,
+        createdById: supervisor.id,
+        start: '2026-09-10T09:00:00Z',
+        end: '2026-09-10T10:00:00Z',
+      });
+      const cause = await getRejectionCause(
+        db.insert(visitResolutions).values({
+          visitScheduleId: visit!.id,
+          outcome: 'other',
+          note: '   ',
+          resolvedBy: supervisor.id,
+        }),
+      );
+      expect(cause.constraint).toBe('chk_visit_resolutions_note');
+    });
+  });
+
+  describe('notification_log missed-visit alerts (0016)', () => {
+    it('allows one shared missed-visit alert per visit and rejects a second', async () => {
+      const db = getDb();
+      const supervisor = await insertUser('supervisor');
+      const caregiver = await insertCaregiver();
+      const dependant = await insertDependant(supervisor.id);
+      const [visit] = await insertVisitSchedule({
+        caregiverId: caregiver.userId,
+        dependantId: dependant.id,
+        createdById: supervisor.id,
+        start: '2026-09-10T09:00:00Z',
+        end: '2026-09-10T10:00:00Z',
+      });
+      await db.insert(notificationLog).values({ type: 'missed_visit', visitScheduleId: visit!.id });
+
+      const cause = await getRejectionCause(
+        db.insert(notificationLog).values({ type: 'missed_visit', visitScheduleId: visit!.id }),
+      );
+      expect(cause.constraint).toBe('uq_notification_log_missed_visit');
     });
   });
 

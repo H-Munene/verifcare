@@ -1,5 +1,7 @@
 // Thin wrapper around amazon-cognito-identity-js for exactly the flow this app's Cognito app
-// client supports: SRP username/password sign-in (ALLOW_USER_SRP_AUTH), no OAuth Hosted UI.
+// client supports: SRP username/password sign-in (ALLOW_USER_SRP_AUTH), no OAuth Hosted UI, plus
+// self-service password reset (ForgotPassword / ConfirmForgotPassword - public Cognito calls made
+// with the client id, so the Mzazi Care API isn't involved).
 // amazon-cognito-identity-js was chosen over full AWS Amplify specifically because this app needs
 // nothing beyond SRP sign-in and session/token refresh - Amplify's Auth/API/Storage/DataStore
 // surface would be unused weight, matching this project's existing preference for lean, purpose-
@@ -11,11 +13,17 @@ import {
   CognitoUserPool,
   type CognitoUserSession,
 } from 'amazon-cognito-identity-js';
+import { getConfig } from '../config';
 
-const userPool = new CognitoUserPool({
-  UserPoolId: import.meta.env.VITE_USER_POOL_ID,
-  ClientId: import.meta.env.VITE_USER_POOL_CLIENT_ID,
-});
+// Built on first use, not at import, because the IDs come from the runtime config (../config.ts).
+let pool: CognitoUserPool | undefined;
+function userPool(): CognitoUserPool {
+  pool ??= new CognitoUserPool({
+    UserPoolId: getConfig().userPoolId,
+    ClientId: getConfig().userPoolClientId,
+  });
+  return pool;
+}
 
 export interface IdentityClaims {
   sub: string;
@@ -68,15 +76,41 @@ export interface SignInSuccessResult {
   type: 'success';
   session: CognitoUserSession;
 }
-export type SignInResult = SignInSuccessResult | NewPasswordRequiredResult;
+// An administrator reset this account's password (AdminResetUserPassword, e.g. from the Cognito
+// console): Cognito refuses the old password and has already emailed a reset code, so sign-in
+// continues in the reset form's code step rather than failing.
+export interface PasswordResetRequiredResult {
+  type: 'passwordResetRequired';
+}
+export type SignInResult =
+  SignInSuccessResult | NewPasswordRequiredResult | PasswordResetRequiredResult;
+
+// amazon-cognito-identity-js rejects with the service's error, whose `code` is the Cognito
+// exception name (e.g. "CodeMismatchException").
+export function cognitoErrorCode(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string') {
+    return err.code;
+  }
+  return undefined;
+}
+
+function asError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
 
 export function signIn(email: string, password: string): Promise<SignInResult> {
   return new Promise((resolve, reject) => {
-    const user = new CognitoUser({ Username: email, Pool: userPool });
+    const user = new CognitoUser({ Username: email, Pool: userPool() });
     const authDetails = new AuthenticationDetails({ Username: email, Password: password });
     user.authenticateUser(authDetails, {
       onSuccess: (session) => resolve({ type: 'success', session }),
-      onFailure: (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
+      onFailure: (err: unknown) => {
+        if (cognitoErrorCode(err) === 'PasswordResetRequiredException') {
+          resolve({ type: 'passwordResetRequired' });
+          return;
+        }
+        reject(asError(err));
+      },
       newPasswordRequired: (_userAttributes: unknown, requiredAttributes: unknown) => {
         resolve({
           type: 'newPasswordRequired',
@@ -97,12 +131,43 @@ export function signIn(email: string, password: string): Promise<SignInResult> {
   });
 }
 
+// Asks Cognito to email a reset code to the account's verified email (the pool's account recovery
+// is email only - see infra/lib/auth.ts). The app clients prevent user-existence errors, so an
+// unknown email also resolves without anything being sent; UserNotFoundException is treated the
+// same way in case a client ever answers the legacy way, so the form never reveals whether an
+// email is registered.
+export function requestPasswordReset(email: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    new CognitoUser({ Username: email, Pool: userPool() }).forgotPassword({
+      onSuccess: () => resolve(),
+      // Fired instead of onSuccess once the code is on its way, when this callback is supplied.
+      inputVerificationCode: () => resolve(),
+      onFailure: (err: unknown) =>
+        cognitoErrorCode(err) === 'UserNotFoundException' ? resolve() : reject(asError(err)),
+    });
+  });
+}
+
+// Sets the new password with the emailed code. Returns no session - the user signs in afterwards.
+export function confirmPasswordReset(
+  email: string,
+  code: string,
+  newPassword: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    new CognitoUser({ Username: email, Pool: userPool() }).confirmPassword(code, newPassword, {
+      onSuccess: () => resolve(),
+      onFailure: (err: unknown) => reject(asError(err)),
+    });
+  });
+}
+
 // Resolves the current session's ID token, transparently refreshing it via the library's own
 // getSession() if the cached access token has expired but the refresh token is still valid.
 // Resolves to null if there is no signed-in user or the session can't be refreshed (expired
 // refresh token) - callers treat that as "not authenticated", not an error.
 export function getCurrentIdToken(): Promise<string | null> {
-  const user = userPool.getCurrentUser();
+  const user = userPool().getCurrentUser();
   if (!user) {
     return Promise.resolve(null);
   }
@@ -118,5 +183,5 @@ export function getCurrentIdToken(): Promise<string | null> {
 }
 
 export function signOut(): void {
-  userPool.getCurrentUser()?.signOut();
+  userPool().getCurrentUser()?.signOut();
 }

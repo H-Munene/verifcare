@@ -1,21 +1,11 @@
-// POST/GET /users, GET/PATCH /users/{userId} (HEZ-29). Two overlapping concerns live here:
-// registration (including a genuinely new Cognito self-signup completing its own role
-// assignment - see auth/cognitoAdmin.ts's header comment for why that path exists at all) and
-// ordinary profile CRUD.
+// POST/GET /users, GET/PATCH /users/{userId}.
 //
-// Ownership/RBAC rules (confirmed with the user before implementing, not assumed):
-// - POST /users: a caller with no role yet (a brand-new self-signup) or an existing non-supervisor
-//   role may only create a row for themselves (cognitoSub must equal their own sub), and only with
-//   role: family_member - never supervisor. A supervisor may create a row for anyone, with either
-//   role. Every successful create also assigns the Cognito custom:role attribute server-side
-//   (cognitoAdmin.assignRole), since the app client can no longer write that attribute itself
-//   (infra/lib/auth.ts) - Cognito's role and this row's role are kept in sync by construction.
-// - GET /users (list): supervisor-only, per openapi.yaml's own description.
-// - GET/PATCH /users/{userId}: a supervisor may act on any user. A non-supervisor may only act on
-//   their own row (matched by cognitoSub === caller's sub, looked up on the target row - the path
-//   userId is this project's internal UUID v7, not the Cognito sub, so ownership can't be checked
-//   from the path parameter alone). A non-supervisor may not change `status` (offboarding) even on
-//   their own row.
+// Access rules:
+// - POST /users: non-supervisors (including brand-new signups) may only create their own row, as
+//   family_member. Supervisors may create anyone with either role. Also sets Cognito custom:role.
+// - GET /users: supervisor-only.
+// - GET/PATCH /users/{userId}: supervisors any user; others only their own row (matched on
+//   cognitoSub, since userId is our internal id), and they can't change `status`.
 
 import { and, asc, eq } from 'drizzle-orm';
 import { Router, type RequestHandler } from 'express';
@@ -24,6 +14,8 @@ import { z } from 'zod';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import type { UserRole } from '../auth/verifier.js';
+import { changedFields, recordAudit } from '../audit.js';
+import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
@@ -33,18 +25,15 @@ import { parseOrSendProblem } from '../validation.js';
 
 export interface UsersRouterDependencies {
   cognitoAdmin: CognitoAdmin;
-  // POST /users needs identity-only verification (role optional - it's the endpoint that assigns
-  // the first one); every other route here needs the stronger requireAuth (role required). Both
-  // are applied per-route below, not uniformly at mount time in app.ts.
+  // POST /users only needs a verified identity since it assigns the first role; the rest need
+  // requireAuth.
   requireAuth: RequestHandler;
   requireVerifiedIdentity: RequestHandler;
 }
 
 interface UserResponse {
   id: string;
-  // Not secret - already visible to the caller via their own decoded JWT for a self-view, and
-  // needed by a supervisor's search-by-email/phone flow (2026-09-14, extending HEZ-55/56) to link
-  // an existing identity without needing it typed in manually.
+  // Not secret; supervisors need it to link an existing user found by email/phone.
   cognitoSub: string;
   email: string | null;
   phoneNumber: string | null;
@@ -77,10 +66,7 @@ const createUserRequestSchema = z
     fullName: z.string().min(1),
     role: z.enum(['supervisor', 'family_member']),
   })
-  // Mirrors the DB's chk_users_phone_required_unless_supervisor check constraint. openapi.yaml's
-  // plain JSON Schema CreateUserRequest can't express "required unless role is X" directly, so
-  // without this the same rule would only surface as an opaque 500 from a raw Postgres constraint
-  // violation instead of a clean 400 - found by testing against a real database, not assumed.
+  // Mirrors chk_users_phone_required_unless_supervisor so it's a 400, not a 500.
   .refine((data) => data.role === 'supervisor' || data.phoneNumber !== undefined, {
     message: 'phoneNumber is required unless role is supervisor.',
     path: ['phoneNumber'],
@@ -96,20 +82,14 @@ const updateUserRequestSchema = z.object({
 const listUsersQuerySchema = z.object({
   role: z.enum(['supervisor', 'caregiver', 'family_member']).optional(),
   status: z.enum(['active', 'suspended', 'deactivated']).optional(),
-  // Exact-match filters, not search/prefix - added 2026-09-14 so a supervisor can look up an
-  // existing user by phone/email (e.g. when registering a dependant's primary contact) instead of
-  // needing their internal id or Cognito sub already. Both columns are UNIQUE in the DB, so either
-  // filter alone returns at most one result. No new privilege: this route is already
-  // supervisor-only, and a supervisor can already see every user's email/phone via the unfiltered
-  // list - this only adds a convenient way to find one, not a new exposure.
+  // Exact-match lookups. Both columns are unique, so each returns at most one user.
   email: z.string().email().optional(),
   phoneNumber: z.string().min(1).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-// Express 5's params type allows string | string[], so req.params.userId isn't a plain string on
-// its own - validated the same way any other input is, via parseOrSendProblem, rather than cast.
+// Express 5 types params as string | string[], so validate rather than cast.
 const userIdParamSchema = z.string().uuid();
 
 function getDb(res: import('express').Response): Db | undefined {
@@ -141,9 +121,7 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
 
     const caller = req.identity;
     if (!caller) {
-      // requireVerifiedIdentity always runs ahead of this route; a missing req.identity here is a
-      // wiring bug, not a client error, but still surfaced as 401 - see requireRole's identical
-      // reasoning for why that's the right status even for a programmer error.
+      // Shouldn't happen behind requireVerifiedIdentity.
       sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
       return;
     }
@@ -172,27 +150,39 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
     }
 
     try {
-      // Assigning the Cognito role before the DB insert (not after) is deliberate: if the DB
-      // insert then fails (e.g. a duplicate cognitoSub -> 409), the caller's token already carries
-      // the intended role on their next attempt, so a retry naturally recovers. The reverse order
-      // risks a DB row whose owner's token can never prove the role this endpoint was supposed to
-      // grant them.
+      // Assign the Cognito role before inserting, so a failed insert can simply be retried.
       await cognitoAdmin.assignRole(body.cognitoSub, body.role);
 
-      const [row] = await db
-        .insert(schema.users)
-        .values({
-          id: uuidv7(),
-          cognitoSub: body.cognitoSub,
-          email: body.email,
-          phoneNumber: body.phoneNumber,
-          fullName: body.fullName,
-          role: body.role,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into users returned no row.');
-      }
+      // Self-registration (the only non-supervisor path, see the isSelf check above) has no prior
+      // users row for the caller - resolved below from the row the transaction is about to create
+      // instead. A supervisor creating someone else's row already has their own, looked up here
+      // (before the transaction - getUserByCognitoSub only reads, so it needn't be inside it).
+      const supervisorRow = isSelf ? undefined : await getUserByCognitoSub(db, caller.sub);
+
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.users)
+          .values({
+            id: uuidv7(),
+            cognitoSub: body.cognitoSub,
+            email: body.email,
+            phoneNumber: body.phoneNumber,
+            fullName: body.fullName,
+            role: body.role,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into users returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: isSelf ? inserted.id : (supervisorRow?.id ?? null),
+          action: 'user.create',
+          entityType: 'user',
+          entityId: inserted.id,
+          metadata: { role: body.role },
+        });
+        return inserted;
+      });
       res.status(201).json(toUserResponse(row));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
@@ -257,6 +247,34 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
 
       const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
       res.status(200).json({ items: items.map(toUserResponse), nextCursor });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /users/me: the caller's own row. Clients only know their Cognito sub, but other responses
+  // refer to users by internal id (e.g. a dependant's family-member links), so without this a
+  // mobile app couldn't tell which link is the caller's own - needed to show "You" and to show
+  // the Edit action only to the primary contact. Registered before /:userId so "me" never
+  // reaches that route's uuid validation.
+  router.get('/me', requireAuth, async (req, res, next) => {
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const row = await getUserByCognitoSub(db, caller.sub);
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      res.status(200).json(toUserResponse(row));
     } catch (err) {
       next(err);
     }
@@ -335,14 +353,29 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
         return;
       }
 
-      const [updated] = await db
-        .update(schema.users)
-        .set({ ...body, updatedAt: new Date() })
-        .where(eq(schema.users.id, userId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to users returned no row.');
-      }
+      // The actor is existing itself when self-editing; otherwise a supervisor's own row, looked
+      // up before the transaction (a read, so it needn't be inside it).
+      const actorRow = isSelf ? existing : await getUserByCognitoSub(db, caller.sub);
+
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.users)
+          .set({ ...body, updatedAt: new Date() })
+          .where(eq(schema.users.id, userId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to users returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'user.update',
+          entityType: 'user',
+          entityId: userId,
+          // email/phoneNumber are never copied into the log verbatim - only that they changed.
+          metadata: changedFields(existing, row, ['fullName', 'status'], ['email', 'phoneNumber']),
+        });
+        return row;
+      });
       res.status(200).json(toUserResponse(updated));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {

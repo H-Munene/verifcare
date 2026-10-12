@@ -16,7 +16,7 @@ interface Crumb {
 
 function buildCrumbs(
   segments: string[],
-  names: { dependantName?: string; caregiverName?: string; visitLabel?: string },
+  names: { dependantName?: string; caregiverName?: string },
 ): Crumb[] {
   const [root, second, third] = segments;
 
@@ -56,30 +56,18 @@ function buildCrumbs(
     return crumbs;
   }
 
-  if (root === 'visits') {
-    const crumbs: Crumb[] = [{ label: 'Visits', to: segments.length > 1 ? '/visits' : undefined }];
-    if (second) {
-      crumbs.push({ label: names.visitLabel ?? 'Visit' });
-    }
-    return crumbs;
-  }
-  if (root === 'flagged-enrollments') {
-    return [{ label: 'Flagged Enrollments' }];
-  }
-
   return [];
 }
 
 export function Breadcrumbs() {
   const location = useLocation();
-  const { dependants, caregivers, visitSchedules } = useApi();
+  const { dependants, caregivers } = useApi();
   const segments = location.pathname.split('/').filter(Boolean);
 
   const dependantId =
     segments[0] === 'dependants' && segments[1] && segments[1] !== 'new' ? segments[1] : undefined;
   const caregiverId =
     segments[0] === 'caregivers' && segments[1] && segments[1] !== 'new' ? segments[1] : undefined;
-  const visitId = segments[0] === 'visits' && segments[1] ? segments[1] : undefined;
 
   // Same queryKey the detail pages themselves use - a cache hit there, not a duplicate fetch, on
   // the common path of navigating detail -> edit/care-plan without a full page reload in between.
@@ -93,18 +81,10 @@ export function Breadcrumbs() {
     queryFn: () => caregivers.getCaregiver(caregiverId!),
     enabled: Boolean(caregiverId),
   });
-  const visitQuery = useQuery({
-    queryKey: ['visit-schedule', visitId],
-    queryFn: () => visitSchedules.getVisitSchedule(visitId!),
-    enabled: Boolean(visitId),
-  });
 
   const crumbs = buildCrumbs(segments, {
     dependantName: dependantQuery.data?.fullName,
     caregiverName: caregiverQuery.data?.fullName,
-    visitLabel: visitQuery.data
-      ? `${visitQuery.data.caregiverDisplayName} → ${visitQuery.data.dependantDisplayName}`
-      : undefined,
   });
 
   // A single top-level crumb (e.g. plain "/visits") adds no navigational value over the

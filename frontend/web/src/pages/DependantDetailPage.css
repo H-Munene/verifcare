@@ -2,6 +2,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   margin-bottom: 24px;
 }
 
@@ -22,12 +24,6 @@
   font-weight: 500;
   color: var(--color-ink-primary);
   margin: 0;
-}
-
-.dependant-detail__meta {
-  font-size: 13px;
-  color: var(--color-ink-subtle);
-  margin-top: 4px;
 }
 
 .dependant-detail__tab-panel {

@@ -3,31 +3,18 @@ info:
   title: Mzazi Care Acoustic Model - Invocation Contract (Draft)
   version: '0.2'
   description: |
-    A draft of the invocation contract between the `api` Lambda function and the `acoustic-model`
-    Lambda function, written from the `api` side as part of defining the backend API contract
-    (Linear HEZ-12), since `api`'s audio endpoints need to know what they're calling.
+    Draft invocation contract between the `api` Lambda and the `acoustic-model` Lambda.
 
-    `acoustic-model` is invoked directly via the AWS SDK `Invoke` API (Lambda-to-Lambda,
-    synchronous) - not over HTTP. There is no server, no URL, no HTTP status codes here in the
-    usual sense. OpenAPI is reused anyway, purely as a convenient, already-tooled way to document
-    the JSON request/response shape of that invocation payload - the one "path" below is a named
-    contract, not a literal route, and there's deliberately no `servers` block, since none exists.
+    `acoustic-model` is invoked synchronously via the AWS SDK `Invoke` API, not over HTTP. OpenAPI
+    is only used to document the payload shape: the one "path" below is a named contract, not a
+    route, and there is no `servers` block.
 
-    Access control is IAM, not network isolation: only the `api` Lambda function's execution role
-    is granted `lambda:InvokeFunction` on this function's resource-based policy. There's no VPC
-    attachment for `acoustic-model` (it only touches S3, not RDS), so no NAT Gateway and no
-    network-level boundary are involved at all - a deliberate change from an earlier version of
-    this design, which was ECS-based and reachable only via Service Connect inside the VPC.
+    Access is controlled by IAM: only the `api` execution role may invoke this function. It isn't
+    attached to the VPC since it only reads from S3.
 
-    This is explicitly a draft, not a settled contract: `acoustic-model/` has no implementation
-    yet. Its language (Python) and packaging (container-image Lambda) were confirmed 2026-09-09 -
-    see `docs/project-state.md` - but the exact audio-feature-extraction library/framework is still
-    open. Linear HEZ-44, "Define the internal HTTP contract" (milestone "4. Acoustic ML Service"),
-    is where this gets finalized once the function is actually scaffolded - update this file then
-    rather than treating it as frozen. (HEZ-49, "Health check endpoint," is worth reconsidering
-    at that point too: Lambda has no persistent process to health-check the way an ECS task did,
-    so an app-level `/health` operation - present in an earlier version of this file - may no
-    longer be the right way to verify the function is deployable and working.)
+    Features: pause/timing features from an intensity-based pause detector, plus a small eGeMAPS
+    subset via openSMILE (voiced/unvoiced timing, jitter, shimmer, HNR). No transcription and no
+    language-specific features. This will change once the function is implemented.
 
 paths:
   /score:
@@ -91,4 +78,6 @@ paths:
                     type: string
                   scoringFailureReason:
                     type: string
-                    description: Set only when `riskScore` is `null` - why scoring couldn't complete (e.g. `audio_too_short`, `unintelligible`, `unsupported_format`). `api` should still write the `audio_records` row either way, leaving `risk_score`/`model_version` null on failure.
+                    description: |
+                      Set only when `riskScore` is `null` - why scoring couldn't complete (e.g. `audio_too_short`, `unintelligible`, `unsupported_format`). `api` should still write the `audio_records` row either way, leaving `risk_score`/`model_version` null on failure.
+                      `audio_too_short` means under 30 s of speech after trimming leading and trailing silence. That minimum was pre-registered for the language-independent model (2026-09-28), because pause statistics are unreliable on shorter recordings. The caregiver app should therefore capture well over 30 s.

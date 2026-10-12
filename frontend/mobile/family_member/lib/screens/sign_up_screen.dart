@@ -3,12 +3,10 @@ import 'package:flutter/material.dart';
 
 import '../auth/cognito_auth_service.dart';
 import '../utils/kenyan_phone.dart';
+import '../widgets/password_field.dart';
 
-/// Creates the Cognito account and stops there - no in-app verification-code step. Cognito's
-/// default (non-SES) email delivery proved unreliable in testing (2026-09-14: a real sign-up's
-/// code never arrived), so for now accounts are confirmed manually (e.g.
-/// `aws cognito-idp admin-confirm-sign-up`) instead of through the app. Revisit once this project
-/// has a real Amazon SES configuration for the user pool.
+/// Creates the Cognito account. There's no verification-code step yet; accounts are confirmed
+/// manually until SES is set up.
 class SignUpScreen extends StatefulWidget {
   final CognitoAuthService authService;
 
@@ -52,7 +50,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _error = null;
     });
     final email = _emailController.text.trim();
-    // Already validated by the field's own validator below, so this can't be null here.
+    // The field validator already rejected invalid numbers.
     final phoneNumber = normalizeKenyanPhoneNumber(_phoneController.text)!;
     try {
       await widget.authService.signUp(
@@ -66,9 +64,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
     } on CognitoClientException catch (err) {
       if (err.code == 'UsernameExistsException') {
-        setState(() => _error =
-            'An account already exists for this email. If it still needs confirming, ask an '
-            'administrator; otherwise use "Sign in" instead.');
+        setState(
+          () => _error =
+              'An account already exists for this email. If it still needs confirming, ask an '
+              'administrator; otherwise use "Sign in" instead.',
+        );
         return;
       }
       setState(() => _error = 'Could not create account: $err');
@@ -119,8 +119,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 keyboardType: TextInputType.emailAddress,
                 autofillHints: const [AutofillHints.email],
                 decoration: const InputDecoration(labelText: 'Email'),
-                validator: (value) =>
-                    (value == null || value.trim().isEmpty) ? 'Email is required.' : null,
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'Email is required.'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -131,9 +132,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   labelText: 'Phone number',
                   hintText: '0712345678',
                 ),
-                // Accepts any common Kenyan local format (0712345678, 254712345678,
-                // +254712345678) and normalizes it to Cognito's required E.164 shape at submit
-                // time - see normalizeKenyanPhoneNumber. This POC is Kenya-only by design.
+                // Accepts 0712345678, 254712345678 or +254712345678; normalized to E.164.
                 validator: (value) {
                   final trimmed = value?.trim() ?? '';
                   if (trimmed.isEmpty) {
@@ -150,35 +149,42 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 controller: _fullNameController,
                 autofillHints: const [AutofillHints.name],
                 decoration: const InputDecoration(labelText: 'Full name'),
-                validator: (value) =>
-                    (value == null || value.trim().isEmpty) ? 'Full name is required.' : null,
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'Full name is required.'
+                    : null,
               ),
               const SizedBox(height: 12),
-              TextFormField(
+              PasswordField(
                 controller: _passwordController,
-                obscureText: true,
+                labelText: 'Password',
+                helperText: passwordPolicyHint,
                 autofillHints: const [AutofillHints.newPassword],
-                decoration: const InputDecoration(labelText: 'Password'),
-                validator: (value) =>
-                    (value == null || value.isEmpty) ? 'Password is required.' : null,
+                validator: (value) => (value == null || value.isEmpty)
+                    ? 'Password is required.'
+                    : null,
               ),
               const SizedBox(height: 12),
-              TextFormField(
+              PasswordField(
                 controller: _confirmPasswordController,
-                obscureText: true,
+                labelText: 'Confirm password',
                 autofillHints: const [AutofillHints.newPassword],
-                decoration: const InputDecoration(labelText: 'Confirm password'),
-                validator: (value) =>
-                    (value == null || value.isEmpty) ? 'Please confirm your password.' : null,
+                validator: (value) => (value == null || value.isEmpty)
+                    ? 'Please confirm your password.'
+                    : null,
               ),
               const SizedBox(height: 20),
               if (_error != null) ...[
-                Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
                 const SizedBox(height: 12),
               ],
               FilledButton(
                 onPressed: _submitting ? null : _submit,
-                child: Text(_submitting ? 'Creating account...' : 'Create account'),
+                child: Text(
+                  _submitting ? 'Creating account...' : 'Create account',
+                ),
               ),
             ],
           ),

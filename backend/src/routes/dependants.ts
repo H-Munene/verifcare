@@ -44,7 +44,7 @@
 // transaction - this is what openapi.yaml's own description of the PATCH endpoint already implies
 // ("reassigning isPrimaryContact... enforced by a partial unique index").
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -55,14 +55,29 @@ import {
   type CognitoAdmin,
 } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
+import { changedFields, recordAudit } from '../audit.js';
 import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
+import {
+  checkinPhotoStatusCondition,
+  checkinPhotoStatuses,
+  type CheckinPhotoStatus,
+} from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
+import { grantConsents, hasGivenTermsConsents } from '../db/consents.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
+import { visitStatsFor } from '../db/visitStats.js';
 import { sendProblem } from '../errors.js';
-import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
+import {
+  decodeCursor,
+  keysetCondition,
+  keysetOrder,
+  paginate,
+  resolveSort,
+  type SortKey,
+} from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
 
 export interface DependantsRouterDependencies {
@@ -91,9 +106,15 @@ interface DependantResponse {
   registeredBy: string;
   createdAt: string;
   updatedAt: string;
+  // Where their check-in photo stands (2026-09-26) - see db/checkinPhotos.ts. Drives the family
+  // app's "photo needed" alert; a visit can only be scheduled once it's 'ready'.
+  checkinPhotoStatus: CheckinPhotoStatus;
 }
 
-function toDependantResponse(row: typeof schema.dependants.$inferSelect): DependantResponse {
+function toDependantResponse(
+  row: typeof schema.dependants.$inferSelect,
+  checkinPhotoStatus: CheckinPhotoStatus,
+): DependantResponse {
   return {
     id: row.id,
     fullName: row.fullName,
@@ -112,7 +133,29 @@ function toDependantResponse(row: typeof schema.dependants.$inferSelect): Depend
     registeredBy: row.registeredBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    checkinPhotoStatus,
   };
+}
+
+// Every response path goes through here, so each one reports checkinPhotoStatus with one extra
+// query no matter how many dependants it returns.
+async function toDependantResponses(
+  db: Db,
+  rows: (typeof schema.dependants.$inferSelect)[],
+): Promise<DependantResponse[]> {
+  const statuses = await checkinPhotoStatuses(
+    db,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => toDependantResponse(row, statuses.get(row.id) ?? 'missing'));
+}
+
+async function toOneDependantResponse(
+  db: Db,
+  row: typeof schema.dependants.$inferSelect,
+): Promise<DependantResponse> {
+  const statuses = await checkinPhotoStatuses(db, [row.id]);
+  return toDependantResponse(row, statuses.get(row.id) ?? 'missing');
 }
 
 interface CareTaskResponse {
@@ -146,23 +189,83 @@ function toCareTaskResponse(row: typeof schema.dependantCareTasks.$inferSelect):
 interface DependantFamilyMemberResponse {
   dependantId: string;
   familyMemberUserId: string;
+  fullName: string;
   relationship: string | null;
   isPrimaryContact: boolean;
   addedBy: string;
   createdAt: string;
+  // The member's registration details (2026-09-26, user request: an expandable details section on
+  // web and mobile). Email and phone go to everyone who can see the list - other family members of
+  // the same dependant use them to coordinate care. The identity document goes to supervisors only
+  // (user decision): another family member has no need for it, and a national ID number is
+  // sensitive under the Kenya Data Protection Act, so it's left out of their response entirely
+  // rather than merely hidden by the app.
+  email: string | null;
+  phoneNumber: string | null;
+  addedByName: string | null;
+  idType?: string | null;
+  idNumber?: string | null;
 }
 
-function toFamilyMemberResponse(
-  row: typeof schema.dependantFamilyMembers.$inferSelect,
-): DependantFamilyMemberResponse {
-  return {
-    dependantId: row.dependantId,
-    familyMemberUserId: row.familyMemberUserId,
-    relationship: row.relationship,
-    isPrimaryContact: row.isPrimaryContact,
-    addedBy: row.addedBy,
-    createdAt: row.createdAt.toISOString(),
-  };
+/**
+ * Builds family-member responses with each member's details and the name of whoever added them,
+ * in one users query however many links. [includeIdentity]: only for a supervisor caller.
+ */
+async function familyMemberResponses(
+  db: Db,
+  links: (typeof schema.dependantFamilyMembers.$inferSelect)[],
+  includeIdentity: boolean,
+): Promise<DependantFamilyMemberResponse[]> {
+  if (links.length === 0) {
+    return [];
+  }
+  const userIds = [...new Set(links.flatMap((link) => [link.familyMemberUserId, link.addedBy]))];
+  const people = new Map(
+    (
+      await db
+        .select({
+          id: schema.users.id,
+          fullName: schema.users.fullName,
+          email: schema.users.email,
+          phoneNumber: schema.users.phoneNumber,
+          idType: schema.users.idType,
+          idNumber: schema.users.idNumber,
+        })
+        .from(schema.users)
+        .where(inArray(schema.users.id, userIds))
+    ).map((person) => [person.id, person]),
+  );
+  return links.map((link) => {
+    const member = people.get(link.familyMemberUserId);
+    if (!member) {
+      throw new Error(`No users row for linked family member ${link.familyMemberUserId}.`);
+    }
+    return {
+      dependantId: link.dependantId,
+      familyMemberUserId: link.familyMemberUserId,
+      fullName: member.fullName,
+      relationship: link.relationship,
+      isPrimaryContact: link.isPrimaryContact,
+      addedBy: link.addedBy,
+      createdAt: link.createdAt.toISOString(),
+      email: member.email,
+      phoneNumber: member.phoneNumber,
+      addedByName: people.get(link.addedBy)?.fullName ?? null,
+      ...(includeIdentity && { idType: member.idType, idNumber: member.idNumber }),
+    };
+  });
+}
+
+async function familyMemberResponse(
+  db: Db,
+  link: typeof schema.dependantFamilyMembers.$inferSelect,
+  includeIdentity: boolean,
+): Promise<DependantFamilyMemberResponse> {
+  const [response] = await familyMemberResponses(db, [link], includeIdentity);
+  if (!response) {
+    throw new Error('familyMemberResponses returned nothing for one link.');
+  }
+  return response;
 }
 
 // Explicit column map (not a bare .select()) so a joined query (the family_member branch of
@@ -283,6 +386,11 @@ const updateDependantRequestSchema = z.object({
   status: z.enum(['active', 'deactivated']).optional(),
 });
 
+const linkExistingMemberRequestSchema = z.object({
+  email: z.string().trim().email(),
+  relationship: z.string().trim().min(1).max(100).optional(),
+});
+
 const updateFamilyMemberRequestSchema = z.object({
   relationship: z.string().min(1).optional(),
   isPrimaryContact: z.boolean().optional(),
@@ -312,8 +420,18 @@ const listCareTasksQuerySchema = z.object({
     .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 
+// Sortable columns (2026-09-26, the supervisor console's tables): "name" ascending, "-name"
+// descending; without one the list keeps its id order.
+const DEPENDANT_SORT_KEYS = {
+  name: { expr: schema.dependants.fullName, cast: 'text' },
+  dob: { expr: schema.dependants.dob, cast: 'date' },
+} as const satisfies Record<string, SortKey>;
+
 const listDependantsQuerySchema = z.object({
   status: z.enum(['active', 'deactivated']).optional(),
+  // Where the check-in photo stands, as in checkinPhotoStatus on each dependant.
+  photo: z.enum(['ready', 'awaiting_review', 'missing']).optional(),
+  sort: z.enum(['name', '-name', 'dob', '-dob']).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -609,10 +727,38 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           addedBy: callerRow.id,
         });
 
+        // A primary contact who ticked the consent boxes when accepting the family app's terms
+        // consented for the dependants they register or are the primary contact for (see
+        // routes/terms.ts's header), so this new dependant gets the same consent now, granted by
+        // them - otherwise it couldn't be scheduled until they accepted the terms again. Applies
+        // when a supervisor registers the dependant for them too, since the consent is theirs.
+        if (await hasGivenTermsConsents(tx, familyMemberUserId)) {
+          await grantConsents(
+            tx,
+            [{ subjectType: 'dependant', id: dependant.id }],
+            familyMemberUserId,
+          );
+        }
+
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'dependant.create',
+          entityType: 'dependant',
+          entityId: dependant.id,
+          metadata: {
+            county: dependant.county,
+            constituency: dependant.constituency,
+            ward: dependant.ward,
+            cognitiveMonitoringEnabled: dependant.cognitiveMonitoringEnabled,
+            primaryFamilyMemberId: familyMemberUserId,
+          },
+        });
+
         return dependant;
       });
 
-      res.status(201).json(toDependantResponse(dependantRow));
+      // Just registered, so no photo yet - the photo step comes after registration.
+      res.status(201).json(toDependantResponse(dependantRow, 'missing'));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -647,10 +793,14 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (query.status) {
         conditions.push(eq(schema.dependants.status, query.status));
       }
+      if (query.photo) {
+        conditions.push(checkinPhotoStatusCondition(schema.dependants.id, query.photo));
+      }
+      const sort = resolveSort(query.sort, DEPENDANT_SORT_KEYS);
       if (query.cursor) {
         let cursor;
         try {
-          cursor = decodeCursor(query.cursor);
+          cursor = decodeCursor(query.cursor, sort?.param);
         } catch {
           sendProblem(res, {
             type: 'about:blank',
@@ -660,7 +810,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
-        conditions.push(cursorCondition(schema.dependants.id, cursor));
+        conditions.push(keysetCondition(schema.dependants.id, cursor, sort));
       }
 
       let rows;
@@ -669,7 +819,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           .select(dependantColumns())
           .from(schema.dependants)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(asc(schema.dependants.id))
+          .orderBy(...keysetOrder(schema.dependants.id, sort))
           .limit(query.limit + 1);
       } else {
         const callerRow = await getUserByCognitoSub(db, caller.sub);
@@ -685,12 +835,16 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             eq(schema.dependants.id, schema.dependantFamilyMembers.dependantId),
           )
           .where(and(...conditions))
-          .orderBy(asc(schema.dependants.id))
+          .orderBy(...keysetOrder(schema.dependants.id, sort))
           .limit(query.limit + 1);
       }
 
-      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({ id: row.id }));
-      res.status(200).json({ items: items.map(toDependantResponse), nextCursor });
+      const { items, nextCursor } = paginate(rows, query.limit, (row) => ({
+        id: row.id,
+        sort: sort?.param,
+        value: sort ? (sort.param.endsWith('dob') ? row.dob : row.fullName) : undefined,
+      }));
+      res.status(200).json({ items: await toDependantResponses(db, items), nextCursor });
     } catch (err) {
       next(err);
     }
@@ -727,7 +881,47 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           return;
         }
       }
-      res.status(200).json(toDependantResponse(row));
+      res.status(200).json(await toOneDependantResponse(db, row));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Visit statistics for the dependant's page (2026-09-27) - see db/visitStats.ts. The same
+  // access rule as GET /:dependantId: a supervisor, or a family member linked to this dependant,
+  // since these are facts about that dependant's own care.
+  router.get('/:dependantId/stats', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+
+    try {
+      const [row] = await db
+        .select({ id: schema.dependants.id })
+        .from(schema.dependants)
+        .where(eq(schema.dependants.id, dependantId));
+      if (!row) {
+        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+        return;
+      }
+      if (caller.role !== 'supervisor') {
+        const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+        if (!found) {
+          sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
+          return;
+        }
+      }
+      res.status(200).json(await visitStatsFor(db, { dependantId }, new Date()));
     } catch (err) {
       next(err);
     }
@@ -762,6 +956,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return;
       }
 
+      let actorRow: typeof schema.users.$inferSelect | undefined;
       if (caller.role !== 'supervisor') {
         if (body.status !== undefined) {
           sendProblem(res, {
@@ -769,6 +964,18 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             title: 'Forbidden',
             status: 403,
             detail: 'Only a supervisor may change a dependant’s status.',
+          });
+          return;
+        }
+        // The primary contact may move the location (e.g. after a house move), but not the
+        // radius: caregiver check-in is verified against it, so widening it would weaken that
+        // check for every future visit (user decision 2026-09-24).
+        if (body.geofenceRadiusMeters !== undefined) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'Only a supervisor may change a dependant’s geofence radius.',
           });
           return;
         }
@@ -783,24 +990,54 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           });
           return;
         }
+        actorRow = found.callerRow;
+      } else {
+        actorRow = await getUserByCognitoSub(db, caller.sub);
       }
 
-      const [updated] = await db
-        .update(schema.dependants)
-        .set({ ...body, updatedAt: new Date() })
-        .where(eq(schema.dependants.id, dependantId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to dependants returned no row.');
-      }
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.dependants)
+          .set({ ...body, updatedAt: new Date() })
+          .where(eq(schema.dependants.id, dependantId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to dependants returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: actorRow?.id ?? null,
+          action: 'dependant.update',
+          entityType: 'dependant',
+          entityId: dependantId,
+          metadata: changedFields(
+            existing,
+            row,
+            [
+              'fullName',
+              'gender',
+              'homeAddressText',
+              'primaryConditionSummary',
+              'county',
+              'constituency',
+              'ward',
+              'geofenceRadiusMeters',
+              'cognitiveMonitoringEnabled',
+              'status',
+            ],
+            // Geofence coordinates are GPS data - never copied into the log verbatim.
+            ['geofenceLat', 'geofenceLng'],
+          ),
+        });
+        return row;
+      });
 
-      // Best-effort, after the update above has already committed - see
-      // db/biometricOffboarding.ts's header comment for why this isn't inside a transaction.
+      // Best-effort, after the transaction above has already committed - see
+      // db/biometricOffboarding.ts's header comment for why this isn't inside it.
       if (body.status === 'deactivated' && faceCollection) {
         await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
       }
 
-      res.status(200).json(toDependantResponse(updated));
+      res.status(200).json(await toOneDependantResponse(db, updated));
     } catch (err) {
       next(err);
     }
@@ -851,6 +1088,19 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             status: 403,
             detail:
               'Only a supervisor or an existing linked family member may add another family member.',
+          });
+          return;
+        }
+        // Adding someone as primary demotes the current primary contact (below), and editing an
+        // existing link is supervisor-only - so a non-primary member must not be able to take that
+        // role away from the current primary contact by this route instead.
+        if (body.isPrimaryContact && !found.link.isPrimaryContact) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail:
+              'Only a supervisor or the current primary contact may add a family member as the primary contact.',
           });
           return;
         }
@@ -911,10 +1161,21 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         if (!row) {
           throw new Error('Insert into dependant_family_members returned no row.');
         }
+        await recordAudit(tx, {
+          actorUserId: callerRowId,
+          action: 'family_member.add',
+          entityType: 'family_member',
+          entityId: familyMemberUserId,
+          metadata: {
+            dependantId,
+            relationship: body.relationship ?? null,
+            isPrimaryContact: body.isPrimaryContact,
+          },
+        });
         return row;
       });
 
-      res.status(201).json(toFamilyMemberResponse(link));
+      res.status(201).json(await familyMemberResponse(db, link, caller.role === 'supervisor'));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -926,6 +1187,101 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         });
         return;
       }
+      next(err);
+    }
+  });
+
+  // POST /dependants/{id}/family-members/link (2026-09-26): the primary contact links someone who
+  // already has a Mzazi Care account, found by their exact email, straight away - no request or
+  // approval, since the primary contact is the one who would approve it. Someone without an
+  // account is told to sign up and send a link request instead (routes/familyLinkRequests.ts).
+  // Unlike POST .../family-members above, this never creates an account or a Cognito identity -
+  // that path is the supervisor's "New user" flow. Answering "no account uses that email" does
+  // reveal whether an email is registered, but only to a dependant's primary contact, and it is
+  // what linking by email needs.
+  router.post('/:dependantId/family-members/link', async (req, res, next) => {
+    const dependantId = parseOrSendProblem(dependantIdParamSchema, req.params.dependantId, res);
+    if (!dependantId) {
+      return;
+    }
+    const body = parseOrSendProblem(linkExistingMemberRequestSchema, req.body, res);
+    if (!body) {
+      return;
+    }
+    const db = getDb(res);
+    if (!db) {
+      return;
+    }
+    const caller = req.auth;
+    if (!caller) {
+      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+      return;
+    }
+    try {
+      const found = await findFamilyMemberLink(db, dependantId, caller.sub);
+      if (!found?.link.isPrimaryContact) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Forbidden',
+          status: 403,
+          detail: "Only the dependant's primary contact can link family members.",
+        });
+        return;
+      }
+      const [member] = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(sql`lower(${schema.users.email})`, body.email.toLowerCase()),
+            eq(schema.users.role, 'family_member'),
+          ),
+        );
+      if (!member) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Not Found',
+          status: 404,
+          detail:
+            'No Mzazi Care account uses that email. They can create an account in the app and ask you to link them.',
+        });
+        return;
+      }
+      const link = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.dependantFamilyMembers)
+          .values({
+            dependantId,
+            familyMemberUserId: member.id,
+            relationship: body.relationship ?? null,
+            isPrimaryContact: false,
+            addedBy: found.callerRow.id,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (!inserted) {
+          return undefined;
+        }
+        await recordAudit(tx, {
+          actorUserId: found.callerRow.id,
+          action: 'family_member.link',
+          entityType: 'family_member',
+          entityId: member.id,
+          metadata: { dependantId, relationship: body.relationship ?? null },
+        });
+        return inserted;
+      });
+      if (!link) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'That person is already linked to this dependant.',
+        });
+        return;
+      }
+      res.status(201).json(await familyMemberResponse(db, link, false));
+    } catch (err) {
       next(err);
     }
   });
@@ -962,11 +1318,11 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         }
       }
 
-      const rows = await db
+      const links = await db
         .select()
         .from(schema.dependantFamilyMembers)
         .where(eq(schema.dependantFamilyMembers.dependantId, dependantId));
-      res.status(200).json(rows.map(toFamilyMemberResponse));
+      res.status(200).json(await familyMemberResponses(db, links, caller.role === 'supervisor'));
     } catch (err) {
       next(err);
     }
@@ -996,6 +1352,11 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!db) {
         return;
       }
+      const caller = req.auth;
+      if (!caller) {
+        sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+        return;
+      }
 
       try {
         const [existing] = await db
@@ -1011,6 +1372,8 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
           return;
         }
+        // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
 
         const updated = await db.transaction(async (tx) => {
           if (body.isPrimaryContact) {
@@ -1034,12 +1397,23 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               ),
             )
             .returning();
+          if (!row) {
+            return undefined;
+          }
+          await recordAudit(tx, {
+            actorUserId: actorRow?.id ?? null,
+            action: 'family_member.update',
+            entityType: 'family_member',
+            entityId: familyMemberUserId,
+            metadata: changedFields(existing, row, ['relationship', 'isPrimaryContact']),
+          });
           return row;
         });
         if (!updated) {
           throw new Error('Update to dependant_family_members returned no row.');
         }
-        res.status(200).json(toFamilyMemberResponse(updated));
+        // Supervisor-only route (requireRole above).
+        res.status(200).json(await familyMemberResponse(db, updated, true));
       } catch (err) {
         next(err);
       }
@@ -1086,21 +1460,36 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
 
-      const [row] = await db
-        .insert(schema.dependantCareTasks)
-        .values({
-          id: uuidv7(),
-          dependantId,
-          title: body.title,
-          description: body.description,
-          category: body.category,
-          required: body.required,
-          createdBy: callerRow.id,
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Insert into dependant_care_tasks returned no row.');
-      }
+      const row = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.dependantCareTasks)
+          .values({
+            id: uuidv7(),
+            dependantId,
+            title: body.title,
+            description: body.description,
+            category: body.category,
+            required: body.required,
+            createdBy: callerRow.id,
+          })
+          .returning();
+        if (!inserted) {
+          throw new Error('Insert into dependant_care_tasks returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'care_task.create',
+          entityType: 'care_task',
+          entityId: inserted.id,
+          metadata: {
+            dependantId,
+            title: inserted.title,
+            category: inserted.category,
+            required: inserted.required,
+          },
+        });
+        return inserted;
+      });
       res.status(201).json(toCareTaskResponse(row));
     } catch (err) {
       next(err);
@@ -1178,18 +1567,58 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       if (!db) {
         return;
       }
+      const caller = req.auth;
+      if (!caller) {
+        sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+        return;
+      }
 
       try {
-        const [row] = await db
-          .update(schema.dependantCareTasks)
-          .set(body)
+        const [existing] = await db
+          .select()
+          .from(schema.dependantCareTasks)
           .where(
             and(
               eq(schema.dependantCareTasks.id, careTaskId),
               eq(schema.dependantCareTasks.dependantId, dependantId),
             ),
-          )
-          .returning();
+          );
+        if (!existing) {
+          sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
+          return;
+        }
+        // A read, so it needn't be inside the transaction below - this route is supervisor-only.
+        const actorRow = await getUserByCognitoSub(db, caller.sub);
+
+        const row = await db.transaction(async (tx) => {
+          const [updated] = await tx
+            .update(schema.dependantCareTasks)
+            .set(body)
+            .where(
+              and(
+                eq(schema.dependantCareTasks.id, careTaskId),
+                eq(schema.dependantCareTasks.dependantId, dependantId),
+              ),
+            )
+            .returning();
+          if (!updated) {
+            return undefined;
+          }
+          await recordAudit(tx, {
+            actorUserId: actorRow?.id ?? null,
+            action: 'care_task.update',
+            entityType: 'care_task',
+            entityId: careTaskId,
+            metadata: changedFields(existing, updated, [
+              'title',
+              'description',
+              'category',
+              'required',
+              'active',
+            ]),
+          });
+          return updated;
+        });
         if (!row) {
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
           return;

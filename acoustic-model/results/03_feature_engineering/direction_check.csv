@@ -1,0 +1,7 @@
+feature,expected,observed,agrees
+pause_rate_per_min,higher,lower,False
+mean_pause_s,higher,higher,True
+median_pause_s,higher,higher,True
+long_pause_rate_per_min,higher,lower,False
+long_pause_time_share,higher,higher,True
+phonation_time_ratio,lower,higher,False

@@ -1,18 +1,15 @@
-// Integration tests for POST/GET /users, GET/PATCH /users/{userId} (HEZ-29) against a real local
-// Postgres, matching db/enforcement.integration.test.ts's established pattern (TEST_DATABASE_URL,
-// describe.skipIf(!hasTestDb)) - RBAC/ownership logic and real unique-constraint 409 handling are
-// exactly the kind of thing worth proving against a real database, not a faked query builder.
+// Integration tests for the /users routes against a real Postgres (needs TEST_DATABASE_URL).
 //
-// requireAuth/requireVerifiedIdentity are replaced here with a small test-only middleware that
-// reads req.auth/req.identity from a header the test sets directly - real JWT verification is
-// already covered by auth/middleware.test.ts; these tests are about the route handlers' own
-// business logic (ownership, role rules, pagination, conflict handling), not token verification.
+// Auth middleware is swapped for one that reads req.auth/req.identity from a test header; JWT
+// verification itself is covered in auth/middleware.test.ts.
 
+import { and, eq } from 'drizzle-orm';
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, VerifiedIdentity } from '../auth/verifier.js';
+import * as schema from '../db/schema.js';
 import {
   getDb,
   getTestDatabaseUrl,
@@ -118,6 +115,14 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
       expect(response.status).toBe(201);
       expect(response.body).toMatchObject({ fullName: 'Ada Lovelace', role: 'family_member' });
       expect(cognitoAdmin.assignRole).toHaveBeenCalledWith('new-sub-1', 'family_member');
+
+      const audit = await getDb().select().from(schema.auditLog);
+      expect(audit).toHaveLength(1);
+      expect(audit[0]).toMatchObject({
+        action: 'user.create',
+        entityId: userBody(response).id,
+        actorUserId: userBody(response).id,
+      });
     });
 
     it('rejects a brand-new self-signup trying to self-assign role: supervisor', async () => {
@@ -271,7 +276,7 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
       expect(response.items[0]).toMatchObject({ fullName: 'User 1' });
     });
 
-    it('filters by an exact email match, added 2026-09-14 for the supervisor-search-by-email/phone flow', async () => {
+    it('filters by an exact email match', async () => {
       await request(app)
         .post('/users')
         .set('x-test-auth', testAuthHeader({ sub: 'email-sub', role: undefined, email: undefined }))
@@ -295,6 +300,37 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
         await request(app).get('/users?email=nobody%40example.com').set('x-test-auth', auth),
       );
       expect(noMatch.items).toHaveLength(0);
+    });
+  });
+
+  describe('GET /users/me', () => {
+    it("returns the caller's own row, and 404s when the caller has none yet", async () => {
+      await request(app)
+        .post('/users')
+        .set('x-test-auth', testAuthHeader({ sub: 'me-sub', role: undefined, email: undefined }))
+        .send({
+          cognitoSub: 'me-sub',
+          fullName: 'Me Myself',
+          phoneNumber: '+254700000022',
+          role: 'family_member',
+        });
+
+      const own = await request(app)
+        .get('/users/me')
+        .set(
+          'x-test-auth',
+          testAuthHeader({ sub: 'me-sub', role: 'family_member', email: undefined }),
+        );
+      expect(own.status).toBe(200);
+      expect(userBody(own)).toMatchObject({ fullName: 'Me Myself', role: 'family_member' });
+
+      const missing = await request(app)
+        .get('/users/me')
+        .set(
+          'x-test-auth',
+          testAuthHeader({ sub: 'no-row-sub', role: 'family_member', email: undefined }),
+        );
+      expect(missing.status).toBe(404);
     });
   });
 
@@ -374,9 +410,22 @@ describe.skipIf(!hasTestDb)('POST/GET /users, GET/PATCH /users/{userId} (real Po
       const nameUpdate = await request(app)
         .patch(`/users/${targetId}`)
         .set('x-test-auth', auth)
-        .send({ fullName: 'After' });
+        .send({ fullName: 'After', phoneNumber: '+254700000099' });
       expect(nameUpdate.status).toBe(200);
       expect(userBody(nameUpdate).fullName).toBe('After');
+
+      const [audit] = await getDb()
+        .select()
+        .from(schema.auditLog)
+        .where(
+          and(eq(schema.auditLog.entityId, targetId), eq(schema.auditLog.action, 'user.update')),
+        );
+      expect(audit).toMatchObject({ action: 'user.update', actorUserId: targetId });
+      // phoneNumber is redacted - only that it changed, never the raw new value.
+      const metadata = audit?.metadata as Record<string, unknown>;
+      expect(metadata.fullName).toEqual({ from: 'Before', to: 'After' });
+      expect(metadata.phoneNumber).toBe('changed');
+      expect(JSON.stringify(metadata)).not.toContain('+254700000099');
 
       const statusUpdate = await request(app)
         .patch(`/users/${targetId}`)

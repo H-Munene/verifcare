@@ -44,7 +44,12 @@ interface EnrollmentBody {
   matchedSimilarity: number | null;
 }
 interface EnrollmentPageBody {
-  items: EnrollmentBody[];
+  items: (EnrollmentBody & {
+    imageUrl: string;
+    subjectName: string | null;
+    matchedSubjectName: string | null;
+    matchedImageUrl: string | null;
+  })[];
   nextCursor: string | null;
 }
 interface UploadUrlBody {
@@ -363,6 +368,14 @@ describe.skipIf(!hasTestDb)(
         expect(body.qualityScore).toBe(72.5);
         expect(body.status).toBe('active');
         expect(body.caregiverId).toBe(subjectId);
+
+        const [audit] = await getDb().select().from(schema.auditLog);
+        expect(audit).toMatchObject({
+          action: 'biometric_enrollment.create',
+          entityType: 'biometric_enrollment',
+          entityId: body.id,
+          metadata: { subjectType: 'caregiver', subjectId, imageOrder: 1, status: 'active' },
+        });
       });
 
       it('rejects with 400 when s3Key does not match the subject/imageOrder prefix', async () => {
@@ -423,6 +436,7 @@ describe.skipIf(!hasTestDb)(
           .from(schema.biometricEnrollments)
           .where(eq(schema.biometricEnrollments.caregiverId, subjectId));
         expect(rows).toHaveLength(0);
+        expect(await getDb().select().from(schema.auditLog)).toHaveLength(0);
       });
 
       it('rejects with 422 when multiple faces are detected', async () => {
@@ -484,6 +498,88 @@ describe.skipIf(!hasTestDb)(
         expect(secondRow?.status).toBe('active');
       });
 
+      it('supersedes active photos in every imageOrder slot, not just the same one', async () => {
+        const { subjectId, auth } = await setupCaregiverSubject();
+        const db = getDb();
+        const [supervisor] = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.cognitoSub, 'supervisor-sub'));
+        // Legacy rows from the old three-slot UI (and the seed): active photos in slots 2 and 3.
+        await db.insert(schema.biometricEnrollments).values(
+          [2, 3].map((imageOrder) => ({
+            subjectType: 'caregiver' as const,
+            caregiverId: subjectId,
+            s3Key: `caregiver/${subjectId}/${imageOrder}/legacy.jpg`,
+            imageOrder,
+            status: 'active',
+            enrolledBy: supervisor!.id,
+          })),
+        );
+        const app = buildTestApp(fakeStorage());
+
+        const res = await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId,
+            imageOrder: 1,
+            s3Key: `caregiver/${subjectId}/1/replacement.jpg`,
+          });
+        expect(res.status).toBe(201);
+
+        const rows = await db
+          .select()
+          .from(schema.biometricEnrollments)
+          .where(eq(schema.biometricEnrollments.caregiverId, subjectId));
+        expect(rows.filter((r) => r.status === 'active').map((r) => r.id)).toEqual([
+          enrollmentBody(res).id,
+        ]);
+        expect(rows.filter((r) => r.status === 'superseded')).toHaveLength(2);
+      });
+
+      it('keeps the current photo active while a replacement is flagged for review', async () => {
+        const { subjectId, auth } = await setupCaregiverSubject();
+        const first = await request(buildTestApp(fakeStorage()))
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId,
+            imageOrder: 1,
+            s3Key: `caregiver/${subjectId}/1/current.jpg`,
+          });
+        const flaggingApp = buildTestApp(
+          fakeStorage(),
+          fakeFaceCollection({
+            checkDuplicate: vi.fn().mockResolvedValue({
+              duplicate: true,
+              matchedSubjectType: 'dependant',
+              matchedSubjectId: '11111111-1111-1111-1111-111111111111',
+              similarity: 97,
+            }),
+          }),
+        );
+
+        const replacement = await request(flaggingApp)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId,
+            imageOrder: 1,
+            s3Key: `caregiver/${subjectId}/1/replacement.jpg`,
+          });
+
+        expect(enrollmentBody(replacement).status).toBe('flagged');
+        const [current] = await getDb()
+          .select()
+          .from(schema.biometricEnrollments)
+          .where(eq(schema.biometricEnrollments.id, enrollmentBody(first).id));
+        expect(current?.status).toBe('active');
+      });
+
       it('returns 409 when the same s3Key is confirmed twice', async () => {
         const { subjectId, auth } = await setupCaregiverSubject();
         const app = buildTestApp(fakeStorage());
@@ -505,7 +601,9 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('GET /biometric-enrollments', () => {
-      it('lists active enrollments before superseded ones, highest quality_score first', async () => {
+      // The newer photo scores lower on purpose: the active one must still come first, ahead of
+      // a better-scoring photo it replaced.
+      it('lists the active photo before superseded ones, then by quality_score', async () => {
         const caregiver = await createTestCaregiver('caregiver-1-sub');
         await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
         const auth = testAuthHeader({
@@ -513,47 +611,51 @@ describe.skipIf(!hasTestDb)(
           role: 'supervisor',
           email: undefined,
         });
-        const app = buildTestApp(
-          fakeStorage({
-            assessFaceQuality: vi.fn().mockResolvedValue({ ok: true, qualityScore: 50 }),
-          }),
-        );
+        const withQuality = (qualityScore: number) =>
+          buildTestApp(
+            fakeStorage({
+              assessFaceQuality: vi.fn().mockResolvedValue({ ok: true, qualityScore }),
+            }),
+          );
 
-        await request(app)
-          .post('/biometric-enrollments')
-          .set('x-test-auth', auth)
-          .send({
-            subjectType: 'caregiver',
-            subjectId: caregiver.id,
-            imageOrder: 1,
-            s3Key: `caregiver/${caregiver.id}/1/low-quality.jpg`,
-          });
+        for (const [name, qualityScore] of [
+          ['first', 90],
+          ['second', 70],
+          ['current', 50],
+        ] as const) {
+          await request(withQuality(qualityScore))
+            .post('/biometric-enrollments')
+            .set('x-test-auth', auth)
+            .send({
+              subjectType: 'caregiver',
+              subjectId: caregiver.id,
+              imageOrder: 1,
+              s3Key: `caregiver/${caregiver.id}/1/${name}.jpg`,
+            });
+        }
 
-        const highQualityApp = buildTestApp(
-          fakeStorage({
-            assessFaceQuality: vi.fn().mockResolvedValue({ ok: true, qualityScore: 90 }),
-          }),
-        );
-        await request(highQualityApp)
-          .post('/biometric-enrollments')
-          .set('x-test-auth', auth)
-          .send({
-            subjectType: 'caregiver',
-            subjectId: caregiver.id,
-            imageOrder: 2,
-            s3Key: `caregiver/${caregiver.id}/2/high-quality.jpg`,
-          });
-
-        const res = await request(app)
+        const res = await request(withQuality(50))
           .get('/biometric-enrollments')
           .query({ subjectType: 'caregiver', subjectId: caregiver.id })
           .set('x-test-auth', auth);
 
         expect(res.status).toBe(200);
-        const rows = enrollmentListBody(res);
-        expect(rows.every((r) => r.status === 'active')).toBe(true);
-        expect(rows[0]?.qualityScore).toBe(90);
-        expect(rows[1]?.qualityScore).toBe(50);
+        expect(enrollmentListBody(res).map((r) => [r.status, r.qualityScore])).toEqual([
+          ['active', 50],
+          ['superseded', 90],
+          ['superseded', 70],
+        ]);
+
+        // Sensitive read (returns photo URLs) - one row for the request, not per photo returned.
+        const viewAudit = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.view'));
+        expect(viewAudit).toHaveLength(1);
+        expect(viewAudit[0]).toMatchObject({
+          entityType: 'biometric_enrollment',
+          entityId: caregiver.id,
+        });
       });
 
       it('forbids a family member from listing a dependant they are not linked to', async () => {
@@ -680,6 +782,112 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentPageBody(res).items).toHaveLength(1);
         expect(enrollmentPageBody(res).items[0]?.status).toBe('flagged');
+
+        // Sensitive read (returns photo URLs, cross-subject) - one row per request, no single
+        // entityId since it's a listing, not one record.
+        const [viewAudit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.view'));
+        expect(viewAudit).toMatchObject({ entityType: 'biometric_enrollment', entityId: null });
+      });
+
+      it("names both people and links the matched person's best active photo", async () => {
+        const supervisor = await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+        const uploader = await createTestCaregiver('caregiver-1-sub');
+        const matched = await createTestDependant(supervisor.id);
+        const db = getDb();
+        // The matched dependant's photos: a better and a worse active one, and a superseded one.
+        await db.insert(schema.biometricEnrollments).values(
+          [
+            ['best', 'active', 92],
+            ['worse', 'active', 60],
+            ['old', 'superseded', 99],
+          ].map(([name, status, qualityScore]) => ({
+            subjectType: 'dependant' as const,
+            dependantId: matched.id,
+            s3Key: `dependant/${matched.id}/1/${name}.jpg`,
+            imageOrder: 1,
+            status: status as string,
+            qualityScore: qualityScore as number,
+            enrolledBy: supervisor.id,
+          })),
+        );
+        const createViewUrl = vi.fn((s3Key: string) => Promise.resolve(`https://view/${s3Key}`));
+        const auth = testAuthHeader({
+          sub: 'supervisor-sub',
+          role: 'supervisor',
+          email: undefined,
+        });
+        const flaggingApp = buildTestApp(
+          fakeStorage({ createViewUrl }),
+          fakeFaceCollection({
+            checkDuplicate: vi.fn().mockResolvedValue({
+              duplicate: true,
+              matchedSubjectType: 'dependant',
+              matchedSubjectId: matched.id,
+              similarity: 97.5,
+            }),
+          }),
+        );
+        await request(flaggingApp)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId: uploader.id,
+            imageOrder: 1,
+            s3Key: `caregiver/${uploader.id}/1/flagged.jpg`,
+          });
+
+        const res = await request(flaggingApp)
+          .get('/biometric-enrollments/flagged')
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(200);
+        const [item] = enrollmentPageBody(res).items;
+        expect(item?.imageUrl).toBe(`https://view/caregiver/${uploader.id}/1/flagged.jpg`);
+        expect(item?.subjectName).toBe(uploader.fullName);
+        expect(item?.matchedSubjectName).toBe('Grandma Wanjiru');
+        expect(item?.matchedImageUrl).toBe(`https://view/dependant/${matched.id}/1/best.jpg`);
+      });
+
+      it('returns a null matched photo when the matched person has no active photo', async () => {
+        await createTestUser('supervisor-sub', 'supervisor', '+254700000001');
+        const uploader = await createTestCaregiver('caregiver-1-sub');
+        const auth = testAuthHeader({
+          sub: 'supervisor-sub',
+          role: 'supervisor',
+          email: undefined,
+        });
+        const app = buildTestApp(
+          fakeStorage(),
+          fakeFaceCollection({
+            checkDuplicate: vi.fn().mockResolvedValue({
+              duplicate: true,
+              matchedSubjectType: 'caregiver',
+              matchedSubjectId: '22222222-2222-2222-2222-222222222222',
+              similarity: 96,
+            }),
+          }),
+        );
+        await request(app)
+          .post('/biometric-enrollments')
+          .set('x-test-auth', auth)
+          .send({
+            subjectType: 'caregiver',
+            subjectId: uploader.id,
+            imageOrder: 1,
+            s3Key: `caregiver/${uploader.id}/1/flagged.jpg`,
+          });
+
+        const res = await request(app)
+          .get('/biometric-enrollments/flagged')
+          .set('x-test-auth', auth);
+
+        const [item] = enrollmentPageBody(res).items;
+        expect(item?.matchedImageUrl).toBeNull();
+        expect(item?.matchedSubjectName).toBeNull();
       });
 
       it('forbids a family member from listing flagged enrollments', async () => {
@@ -736,6 +944,43 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentBody(res).status).toBe('active');
         expect(faceCollection.indexFace).toHaveBeenCalledOnce();
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.approve'));
+        expect(audit).toMatchObject({ entityType: 'biometric_enrollment', entityId: id });
+      });
+
+      it('approving a flagged replacement supersedes the photo it replaces', async () => {
+        const { id, subjectId, auth } = await createFlaggedRow();
+        const db = getDb();
+        const [supervisor] = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.cognitoSub, 'supervisor-sub'));
+        const [current] = await db
+          .insert(schema.biometricEnrollments)
+          .values({
+            subjectType: 'caregiver',
+            caregiverId: subjectId,
+            s3Key: `caregiver/${subjectId}/2/current.jpg`,
+            imageOrder: 2,
+            status: 'active',
+            enrolledBy: supervisor!.id,
+          })
+          .returning();
+
+        const res = await request(buildTestApp(fakeStorage()))
+          .post(`/biometric-enrollments/${id}/approve`)
+          .set('x-test-auth', auth);
+
+        expect(res.status).toBe(200);
+        const [after] = await db
+          .select()
+          .from(schema.biometricEnrollments)
+          .where(eq(schema.biometricEnrollments.id, current!.id));
+        expect(after?.status).toBe('superseded');
       });
 
       it('rejects approving a row that is not flagged', async () => {
@@ -774,6 +1019,12 @@ describe.skipIf(!hasTestDb)(
         expect(res.status).toBe(200);
         expect(enrollmentBody(res).status).toBe('deleted');
         expect(faceCollection.indexFace).not.toHaveBeenCalled();
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'biometric_enrollment.reject'));
+        expect(audit).toMatchObject({ entityType: 'biometric_enrollment', entityId: id });
       });
 
       it('rejects re-rejecting a row that is not flagged', async () => {

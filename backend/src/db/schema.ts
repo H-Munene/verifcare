@@ -39,6 +39,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -453,6 +454,12 @@ export const verificationEvents = pgTable(
     checkinGpsLat: doublePrecision(),
     checkinGpsLng: doublePrecision(),
     distanceFromGeofenceMeters: doublePrecision(),
+    // Where the caregiver was when they checked out, and how far that was from the geofence
+    // centre (migration 0015): checkout must happen inside the home's radius, like check-in, and
+    // this is the record that it did. Null for visits checked out before the rule existed.
+    checkoutGpsLat: doublePrecision(),
+    checkoutGpsLng: doublePrecision(),
+    checkoutDistanceFromGeofenceMeters: doublePrecision(),
     caregiverMatchConfidence: numeric({ precision: 5, scale: 2 }),
     dependantMatchConfidence: numeric({ precision: 5, scale: 2 }),
     caregiverLivenessPassed: boolean(),
@@ -514,6 +521,50 @@ export const verificationAttempts = pgTable(
 );
 
 // ============================================================================
+// visit_resolutions (append-only, 0016) - a supervisor's account of how a missed visit or a failed
+// check was resolved, for the Compliance tab's exceptions log. Append-only so the history an
+// auditor sees is never rewritten: a later resolution supersedes an earlier one, the latest wins.
+// ============================================================================
+
+export const VISIT_RESOLUTION_OUTCOMES = [
+  'caregiver_absent',
+  'family_cancelled',
+  'dependant_unavailable',
+  'device_or_network_issue',
+  'visit_took_place',
+  'verified_manually',
+  'other',
+] as const;
+export type VisitResolutionOutcome = (typeof VISIT_RESOLUTION_OUTCOMES)[number];
+
+export const visitResolutions = pgTable(
+  'visit_resolutions',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    visitScheduleId: uuid()
+      .notNull()
+      .references(() => visitSchedules.id),
+    outcome: text().$type<VisitResolutionOutcome>().notNull(),
+    note: text().notNull(),
+    resolvedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    resolvedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_visit_resolutions_outcome',
+      sql`${table.outcome} IN ('caregiver_absent', 'family_cancelled', 'dependant_unavailable', 'device_or_network_issue', 'visit_took_place', 'verified_manually', 'other')`,
+    ),
+    check('chk_visit_resolutions_note', sql`length(btrim(${table.note})) > 0`),
+    index('idx_visit_resolutions_visit').on(table.visitScheduleId, table.resolvedAt),
+    // `trg_visit_resolutions_append_only` (rejects UPDATE/DELETE) is added by 0016.
+  ],
+);
+
+// ============================================================================
 // audio_records
 // ============================================================================
 
@@ -564,6 +615,8 @@ export const consentRecords = pgTable(
       .references(() => users.id),
     grantedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp({ withTimezone: true }),
+    // Who revoked it (0016), so the consent register can show it. Null on rows revoked before.
+    revokedBy: uuid().references(() => users.id),
   },
   (table) => [
     check(
@@ -575,6 +628,104 @@ export const consentRecords = pgTable(
     index('idx_consent_records_dependant').on(table.dependantId),
     index('idx_consent_records_type').on(table.consentType),
     index('idx_consent_records_granted_by').on(table.grantedBy),
+  ],
+);
+
+// ============================================================================
+// terms_acceptances (append-only) - a user accepting the app's terms of use and privacy notice
+// (2026-09-26, the mobile apps' consent screen). Not consent_records: that table is consent given
+// *about a subject* (a caregiver's or dependant's biometrics/audio), often by someone else on
+// their behalf; this is the signed-in user agreeing to the terms for themselves. One row per
+// document version accepted, so publishing a new version (src/terms.ts) asks everyone again while
+// the record of what each person agreed to, and when, is kept.
+// ============================================================================
+
+export const termsAcceptances = pgTable(
+  'terms_acceptances',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id),
+    // Which document: the caregiver and family-member apps have different terms.
+    document: text().notNull(),
+    version: text().notNull(),
+    acceptedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    // The consent screen's two checkboxes (migration 0014, terms v2): consent to photos being
+    // used to verify identity at visits, and to audio being recorded during visits. Kept on the
+    // acceptance as the append-only proof of what the person ticked, alongside the
+    // consent_records rows the same acceptance creates (which can later be revoked). Null on v1
+    // acceptances, which didn't ask - null means "not asked", not "refused".
+    biometricConsent: boolean(),
+    audioConsent: boolean(),
+  },
+  (table) => [
+    check(
+      'chk_terms_acceptances_document',
+      sql`${table.document} IN ('caregiver', 'family_member')`,
+    ),
+    unique('uq_terms_acceptances_user_document_version').on(
+      table.userId,
+      table.document,
+      table.version,
+    ),
+    // `trg_terms_acceptances_append_only` (rejects UPDATE/DELETE) is added by migration 0012.
+  ],
+);
+
+// ============================================================================
+// family_link_requests (2026-09-26) - a family member asking a dependant's primary contact to
+// link them. The requester names the primary contact by exact email or phone and never learns
+// whether that matched anyone (the request is stored and shown to them as pending either way);
+// primaryContactUserId is only set when the contact belonged to a primary contact at the time, and
+// only those requests reach anyone. The primary contact chooses which of their dependants to link
+// when approving, so the requester never sees dependants' names before being linked.
+// ============================================================================
+
+export const familyLinkRequests = pgTable(
+  'family_link_requests',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    requesterUserId: uuid()
+      .notNull()
+      .references(() => users.id),
+    // The email (lower-cased) or E.164 phone number the requester typed, shown back to them.
+    targetContact: text().notNull(),
+    primaryContactUserId: uuid().references(() => users.id),
+    relationship: text(),
+    status: text().notNull().default('pending'),
+    // The dependants the primary contact linked the requester to, when approved.
+    linkedDependantIds: uuid().array(),
+    decidedAt: timestamp({ withTimezone: true }),
+    // When the requester saw the outcome in the app - until then it counts as an unread
+    // notification for them.
+    requesterSeenAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_family_link_requests_status',
+      sql`${table.status} IN ('pending', 'approved', 'rejected')`,
+    ),
+    check(
+      'chk_family_link_requests_decision',
+      sql`(${table.status} = 'pending' AND ${table.decidedAt} IS NULL) OR
+          (${table.status} = 'rejected' AND ${table.decidedAt} IS NOT NULL) OR
+          (${table.status} = 'approved' AND ${table.decidedAt} IS NOT NULL AND ${table.linkedDependantIds} IS NOT NULL)`,
+    ),
+    // One open request per requester and contact - asking again doesn't pile up duplicates.
+    uniqueIndex('uq_family_link_requests_pending')
+      .on(table.requesterUserId, table.targetContact)
+      .where(sql`${table.status} = 'pending'`),
+    index('idx_family_link_requests_requester').on(table.requesterUserId),
+    index('idx_family_link_requests_primary_pending')
+      .on(table.primaryContactUserId)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 
@@ -591,9 +742,9 @@ export const notificationLog = pgTable(
     type: text().notNull(),
     visitScheduleId: uuid().references(() => visitSchedules.id),
     audioRecordId: uuid().references(() => audioRecords.id),
-    recipientUserId: uuid()
-      .notNull()
-      .references(() => users.id),
+    // NULL = every supervisor: a missed-visit alert is shared, any supervisor can acknowledge it
+    // (0016). A cognitive_risk alert always names its family member.
+    recipientUserId: uuid().references(() => users.id),
     channel: text(),
     sentAt: timestamp({ withTimezone: true }),
     acknowledgedAt: timestamp({ withTimezone: true }),
@@ -606,6 +757,14 @@ export const notificationLog = pgTable(
       sql`(${table.type} = 'missed_visit' AND ${table.visitScheduleId} IS NOT NULL AND ${table.audioRecordId} IS NULL) OR
           (${table.type} = 'cognitive_risk' AND ${table.audioRecordId} IS NOT NULL AND ${table.visitScheduleId} IS NULL)`,
     ),
+    check(
+      'chk_notification_log_recipient',
+      sql`${table.recipientUserId} IS NOT NULL OR ${table.type} = 'missed_visit'`,
+    ),
+    // One alert per missed visit, so re-running the sweep never raises a second.
+    uniqueIndex('uq_notification_log_missed_visit')
+      .on(table.visitScheduleId)
+      .where(sql`${table.type} = 'missed_visit'`),
     index('idx_notification_log_recipient_sent').on(table.recipientUserId, table.sentAt),
     index('idx_notification_log_visit_schedule').on(table.visitScheduleId),
     index('idx_notification_log_audio_record').on(table.audioRecordId),
@@ -627,13 +786,16 @@ export const auditLog = pgTable(
     action: text().notNull(),
     entityType: text().notNull(),
     // No FK: can point at any entity type in the system, not just two - see schema.sql's file header.
-    entityId: uuid().notNull(),
+    // Nullable (0016) for actions with no single entity, e.g. a compliance export of a whole period.
+    entityId: uuid(),
     metadata: jsonb(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('idx_audit_log_entity').on(table.entityType, table.entityId),
     index('idx_audit_log_actor_time').on(table.actorUserId, table.createdAt),
+    // The audit log screen: newest first across every entity.
+    index('idx_audit_log_created').on(table.createdAt, table.id),
     // `trg_audit_log_append_only` (rejects UPDATE/DELETE) is added by HEZ-9.
   ],
 );

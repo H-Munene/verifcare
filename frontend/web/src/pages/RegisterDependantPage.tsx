@@ -1,13 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { BiometricEnrollment } from '../api/biometricEnrollments';
-import { uploadFileToPresignedUrl } from '../api/biometricEnrollments';
+import {
+  ENROLLMENT_CONTENT_TYPES,
+  ENROLLMENT_MAX_BYTES,
+  type BiometricEnrollment,
+} from '../api/biometricEnrollments';
 import { ApiError } from '../api/client';
 import type { Dependant, DependantGender, DependantStatus } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { getConfig } from '../config';
+import { EnrollmentOutcome } from '../components/EnrollmentOutcome';
 import { ExactLocationMap } from '../components/ExactLocationMap';
+import { isPointInFeature } from '../geo/adminBoundaries';
 import {
   FamilyMemberResolver,
   type FamilyMemberSelection,
@@ -15,10 +21,13 @@ import {
 import { LocationSelector, type ResolvedWard } from '../components/LocationSelector';
 import { Button } from '../design-system/Button';
 import { Card } from '../design-system/Card';
+import { ImageDropzone } from '../design-system/ImageDropzone';
 import { Input } from '../design-system/Input';
 import { Stepper } from '../design-system/Stepper';
 import { Switch } from '../design-system/Switch';
 import './RegisterDependantPage.css';
+import { DetailSkeleton } from '../design-system/Skeleton';
+import { useEnrollPhoto } from '../hooks/useEnrollPhoto';
 
 // Handles both registration (no :dependantId in the route) and editing (wireframe page 5 combines
 // both into one form, and PATCH /dependants/{id} already existed from HEZ-30, so this costs
@@ -48,10 +57,10 @@ import './RegisterDependantPage.css';
 // dependant co-presence step (HEZ-35) CompareFaces-matches the live check-in photo against this
 // subject's own active enrollment, and fails with not_enrolled if there isn't one. Confirmed with
 // the user as a single required photo (matches the caregiver check-in step's own single-photo
-// design), not the full 1-3 image slots DependantDetailPage's Biometric Enrollment section supports
-// - that page remains where a skipped photo (or a 2nd/3rd image) gets added later, imageOrder fixed
-// at 1 here rather than exposed as a choice. Editing shows whatever's already enrolled at imageOrder
-// 1 (if any) before the upload form, so this step doesn't look like "no photo exists" when one does.
+// design), and since 2026-09-27 the whole POC keeps one photo per person, so DependantDetailPage's
+// Enrollment tab shows the same single photo - that tab remains where a skipped photo gets added
+// later. Editing shows the photo already on file (if any) before the upload form, so this step
+// doesn't look like "no photo exists" when one does.
 //
 // Consent capture (biometric-verification / audio-cognitive-monitoring, shown in the wireframe)
 // is deliberately not built here - HEZ-40 ("Consent capture endpoints") is a separate, not-yet-
@@ -73,7 +82,7 @@ export function RegisterDependantPage() {
   });
 
   if (isEdit && existing.isLoading) {
-    return <p>Loading...</p>;
+    return <DetailSkeleton />;
   }
   if (isEdit && (existing.isError || !existing.data)) {
     return <p>Failed to load this dependant.</p>;
@@ -115,6 +124,27 @@ function splitFullName(fullName: string): { firstName: string; lastName: string 
     return { firstName: trimmed, lastName: '' };
   }
   return { firstName: trimmed.slice(0, spaceIndex), lastName: trimmed.slice(spaceIndex + 1) };
+}
+
+// The photo already on file when editing, so the Photo step doesn't look like none exists.
+function CurrentPhoto({ enrollment }: { enrollment: BiometricEnrollment }) {
+  const quality =
+    enrollment.qualityScore !== null
+      ? ` - quality score ${enrollment.qualityScore.toFixed(1)}`
+      : '';
+  return (
+    <div className="register-dependant-page__current-photo">
+      <img src={enrollment.imageUrl} alt="Current photo" />
+      <div>
+        <div className="register-dependant-page__current-photo-title">Current photo</div>
+        <div className="register-dependant-page__resolution-hint">
+          {enrollment.status === 'flagged'
+            ? 'Waiting for a supervisor to review it on the Reviews page.'
+            : `In use for check-in${quality}. A new photo replaces it.`}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 interface AdditionalContactDraft {
@@ -213,13 +243,21 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   // removed for UX reasons (confirmed with the user); the pin is the only way to set them now.
   const [geofenceLat, setGeofenceLat] = useState<number | null>(initial?.geofenceLat ?? null);
   const [geofenceLng, setGeofenceLng] = useState<number | null>(initial?.geofenceLng ?? null);
-  const [exactLocationValid, setExactLocationValid] = useState(false);
 
-  function handleExactLocationChange(lat: number, lng: number, isInsideWard: boolean): void {
+  function handleExactLocationChange(lat: number, lng: number): void {
     setGeofenceLat(lat);
     setGeofenceLng(lng);
-    setExactLocationValid(isInsideWard);
   }
+
+  // Whether the pin is inside the selected ward, worked out from the pin and the ward's boundary on
+  // every render rather than remembered from the last tap (2026-09-26, user report: Next and Save
+  // must be disabled while the pin is outside the ward). Deriving it also catches a ward changed
+  // after the pin was placed, and an edit's saved pin, which the old tap-time flag missed. null
+  // when there's nothing to check yet (no pin, or the ward's boundary isn't loaded).
+  const pinInsideWard =
+    wardFeature && geofenceLat !== null && geofenceLng !== null
+      ? isPointInFeature(geofenceLat, geofenceLng, wardFeature)
+      : null;
 
   // 20m default - confirmed with the user 2026-09-14 (originally proposed at 10m, revised up after
   // flagging that typical smartphone GPS accuracy, ~5m under open sky and substantially worse
@@ -246,7 +284,6 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   // Photo step needs no prior "create/save" action to unlock it, unlike registration.
   const [createdDependantId, setCreatedDependantId] = useState<string | null>(dependantId ?? null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoResult, setPhotoResult] = useState<BiometricEnrollment | null>(null);
 
   function addAdditionalContact() {
     setAdditionalContacts((prev) => [...prev, { selection: null, relationship: '' }]);
@@ -270,33 +307,9 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       dependants.updateDependant(dependantId!, body),
   });
 
-  // Single required photo, imageOrder fixed at 1 - see the file header comment for why this exists
-  // and why it's just one image here, unlike DependantDetailPage's full 1-3 slot picker.
-  const photoMutation = useMutation({
-    mutationFn: async () => {
-      if (!photoFile || !createdDependantId) {
-        throw new Error('Choose a photo first.');
-      }
-      if (!['image/jpeg', 'image/png'].includes(photoFile.type)) {
-        throw new Error('Only JPEG or PNG images are accepted.');
-      }
-      const contentType = photoFile.type as 'image/jpeg' | 'image/png';
-      const presigned = await biometricEnrollments.createUploadUrl({
-        subjectType: 'dependant',
-        subjectId: createdDependantId,
-        imageOrder: 1,
-        contentType,
-      });
-      await uploadFileToPresignedUrl(presigned.uploadUrl, photoFile);
-      return biometricEnrollments.confirmEnrollment({
-        subjectType: 'dependant',
-        subjectId: createdDependantId,
-        s3Key: presigned.s3Key,
-        imageOrder: 1,
-      });
-    },
-    onSuccess: (enrollment) => setPhotoResult(enrollment),
-  });
+  // Single photo, imageOrder fixed at 1 - see the file header comment for why this exists. The
+  // upload itself is the shared hooks/useEnrollPhoto flow.
+  const photoMutation = useEnrollPhoto('dependant', createdDependantId);
 
   // Editing reaches the Photo step with a dependant that may already have an enrolled photo - shown
   // above the upload form so this step doesn't look like "no photo exists" when one does (a fresh
@@ -306,7 +319,10 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
     queryFn: () => biometricEnrollments.listEnrollments('dependant', createdDependantId!),
     enabled: isPhotoStep && Boolean(createdDependantId),
   });
-  const existingEnrollment = existingEnrollmentQuery.data?.find((e) => e.imageOrder === 1);
+  // The photo check-in uses if there is one, otherwise one still waiting for review.
+  const existingEnrollment =
+    existingEnrollmentQuery.data?.find((e) => e.status === 'active') ??
+    existingEnrollmentQuery.data?.find((e) => e.status === 'flagged');
 
   // Per-step validity, gating the "Next step" button the same way the final Save button was
   // already gated - a step's own required fields must be filled before moving on, rather than
@@ -318,20 +334,23 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   // can proceed (confirmed with the user) - editing an existing dependant is not blocked on either,
   // since the backend only requires them at creation, not on every update.
   const locationSelectorValid = county !== '' && constituency !== '' && ward !== '';
-  const exactLocationStepValid =
-    geofenceLat !== null &&
-    geofenceLng !== null &&
-    exactLocationValid &&
-    geofenceRadiusMeters !== '';
+  const exactLocationStepValid = pinInsideWard === true && geofenceRadiusMeters !== '';
   const primaryContactValid = Boolean(primarySelection);
+  // Editing isn't blocked on location in general (see above), but never on a pin known to be
+  // outside the ward.
+  const editPinValid = pinInsideWard !== false;
   const stepValidityByIndex = isEdit
-    ? [detailsValid, true, true]
+    ? [detailsValid, true, editPinValid]
     : [detailsValid, locationSelectorValid, exactLocationStepValid, primaryContactValid];
   const currentStepValid = stepValidityByIndex[step] ?? true;
   // Surfaces *why* Next/Save is disabled, rather than leaving a disabled button as the only signal
   // - the underlying gate above is what actually enforces this; this is purely to make it visible.
   const stepHints = isEdit
-    ? ['Enter first name, last name, and date of birth to continue.']
+    ? [
+        'Enter first name, last name, and date of birth to continue.',
+        null,
+        'Move the pin inside the ward boundary to continue.',
+      ]
     : [
         'Enter first name, last name, and date of birth to continue.',
         'Select a county, constituency, and ward to continue.',
@@ -416,6 +435,9 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       });
       void queryClient.invalidateQueries({ queryKey: ['dependants'] });
       void queryClient.invalidateQueries({ queryKey: ['dependant', dependantId] });
+      // Back to the dependant's page once saved (2026-09-26, user report: Save used to leave the
+      // supervisor on the edit form with no sign it had worked).
+      void navigate(`/dependants/${dependantId}`);
     } catch {
       // updateMutation's own `error` state (surfaced via mutationError below) already reports this
       // - nothing further to do here.
@@ -484,7 +506,8 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           <Button
             type="button"
             variant="primary"
-            disabled={updateMutation.isPending || !detailsValid}
+            disabled={updateMutation.isPending || !detailsValid || !editPinValid}
+            title={editPinValid ? undefined : 'Move the pin inside the ward boundary to save.'}
             onClick={() => void saveEdit()}
           >
             {updateMutation.isPending ? 'Saving...' : 'Save'}
@@ -492,6 +515,12 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         ) : null}
       </div>
       <Stepper steps={steps} currentStepIndex={step} />
+      {isEdit && !editPinValid && step !== exactLocationStepIndex ? (
+        <p className="register-dependant-page__step-hint">
+          The pin is outside the selected ward - move it inside the boundary on the Exact Location
+          step to save.
+        </p>
+      ) : null}
       <form
         onSubmit={handleSubmit}
         onKeyDown={preventEnterSubmit}
@@ -600,7 +629,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           <div className="register-dependant-page__section">
             {wardFeature ? (
               <ExactLocationMap
-                apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+                apiKey={getConfig().googleMapsApiKey}
                 wardFeature={wardFeature}
                 lat={geofenceLat}
                 lng={geofenceLng}
@@ -697,13 +726,12 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
               for a visit. Optional for now - you can add or replace it later from the
               dependant&rsquo;s detail page instead.
             </p>
-            {photoResult ? (
+            {photoMutation.data ? (
               <>
-                <p>
-                  {photoResult.status === 'flagged'
-                    ? `This photo matched an already-enrolled ${photoResult.matchedSubjectType} at ${photoResult.matchedSimilarity?.toFixed(1)}% similarity - it's been flagged for a supervisor to review on the Flagged Enrollments page, and hasn't been activated.`
-                    : `Uploaded and activated - quality score ${photoResult.qualityScore?.toFixed(1) ?? 'n/a'}.`}
-                </p>
+                <EnrollmentOutcome
+                  enrollment={photoMutation.data}
+                  replacing={existingEnrollment?.status === 'active'}
+                />
                 <div className="register-dependant-page__step-actions">
                   <Button
                     type="button"
@@ -716,30 +744,25 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
               </>
             ) : (
               <>
-                {existingEnrollment ? (
-                  <p className="register-dependant-page__resolution-hint">
-                    {existingEnrollment.status === 'flagged'
-                      ? 'The current photo is flagged for a supervisor to review on the Flagged Enrollments page.'
-                      : `Already enrolled - quality score ${existingEnrollment.qualityScore?.toFixed(1) ?? 'n/a'}. Uploading a new photo replaces it.`}
-                  </p>
-                ) : null}
-                <Input
+                {existingEnrollment ? <CurrentPhoto enrollment={existingEnrollment} /> : null}
+                <ImageDropzone
                   id="dependantPhoto"
-                  type="file"
-                  label="Photo (JPEG or PNG)"
-                  accept="image/jpeg,image/png"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                  label={existingEnrollment ? 'Replacement photo' : 'Photo'}
+                  value={photoFile}
+                  onChange={(file) => {
+                    setPhotoFile(file);
+                    photoMutation.reset();
+                  }}
+                  accept={ENROLLMENT_CONTENT_TYPES}
+                  maxBytes={ENROLLMENT_MAX_BYTES}
+                  error={photoMutation.error?.message}
+                  busy={photoMutation.isPending}
+                  busyLabel="Uploading and checking the face..."
                 />
-                {photoMutation.error ? (
-                  <div className="register-dependant-page__error">
-                    {photoMutation.error instanceof Error
-                      ? photoMutation.error.message
-                      : 'Something went wrong.'}
-                  </div>
-                ) : null}
                 <div className="register-dependant-page__step-actions">
                   <Button
                     type="button"
+                    disabled={photoMutation.isPending}
                     onClick={() => void navigate(`/dependants/${createdDependantId}`)}
                   >
                     {existingEnrollment ? 'Keep current photo' : 'Skip for now'}
@@ -748,7 +771,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
                     type="button"
                     variant="primary"
                     disabled={photoMutation.isPending || !photoFile}
-                    onClick={() => photoMutation.mutate()}
+                    onClick={() => photoFile && photoMutation.mutate(photoFile)}
                   >
                     {photoMutation.isPending
                       ? 'Uploading...'

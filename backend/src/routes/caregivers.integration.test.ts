@@ -1,7 +1,5 @@
-// Integration tests for POST/GET /caregivers, GET/PATCH /caregivers/{caregiverId} (HEZ-29) against
-// a real local Postgres - see users.integration.test.ts's header comment for why (real
-// unique-constraint/transaction behavior, not a faked query builder) and for the test-auth-header
-// pattern used here too.
+// Integration tests for the /caregivers routes against a real Postgres. Auth is faked the same way
+// as in users.integration.test.ts.
 
 import express, { type Express } from 'express';
 import request from 'supertest';
@@ -182,6 +180,14 @@ describe.skipIf(!hasTestDb)(
           phoneNumber: '+254700000030',
           fullName: 'Grace Hopper',
           role: 'caregiver',
+        });
+
+        const audit = await getDb().select().from(schema.auditLog);
+        expect(audit).toHaveLength(1);
+        expect(audit[0]).toMatchObject({
+          action: 'caregiver.create',
+          entityType: 'caregiver',
+          entityId: caregiverBody(response).userId,
         });
       });
 
@@ -402,14 +408,34 @@ describe.skipIf(!hasTestDb)(
         const response = await request(app)
           .patch(`/caregivers/${caregiverBody(created).userId}`)
           .set('x-test-auth', supervisorAuth)
-          .send({ fullName: 'After', active: false, employeeNumber: 'EMP-999' });
+          .send({
+            fullName: 'After',
+            active: false,
+            employeeNumber: 'EMP-999',
+            idNumber: 'ID-SECRET-999',
+          });
 
         expect(response.status).toBe(200);
         expect(response.body).toMatchObject({
           fullName: 'After',
           active: false,
           employeeNumber: 'EMP-999',
+          idNumber: 'ID-SECRET-999',
         });
+
+        const [audit] = await getDb()
+          .select()
+          .from(schema.auditLog)
+          .where(eq(schema.auditLog.action, 'caregiver.update'));
+        expect(audit).toMatchObject({
+          entityType: 'caregiver',
+          entityId: caregiverBody(created).userId,
+        });
+        const metadata = audit?.metadata as Record<string, unknown>;
+        expect(metadata.fullName).toEqual({ from: 'Before', to: 'After' });
+        // idNumber is redacted - only that it changed, never the raw new value.
+        expect(metadata.idNumber).toBe('changed');
+        expect(JSON.stringify(metadata)).not.toContain('ID-SECRET-999');
       });
 
       it('returns 409 on a duplicate employeeNumber', async () => {

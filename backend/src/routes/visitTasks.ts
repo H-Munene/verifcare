@@ -24,6 +24,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
+import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
@@ -93,7 +94,13 @@ async function resolveCaregiverInProgressVisit(
   visitScheduleId: string,
   req: Request,
   res: Response,
-): Promise<typeof schema.visitSchedules.$inferSelect | undefined> {
+): Promise<
+  | {
+      callerRow: typeof schema.users.$inferSelect;
+      visit: typeof schema.visitSchedules.$inferSelect;
+    }
+  | undefined
+> {
   const caller = req.auth;
   if (!caller) {
     sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
@@ -126,7 +133,7 @@ async function resolveCaregiverInProgressVisit(
     return undefined;
   }
 
-  return visit;
+  return { callerRow, visit };
 }
 
 export function createVisitTasksRouter(dependencies: VisitTasksRouterDependencies): Router {
@@ -149,10 +156,11 @@ export function createVisitTasksRouter(dependencies: VisitTasksRouterDependencie
     }
 
     try {
-      const visit = await resolveCaregiverInProgressVisit(db, visitScheduleId, req, res);
-      if (!visit) {
+      const resolved = await resolveCaregiverInProgressVisit(db, visitScheduleId, req, res);
+      if (!resolved) {
         return;
       }
+      const { visit } = resolved;
 
       const tasks = await db
         .select()
@@ -214,10 +222,11 @@ export function createVisitTasksRouter(dependencies: VisitTasksRouterDependencie
     }
 
     try {
-      const visit = await resolveCaregiverInProgressVisit(db, visitScheduleId, req, res);
-      if (!visit) {
+      const resolved = await resolveCaregiverInProgressVisit(db, visitScheduleId, req, res);
+      if (!resolved) {
         return;
       }
+      const { callerRow, visit } = resolved;
 
       const [task] = await db
         .select({ id: schema.dependantCareTasks.id })
@@ -239,31 +248,43 @@ export function createVisitTasksRouter(dependencies: VisitTasksRouterDependencie
         return;
       }
 
-      const [row] = await db
-        .insert(schema.visitTaskCompletions)
-        .values({
-          visitScheduleId,
-          careTaskId,
-          status: body.status,
-          reason: body.reason ?? null,
-          notes: body.notes ?? null,
-        })
-        .onConflictDoUpdate({
-          target: [
-            schema.visitTaskCompletions.visitScheduleId,
-            schema.visitTaskCompletions.careTaskId,
-          ],
-          set: {
+      const row = await db.transaction(async (tx) => {
+        const [upserted] = await tx
+          .insert(schema.visitTaskCompletions)
+          .values({
+            visitScheduleId,
+            careTaskId,
             status: body.status,
             reason: body.reason ?? null,
             notes: body.notes ?? null,
-            completedAt: new Date(),
-          },
-        })
-        .returning();
-      if (!row) {
-        throw new Error('Upsert into visit_task_completions returned no row.');
-      }
+          })
+          .onConflictDoUpdate({
+            target: [
+              schema.visitTaskCompletions.visitScheduleId,
+              schema.visitTaskCompletions.careTaskId,
+            ],
+            set: {
+              status: body.status,
+              reason: body.reason ?? null,
+              notes: body.notes ?? null,
+              completedAt: new Date(),
+            },
+          })
+          .returning();
+        if (!upserted) {
+          throw new Error('Upsert into visit_task_completions returned no row.');
+        }
+        // notes is free-text and can carry sensitive detail about the dependant's condition - kept
+        // out of the log; status/reason are just checklist state.
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'visit_task.record',
+          entityType: 'visit_schedule',
+          entityId: visitScheduleId,
+          metadata: { careTaskId, status: upserted.status, reason: upserted.reason },
+        });
+        return upserted;
+      });
       res.status(200).json({
         careTaskId: row.careTaskId,
         status: row.status,

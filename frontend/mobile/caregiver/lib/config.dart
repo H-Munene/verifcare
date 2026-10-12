@@ -12,5 +12,15 @@ class AppConfig {
   // phone, where "localhost" would resolve to the phone itself, not the dev machine. Not used by
   // anything yet (login is the only screen so far), but kept here matching the family-member
   // app's own config shape, since the next piece of work will need it.
-  static const String apiBaseUrl = 'https://1fipq7yhjd.execute-api.eu-west-1.amazonaws.com/prod';
+  // Google Directions web-service key for the route to the dependant's home on the check-in map
+  // (2026-09-26). Supplied at build time so it's never committed:
+  //   flutter run --dart-define=DIRECTIONS_API_KEY=<key>
+  // Empty means no route is drawn; the map works as before. It must be a key allowed to call the
+  // Directions API - an Android-app-restricted Maps SDK key is refused by the web service.
+  static const String directionsApiKey = String.fromEnvironment(
+    'DIRECTIONS_API_KEY',
+  );
+
+  static const String apiBaseUrl =
+      'https://1fipq7yhjd.execute-api.eu-west-1.amazonaws.com/prod';
 }

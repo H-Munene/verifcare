@@ -16,24 +16,15 @@ export interface ObservabilityParams {
 export function createObservability(stack: cdk.Stack, params: ObservabilityParams): void {
   const { apiFunction, missedVisitSweepFunction, restApi, database } = params;
 
-  // Deliberately a separate topic from AlertsTopic - architecture.md's
-  // Observability row says CloudWatch alarms are "distinct from the
-  // business-facing SNS alerts" (missed-visit/cognitive-risk, sent to the
-  // supervisor). This one is for operational/system health, not product
-  // alerts. No email subscription yet, same reasoning as AlertsTopic - no
-  // real recipient address is settled anywhere.
+  // System health alarms, kept separate from the product AlertsTopic.
+  // No subscriptions yet.
   const opsAlertsTopic = new sns.Topic(stack, "OpsAlertsTopic", {
     topicName: "mzazi-care-ops-alerts",
   });
   const opsAlarmAction = new cloudwatchActions.SnsAction(opsAlertsTopic);
 
-  // 5 alarms, 1 dashboard - matches the confirmed cost estimate ($0.51/
-  // month). Errors only, one per current resource, not error+latency per
-  // Lambda function as architecture.md's fuller text describes - confirmed
-  // with the user 2026-09-13, since the literal text doesn't fit in 5 with
-  // 2 functions + API Gateway + RDS all needing coverage. Latency alarms
-  // and acoustic-model's own alarm are left for later, once there's a
-  // concrete need to revisit the count.
+  // Error alarms only, one per resource, to stay within the 5-alarm budget.
+  // TODO: latency alarms and an acoustic-model alarm.
   const apiFunctionErrorsAlarm = new cloudwatch.Alarm(stack, "ApiFunctionErrorsAlarm", {
     alarmDescription: "api Lambda function errors",
     metric: apiFunction.metricErrors({ period: cdk.Duration.minutes(5) }),

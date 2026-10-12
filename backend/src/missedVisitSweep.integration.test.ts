@@ -128,6 +128,47 @@ describe.skipIf(!hasTestDb)('sweepMissedVisits (real Postgres)', () => {
     expect(updated?.status).toBe('missed');
   });
 
+  it('raises one shared missed-visit alert per visit, audited, and never a second on re-run', async () => {
+    const db = getDb();
+    const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+    const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+    const dependant = await createTestDependant(supervisor.id);
+    const visit = await createTestVisit(
+      caregiver.userId,
+      dependant.id,
+      supervisor.id,
+      'scheduled',
+      new Date(Date.now() - 60 * 60 * 1000),
+    );
+
+    await sweepMissedVisits(db);
+    // A visit re-marked by hand and swept again must not get a second alert.
+    await db
+      .update(schema.visitSchedules)
+      .set({ status: 'scheduled' })
+      .where(eq(schema.visitSchedules.id, visit.id));
+    await sweepMissedVisits(db);
+
+    const alerts = await db.select().from(schema.notificationLog);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      type: 'missed_visit',
+      visitScheduleId: visit.id,
+      recipientUserId: null,
+      channel: 'in_app',
+      acknowledgedAt: null,
+    });
+    expect(alerts[0]?.sentAt).toBeInstanceOf(Date);
+
+    const audit = await db.select().from(schema.auditLog);
+    expect(audit[0]).toMatchObject({
+      actorUserId: null,
+      action: 'visit_schedule.mark_missed',
+      entityType: 'visit_schedule',
+      entityId: visit.id,
+    });
+  });
+
   it('marks a checked-in-but-never-checked-out visit as missed once its scheduledEnd has passed', async () => {
     const db = getDb();
     const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');

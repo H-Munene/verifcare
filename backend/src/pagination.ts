@@ -17,21 +17,34 @@
 // beyond what its own cursor could represent would compare as "greater than itself" on the next
 // page's query, re-including that row instead of excluding it. Sorting and comparing on id alone
 // has no such precision mismatch, since id round-trips through the cursor exactly.
-import { sql, type SQL } from 'drizzle-orm';
+//
+// Sorting (2026-09-26, for the supervisor console's sortable tables): a list may be ordered by
+// another column instead, with id as the tie-breaker, and then pages on the (sort value, id) pair
+// - so the cursor also carries the last row's sort value and which sort it was made for. A cursor
+// from one sort is rejected on another rather than silently skipping or repeating rows. Sort
+// expressions must never be NULL (COALESCE a nullable column) and must round-trip exactly
+// through the cursor's string (truncate timestamps to milliseconds, as above).
+import { asc, desc, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 
 export interface Cursor {
   id: string;
+  /** The sort the cursor was made for (e.g. "-name"); absent for the default id order. */
+  sort?: string;
+  /** The last row's sort value, as text. */
+  value?: string;
 }
 
 export function encodeCursor(cursor: Cursor): string {
-  return Buffer.from(JSON.stringify({ id: cursor.id })).toString('base64url');
+  return Buffer.from(
+    JSON.stringify({ id: cursor.id, sort: cursor.sort, value: cursor.value }),
+  ).toString('base64url');
 }
 
 // Throws on any malformed input - callers should treat this the same as any other bad request
 // (400), not a 500. A cursor is only ever produced by encodeCursor above, so a decode failure
 // means a client sent something else (stale/tampered/hand-edited), not a bug in this code.
-export function decodeCursor(raw: string): Cursor {
+export function decodeCursor(raw: string, expectedSort?: string): Cursor {
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
@@ -41,18 +54,69 @@ export function decodeCursor(raw: string): Cursor {
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error('Malformed pagination cursor.');
   }
-  const { id } = parsed as Record<string, unknown>;
+  const { id, sort, value } = parsed as Record<string, unknown>;
   if (typeof id !== 'string' || id === '') {
     throw new Error('Malformed pagination cursor.');
   }
-  return { id };
+  if (sort !== expectedSort) {
+    throw new Error('Pagination cursor belongs to a different sort.');
+  }
+  if (expectedSort !== undefined && typeof value !== 'string') {
+    throw new Error('Malformed pagination cursor.');
+  }
+  return typeof sort === 'string' && typeof value === 'string' ? { id, sort, value } : { id };
 }
 
 export function cursorCondition(idColumn: PgColumn, cursor: Cursor): SQL {
   return sql`${idColumn} > ${cursor.id}`;
 }
 
-// Callers fetch `limit + 1` rows ordered by id ASC; this splits that result into the page actually
+/** A column a list can be sorted by: the SQL to order on, and the type its cursor text casts to. */
+export interface SortKey {
+  expr: SQL | PgColumn;
+  cast: 'text' | 'date' | 'timestamptz';
+}
+
+/** A requested sort ("name" ascending, "-name" descending) resolved against a list's keys. */
+export interface Sort extends SortKey {
+  /** The sort as requested, which the cursor records. */
+  param: string;
+  descending: boolean;
+}
+
+// [param] comes from the route's own z.enum of "key" / "-key" values, so it always names a key.
+export function resolveSort<K extends string>(
+  param: string | undefined,
+  keys: Record<K, SortKey>,
+): Sort | undefined {
+  if (!param) {
+    return undefined;
+  }
+  const descending = param.startsWith('-');
+  const key = (descending ? param.slice(1) : param) as K;
+  return { ...keys[key], param, descending };
+}
+
+/** WHERE condition for the rows after [cursor], in [sort]'s order (id order when none). */
+export function keysetCondition(idColumn: PgColumn, cursor: Cursor, sort?: Sort): SQL {
+  if (!sort) {
+    return cursorCondition(idColumn, cursor);
+  }
+  // A row comparison: Postgres compares (value, id) pairs in order, which is exactly the keyset.
+  // Both parts go the same direction, so the id tie-break follows the sort's direction too.
+  const after = sort.descending ? sql`<` : sql`>`;
+  return sql`(${sort.expr}, ${idColumn}) ${after} (${cursor.value}::${sql.raw(sort.cast)}, ${cursor.id}::uuid)`;
+}
+
+/** ORDER BY for [sort], with id as the tie-breaker (plain id order when none). */
+export function keysetOrder(idColumn: PgColumn, sort?: Sort): SQL[] {
+  if (!sort) {
+    return [asc(idColumn)];
+  }
+  return sort.descending ? [desc(sort.expr), desc(idColumn)] : [asc(sort.expr), asc(idColumn)];
+}
+
+// Callers fetch `limit + 1` rows in keysetOrder; this splits that result into the page actually
 // returned and the next cursor (or null on the last page), without a separate COUNT query.
 export function paginate<T>(
   rowsFetched: T[],

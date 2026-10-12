@@ -24,6 +24,7 @@ import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
+import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
@@ -40,7 +41,8 @@ interface NotificationResponse {
   type: 'missed_visit' | 'cognitive_risk';
   visitScheduleId: string | null;
   audioRecordId: string | null;
-  recipientUserId: string;
+  // null: a shared missed-visit alert, addressed to every supervisor (0016).
+  recipientUserId: string | null;
   channel: string | null;
   sentAt: string | null;
   acknowledgedAt: string | null;
@@ -196,14 +198,24 @@ export function createNotificationsRouter(dependencies: NotificationsRouterDepen
         throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
       }
 
-      const [updated] = await db
-        .update(schema.notificationLog)
-        .set({ acknowledgedAt: new Date(), acknowledgedBy: callerRow.id })
-        .where(eq(schema.notificationLog.id, notificationId))
-        .returning();
-      if (!updated) {
-        throw new Error('Update to notification_log returned no row.');
-      }
+      const updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(schema.notificationLog)
+          .set({ acknowledgedAt: new Date(), acknowledgedBy: callerRow.id })
+          .where(eq(schema.notificationLog.id, notificationId))
+          .returning();
+        if (!row) {
+          throw new Error('Update to notification_log returned no row.');
+        }
+        await recordAudit(tx, {
+          actorUserId: callerRow.id,
+          action: 'notification.acknowledge',
+          entityType: 'notification',
+          entityId: notificationId,
+          metadata: { type: existing.type },
+        });
+        return row;
+      });
       res.status(200).json(toResponse(updated));
     } catch (err) {
       next(err);
