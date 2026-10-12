@@ -69,12 +69,10 @@ ThemeData buildAppTheme() {
   final squareButton = ButtonStyle(
     shape: WidgetStateProperty.all(const RoundedRectangleBorder()),
   );
-  // Neutral grey borders that only darken on focus, never a coloured outline - the same rule as
-  // the web console's fields.
-  OutlineInputBorder squareInput(Color color) => OutlineInputBorder(
-    borderRadius: BorderRadius.zero,
-    borderSide: BorderSide(color: color),
-  );
+  // Fields are a single underline, no box (user request 2026-10-12): neutral grey that only darkens
+  // on focus, never a coloured outline - the same rule as the web console's fields.
+  UnderlineInputBorder underline(Color color) =>
+      UnderlineInputBorder(borderSide: BorderSide(color: color));
   return ThemeData(
     // primary is pinned to the exact emerald; a bare seed would shift it to a generated tone.
     colorScheme: ColorScheme.fromSeed(
@@ -92,11 +90,11 @@ ThemeData buildAppTheme() {
       shape: square,
     ),
     inputDecorationTheme: InputDecorationTheme(
-      border: squareInput(const Color(0xFFD4D4D4)),
-      enabledBorder: squareInput(const Color(0xFFD4D4D4)),
-      focusedBorder: squareInput(inkTertiary),
-      errorBorder: squareInput(dangerRed),
-      focusedErrorBorder: squareInput(dangerRed),
+      border: underline(const Color(0xFFD4D4D4)),
+      enabledBorder: underline(const Color(0xFFD4D4D4)),
+      focusedBorder: underline(inkTertiary),
+      errorBorder: underline(dangerRed),
+      focusedErrorBorder: underline(dangerRed),
       floatingLabelStyle: WidgetStateTextStyle.resolveWith(
         (states) => TextStyle(
           color: states.contains(WidgetState.error) ? dangerRed : inkSecondary,

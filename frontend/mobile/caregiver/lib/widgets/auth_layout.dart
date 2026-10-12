@@ -6,7 +6,7 @@ import '../app_ui.dart';
 // CARE word logo top left, and no "Caregiver"/"Family member" label, since each app is already
 // only for one kind of user. Kept identical in both mobile apps (they share no package).
 
-/// The word logo: a small emerald square, then the name in spaced capitals.
+/// The word logo: the name in spaced emerald capitals.
 class Wordmark extends StatelessWidget {
   const Wordmark({super.key});
 
@@ -15,21 +15,14 @@ class Wordmark extends StatelessWidget {
     // Read as a name, not spelled out letter by letter.
     label: 'Mzazi Care',
     child: ExcludeSemantics(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(width: 10, height: 10, color: primaryGreen),
-          const SizedBox(width: 10),
-          const Text(
-            'MZAZI CARE',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 3,
-              color: inkDefault,
-            ),
-          ),
-        ],
+      child: const Text(
+        'MZAZI CARE',
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 3,
+          color: primaryGreen,
+        ),
       ),
     ),
   );

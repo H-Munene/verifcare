@@ -272,7 +272,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               initialValue: reason,
               decoration: const InputDecoration(
                 labelText: 'Reason not done',
-                border: OutlineInputBorder(),
                 isDense: true,
               ),
               items: [
@@ -296,8 +295,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 enabled: !_submitting,
                 decoration: const InputDecoration(
                   labelText: 'Details (optional)',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+                    isDense: true,
                 ),
               ),
             ),

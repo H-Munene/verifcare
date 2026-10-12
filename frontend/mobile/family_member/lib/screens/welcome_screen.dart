@@ -28,12 +28,7 @@ class WelcomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: const AuthHeading(
-        title: 'Stay close to their care',
-        subtitle:
-            'See when a caregiver arrives, what they did and how each visit went, wherever '
-            'you are.',
-      ),
+      child: const SizedBox.shrink(),
     );
   }
 }
