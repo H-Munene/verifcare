@@ -229,6 +229,28 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       authorizationType: apigateway.AuthorizationType.COGNITO,
       authorizer: cognitoAuthorizer,
     },
+    // Stage-wide throttle (2026-10-12). Without it the only cap was the account's 10,000 req/s,
+    // and a burst could scale the api Lambda far enough to exhaust db.t4g.micro's connections
+    // (each environment holds a pool of 2). 50 req/s steady, bursting to 100, is far above this
+    // project's real traffic while keeping Lambda concurrency, and so RDS connections, bounded.
+    // Requests over it get a 429 from API Gateway. Per-client limits are WAF's job (below).
+    deployOptions: {
+      throttlingRateLimit: 50,
+      throttlingBurstLimit: 100,
+    },
+  });
+
+  // API Gateway's own error responses (authorizer 401s, throttling 429s, 5xx) carry no CORS
+  // headers by default, so a browser hides them behind a generic "Failed to fetch" and the web
+  // console can't tell an expired session or a rate limit from a network failure.
+  const corsErrorHeaders = { "Access-Control-Allow-Origin": "'*'" };
+  restApi.addGatewayResponse("Default4xxResponse", {
+    type: apigateway.ResponseType.DEFAULT_4XX,
+    responseHeaders: corsErrorHeaders,
+  });
+  restApi.addGatewayResponse("Default5xxResponse", {
+    type: apigateway.ResponseType.DEFAULT_5XX,
+    responseHeaders: corsErrorHeaders,
   });
 
   // WAF: 1 Web ACL, one custom rate-based rule, one AWS Managed Rule Group
@@ -253,7 +275,16 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       {
         name: "RateLimit",
         priority: 0,
-        action: { block: {} },
+        // 429 rather than WAF's default 403, so clients see "too many requests", not "forbidden";
+        // with the CORS header so the browser lets the web console read it.
+        action: {
+          block: {
+            customResponse: {
+              responseCode: 429,
+              responseHeaders: [{ name: "Access-Control-Allow-Origin", value: "*" }],
+            },
+          },
+        },
         statement: {
           rateBasedStatement: {
             limit: 2000,
