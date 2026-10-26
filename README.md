@@ -14,7 +14,7 @@ Supervisors schedule and monitor visits from a web console, caregivers check in 
 | Infrastructure | `infra` | AWS CDK (TypeScript), one stack: `MzaziCareStack` |
 | Acoustic model | `acoustic-model` | Python research package (not deployed yet) |
 
-The supervisor web console is live at **https://d2tvkj3xx9akgx.cloudfront.net**.
+The supervisor web console is live at **https://mzazicare.hmunene.com/**.
 
 ## Architecture
 
