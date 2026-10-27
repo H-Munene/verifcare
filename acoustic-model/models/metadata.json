@@ -1,0 +1,72 @@
+{
+  "model": "xlsr_logistic",
+  "best_params": {
+    "C": "15.741890047456648",
+    "class_weight": "None",
+    "dual": "False",
+    "fit_intercept": "True",
+    "intercept_scaling": "1",
+    "l1_ratio": "0.0",
+    "max_iter": "5000",
+    "n_jobs": "None",
+    "penalty": "deprecated",
+    "random_state": "None",
+    "solver": "lbfgs",
+    "tol": "0.0001",
+    "verbose": "0",
+    "warm_start": "False"
+  },
+  "calibration": {
+    "slope": 0.024686505797636458,
+    "intercept": -0.6173047303386616
+  },
+  "extraction_parameters": {
+    "FRAME_SECONDS": 0.025,
+    "HOP_SECONDS": 0.01,
+    "LONG_PAUSE_SECONDS": 0.18,
+    "MAX_DURATION_SECONDS": 90.0,
+    "MIN_DURATION_SECONDS": 30.0,
+    "MIN_PAUSE_SECONDS": 0.08,
+    "MIN_SPEECH_SECONDS": 0.025,
+    "NOISE_LEVEL_PERCENTILE": 5,
+    "NOISE_MARGIN_DB": 6.0,
+    "SILENCE_DB_BELOW_SPEECH": 25.0,
+    "SPEECH_LEVEL_PERCENTILE": 99,
+    "TARGET_SAMPLE_RATE": 16000,
+    "TRIM_DB_BELOW_REFERENCE": 30.0,
+    "TRIM_FRAME_SECONDS": 0.025,
+    "TRIM_HOP_SECONDS": 0.01,
+    "TRIM_REFERENCE_PERCENTILE": 99
+  },
+  "cv_design": {
+    "folds": 5,
+    "repeats": 5,
+    "inner_folds": 3,
+    "search_configs_per_model": 20
+  },
+  "seed": 42,
+  "trained_on": "2026-10-28",
+  "package_versions": {
+    "numpy": "2.5.3",
+    "scipy": "1.18.1",
+    "scikit-learn": "1.9.1",
+    "xgboost": "3.4.1",
+    "pandas": "3.0.5",
+    "opensmile": "2.6.0",
+    "soundfile": "0.14.0",
+    "soxr": "1.1.0",
+    "joblib": "1.6.0",
+    "torch": "2.14.1",
+    "transformers": "5.21.0"
+  },
+  "encoder": "facebook/wav2vec2-xls-r-300m",
+  "encoder_revision": "1a640f32ac3e39899438a2931f9924c02f080a54",
+  "layer": 12,
+  "pca_components": 64,
+  "input": "candidate layers [6, 9, 12, 15, 18] x 1024, flattened (xlsr.layer_columns)",
+  "embedding": {
+    "window_s": 20.0,
+    "min_last_window_s": 5.0,
+    "torch_threads": 4
+  }
+}
