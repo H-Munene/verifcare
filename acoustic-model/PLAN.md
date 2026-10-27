@@ -2,6 +2,7 @@
 ## Development Plan: Language-Independent Acoustic Markers
 
 **Status:** Plan for building the model from scratch. Scoping review done 2026-09-28: the feature list in 3.1 is frozen, and the decisions from that review are recorded in place and in `docs/ml-dev-log.md` (local). Checkpoint 1 review 2026-09-28: 90 s truncation, D2, D6 opened, and the within-subject tolerance, all recorded in place.
+**Restart after Stage 2 (2026-10-27, developer decision):** the v2 Stage 3-5 outputs and the saved model are cleared (still in git history; the v2 run gave test ROC-AUC 0.409, 95 % CI 0.184-0.642). Stages 0-2 stand: the data audit, D1-D7, the 90 s truncation, the split and the 5 × 5 folds. Stages 3-5 are to be redesigned on the same DementiaNet data, so Stage 3's frozen feature list is open again. **The test set is already used**, so the guard's marker (`results/05_model_evaluation/test_set_used.json`) is kept and blocks it. Any result from the restart is a cross-validation result on the training portion and is reported as exploratory, not as a held-out performance estimate.
 **Audience:** the developer and the coding agent. The agent treats this file as the source of truth. If something in it turns out to be wrong once real data is inspected, the agent stops, says so, and proposes a change. It never silently deviates.
 
 ---
