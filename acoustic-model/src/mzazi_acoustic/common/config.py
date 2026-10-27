@@ -280,3 +280,35 @@ D5_THRESHOLD = None
 ROBUSTNESS_TEST_CONDITION = "bandpass+pink@10dB"
 PERMUTATION_REPEATS = 10  # shuffles per feature per fold
 CALIBRATION_BINS = 10  # expected calibration error
+
+# v3 (PLAN.md "Stages 3-5, v3", approved 2026-10-27 as D8 and D9): frozen pretrained speech
+# representations. Pre-registered before any embedding was extracted.
+EMBEDDING_RESULTS = RESULTS_DIR / "03v3_embeddings"
+V3_TRAINING_RESULTS = RESULTS_DIR / "04v3_model_training"
+V3_EVALUATION_RESULTS = RESULTS_DIR / "05v3_model_evaluation"
+EMBEDDING_CACHE = DATA_DIR / "embeddings"  # git-ignored with the rest of data/
+# D8: Apache-2.0, 128 languages including Swahili (not Luo or Kikuyu). Never fine-tuned.
+ENCODER_NAME = "facebook/wav2vec2-xls-r-300m"
+# Pinned on first download (the model card's commit), so a later upstream change can't alter the
+# embeddings silently. None only until that first download.
+ENCODER_REVISION = None
+EMBEDDING_WINDOW_SECONDS = 20.0  # consecutive, non-overlapping
+EMBEDDING_MIN_LAST_WINDOW_SECONDS = 5.0  # a shorter remainder joins the previous window
+EMBEDDING_TORCH_THREADS = 4  # fixed, so floating-point reduction order is the same every run
+# Middle layers carry the most acoustic/paralinguistic information; the last ones lean towards the
+# phonetic content of the language. Chosen per fold, in the inner search only.
+EMBEDDING_CANDIDATE_LAYERS = [6, 9, 12, 15, 18]
+# C3 (silence only): a clip with less pause audio than this gets no embedding and is median-imputed
+# inside the fold; the count is reported.
+PAUSE_ONLY_MIN_SECONDS = 0.5
+V3_MODEL = "xlsr_logistic"
+V3_SEARCH_SPACE = {"select__layer": EMBEDDING_CANDIDATE_LAYERS, "pca__n_components": [8, 16, 32, 64],
+                   "model__C": ("log", 1e-4, 1e2)}
+# C1: v2's 18 features as Stage 3.3 left them (sd_unvoiced_segment_s dropped as redundant, r = 0.996).
+V3_C1_FEATURES = [f for f in MODEL_FEATURES if f != "sd_unvoiced_segment_s"]
+# C2: the Stage 1 channel-quality proxies (file_manifest.csv, measured at each file's native rate).
+CHANNEL_PROXIES = ["noise_floor_dbfs", "bandwidth_hz", "noise_flatness"]
+V3_N_COMPARISONS = 2  # Bonferroni family: v3 vs C1, v3 vs C2
+V3_C3_MARGIN = 0.05  # C3 AUC >= main AUC - this: the signal most likely comes from the recording
+V3_C4_ABS_R = 0.3  # score-vs-proxy or score-vs-duration |r| above this is reported next to the result
+V3_ROBUSTNESS_CONDITIONS = [("bandpass", None, None), ("bandpass+pink@10dB", "pink", 10)]

@@ -180,9 +180,9 @@ No subject appears in both train and test; no subject appears in more than one v
 
 ---
 
-## Stages 3-5, v3: pretrained speech representations (PROPOSED 2026-10-27, awaiting the developer's approval)
+## Stages 3-5, v3: pretrained speech representations (APPROVED 2026-10-27: D8 and D9)
 
-The developer chose this approach on 2026-10-27, after the v2 restart (see Status). Until this section is approved, nothing in it runs. Once approved, it replaces the v2 Stages 3-5 below, which stay as history. Stages 0-2, the principles in section 0, the guard, D1-D7, the 5 × 5 folds, D2 weights, the rank-preserving calibration and the D5 threshold rule all carry over unchanged.
+The developer chose this approach on 2026-10-27, after the v2 restart (see Status), and approved this section the same day. It replaces the v2 Stages 3-5 below, which stay as history. The pre-registered values are in `config.py` under "v3". Stages 0-2, the principles in section 0, the guard, D1-D7, the 5 × 5 folds, D2 weights, the rank-preserving calibration and the D5 threshold rule all carry over unchanged.
 
 ### v3.0 What changes and why
 
@@ -263,11 +263,11 @@ C5 is limited to two conditions because every condition means a full re-extracti
   - test-split clips are refused;
   - layer selection happens inside the pipeline, so it is fitted per fold.
 
-### Decisions needed from the developer before anything runs
+### Decisions (developer, 2026-10-27)
 
-- **D8:** the encoder. Proposed: XLS-R 300M, frozen.
-- **D9:** the v3.3 pipeline and its search space, the v3.4 comparators and reading rules, and the "exploratory, no held-out test" labelling. Proposed: as written.
-- **Limitation 17, added if approved:** no untouched test set remains for v3, so every v3 figure is a cross-validation estimate.
+- **D8 = XLS-R 300M, frozen.** Approved.
+- **D9 = the v3.3 pipeline and search space, the v3.4 comparators and reading rules, and the "exploratory, no held-out test" labelling, as written.** Approved.
+- Limitation 17 added (below).
 
 ## Stage 3 — Feature Engineering (language-independent) [v2: outputs cleared 2026-10-27; kept as history and as the C1 comparator's definition]
 
@@ -547,6 +547,7 @@ The rule's exact form, and its false-alarm rate over a typical visit schedule, i
 14. **Other voices in training, monologues in deployment (added 2026-10-05):** D1 = (a) keeps clips with other voices (about 60 % of people in each class), while the supervisor-approved deployment records prompted monologues. The single-speaker sensitivity analysis is the closest estimate of monologue performance.
 15. **Pause detector not validated against human annotation (added 2026-10-05):** the hand-annotation step was skipped (developer decision), so the accuracy of every pause feature on real speech is unverified, including how much stop consonants contaminate the short-pause band. The settings were pre-registered and never tuned, so this is a lack of validation, not a risk of tuning to the results.
 16. **Chance-level discrimination in cross-validation (added 2026-10-05):** on DementiaNet, the pre-chosen language-independent feature set barely separates the classes. The chosen logistic regression has a person-weighted CV ROC-AUC of 0.522 (SD 0.059); raw scores reach 0.553. At the 90 %-specificity threshold, CV sensitivity is 10 %. The strongest single feature, articulation rate (out-of-fold AUC about 0.62), is also flagged for depending on recording length. Possible reasons, none established: the detector is unvalidated (limitation 15); label noise (limitations 2 and 7); and other voices in about 60 % of people's clips.
+17. **No untouched test set for v3 (added 2026-10-27):** v2 used the held-out test set once and it stays locked. Every v3 figure is therefore a cross-validation estimate on the training portion, kept honest by running one pre-registered pipeline (no winner picked on the outer folds), but still not a held-out result.
 
 ---
 
