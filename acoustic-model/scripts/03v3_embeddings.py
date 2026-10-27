@@ -93,7 +93,11 @@ def main():
             elapsed = time.perf_counter() - started
             if not args.time:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                np.save(path, vector)
+                # Write then rename, so a run stopped mid-save never leaves a partial file that a
+                # resumed run would mistake for a finished one.
+                partial = path.with_name(path.stem + ".partial.npy")
+                np.save(partial, vector)
+                partial.replace(path)
             index.append({**entry, "embed_seconds": elapsed, "embedded": True})
         print(f"  {i}/{len(rows)} {row.file_id}")
 
