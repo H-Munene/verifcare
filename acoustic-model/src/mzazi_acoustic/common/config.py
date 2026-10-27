@@ -289,9 +289,9 @@ V3_EVALUATION_RESULTS = RESULTS_DIR / "05v3_model_evaluation"
 EMBEDDING_CACHE = DATA_DIR / "embeddings"  # git-ignored with the rest of data/
 # D8: Apache-2.0, 128 languages including Swahili (not Luo or Kikuyu). Never fine-tuned.
 ENCODER_NAME = "facebook/wav2vec2-xls-r-300m"
-# Pinned on first download (the model card's commit), so a later upstream change can't alter the
-# embeddings silently. None only until that first download.
-ENCODER_REVISION = None
+# Pinned 2026-10-27 at the 5-clip timing run (the Hub commit then current), so a later upstream
+# change can't alter the embeddings silently.
+ENCODER_REVISION = "1a640f32ac3e39899438a2931f9924c02f080a54"
 EMBEDDING_WINDOW_SECONDS = 20.0  # consecutive, non-overlapping
 EMBEDDING_MIN_LAST_WINDOW_SECONDS = 5.0  # a shorter remainder joins the previous window
 EMBEDDING_TORCH_THREADS = 4  # fixed, so floating-point reduction order is the same every run

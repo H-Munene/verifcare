@@ -20,6 +20,7 @@ import zlib
 import numpy as np
 import pandas as pd
 import soundfile as sf
+from huggingface_hub import HfApi
 
 from mzazi_acoustic.common import config, degradation, guards
 from mzazi_acoustic.embeddings import xlsr
@@ -64,11 +65,11 @@ def main():
     rows = clips()
     if args.time:
         rows = rows[rows["role"] == "training_pool"].head(args.time)
-    model, extractor = xlsr.load_encoder()
-    revision = model.config._commit_hash
+    # The pinned commit, or (for --time, before pinning) the current one: either way the exact
+    # commit is what gets loaded and printed.
+    revision = config.ENCODER_REVISION or HfApi().model_info(config.ENCODER_NAME).sha
+    model, extractor = xlsr.load_encoder(revision=revision)
     print(f"Encoder {config.ENCODER_NAME} at revision {revision}")
-    if config.ENCODER_REVISION is not None and revision != config.ENCODER_REVISION:
-        sys.exit(f"Loaded revision {revision} differs from the pinned {config.ENCODER_REVISION}.")
 
     OUT.mkdir(parents=True, exist_ok=True)
     index, c1 = [], []
