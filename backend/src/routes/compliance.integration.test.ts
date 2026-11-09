@@ -393,6 +393,41 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
     });
   });
 
+  it('reports caregiver performance from the same visit records as the other reports', async () => {
+    const response = await request(app)
+      .get('/compliance/caregiver-performance?from=2026-09-01&to=2026-09-30')
+      .set('x-test-auth', supervisorAuth);
+
+    expect(response.status).toBe(200);
+    const { items } = response.body as {
+      items: { caregiverName: string; completed: number; missed: number; assigned: number }[];
+    };
+    expect(items.map((row) => row.caregiverName)).toEqual(['Amina Wanjiru', 'Brian Otieno']);
+    expect(items[0]).toMatchObject({ assigned: 3, completed: 2, missed: 1 });
+  });
+
+  it('exports caregiver performance as CSV and logs the export', async () => {
+    const response = await request(app)
+      .get('/compliance/exports/caregiver-performance?from=2026-09-01&to=2026-09-30')
+      .set('x-test-auth', supervisorAuth);
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('Amina Wanjiru');
+    const audits = await getDb()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'compliance.export'));
+    expect(audits[0]?.metadata).toMatchObject({ report: 'caregiver-performance' });
+  });
+
+  it('keeps caregiver performance from non-supervisors', async () => {
+    const response = await request(app)
+      .get('/compliance/caregiver-performance')
+      .set('x-test-auth', testAuthHeader('someone', 'caregiver'));
+
+    expect(response.status).toBe(403);
+  });
+
   it('reports who has accepted the current terms', async () => {
     const db = getDb();
     await db.insert(schema.termsAcceptances).values([

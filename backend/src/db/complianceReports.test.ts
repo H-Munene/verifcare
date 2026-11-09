@@ -22,6 +22,7 @@ function completedVisit(overrides: Partial<VisitRecord> = {}): VisitRecord {
     familyDistanceFromGeofenceMeters: 4,
     audioRecorded: true,
     audioSkipReason: null,
+    recoveredFromVisitId: null,
     failedChecks: [],
     requiredTasksNotDone: [],
     latestResolution: null,
