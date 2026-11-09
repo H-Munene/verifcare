@@ -48,6 +48,17 @@ export interface PendingCheckinOverride {
   caregiverName: string;
 }
 
+export interface VisitNeedingCover {
+  caseId: string;
+  status: 'open' | 'exhausted';
+  visitScheduleId: string;
+  scheduledStart: string;
+  dependantName: string;
+  caregiverName: string;
+  offeredToName: string | null;
+  notificationId: string | null;
+}
+
 export interface DashboardOverview {
   date: string;
   timeZone: string;
@@ -62,6 +73,7 @@ export interface DashboardOverview {
   previousPeriod?: { completed: number; missed: number };
   attention: {
     missedVisitAlerts: { total: number; items: MissedVisitAlert[] };
+    visitsNeedingCover: { total: number; items: VisitNeedingCover[] };
     pendingCheckinOverrides: { total: number; items: PendingCheckinOverride[] };
   };
 }

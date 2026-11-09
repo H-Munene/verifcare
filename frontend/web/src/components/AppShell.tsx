@@ -5,6 +5,7 @@ import {
   CalendarCheckIn01Icon,
   DashboardSquare01Icon,
   HandHeartIcon,
+  Route01Icon,
   SecurityCheckIcon,
   UserGroupIcon,
 } from '@hugeicons/core-free-icons';
@@ -25,6 +26,7 @@ import './AppShell.css';
 const NAV_SECTIONS = [
   { label: 'Overview', path: '/overview', icon: DashboardSquare01Icon },
   { label: 'Visits', path: '/visits', icon: CalendarCheckIn01Icon },
+  { label: 'Plan day', path: '/plan', icon: Route01Icon },
   { label: 'Caregivers', path: '/caregivers', icon: UserGroupIcon },
   { label: 'Dependants', path: '/dependants', icon: HandHeartIcon },
   { label: 'Compliance', path: '/compliance', icon: SecurityCheckIcon },
@@ -51,6 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const supervisorOnlySections = new Set([
     'Overview',
     'Visits',
+    'Plan day',
     'Caregivers',
     'Reviews',
     'Compliance',

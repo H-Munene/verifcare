@@ -34,7 +34,9 @@ export function trendOutcome(
   visit: Parameters<typeof visitState>[0] & { checkoutAt: Date | null },
   now: Date,
 ): TrendOutcome {
-  if (visit.status === 'cancelled') {
+  // A reassigned visit was taken over by another caregiver, and the replacement is counted in its
+  // own right. Counting the original as missed too would report one piece of care twice.
+  if (visit.status === 'cancelled' || visit.status === 'reassigned') {
     return 'cancelled';
   }
   const state = visitState(visit, now);

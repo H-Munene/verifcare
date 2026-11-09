@@ -10,6 +10,7 @@ import { DependantDetailPage } from './pages/DependantDetailPage';
 import { DependantsListPage } from './pages/DependantsListPage';
 import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { PlanDayPage } from './pages/PlanDayPage';
 import { RegisterCaregiverPage } from './pages/RegisterCaregiverPage';
 import { RegisterDependantPage } from './pages/RegisterDependantPage';
 import { VisitsPage } from './pages/VisitsPage';
@@ -48,6 +49,7 @@ export function App() {
                 <Route path="/caregivers/:caregiverId" element={<CaregiverDetailPage />} />
                 <Route path="/caregivers/:caregiverId/edit" element={<RegisterCaregiverPage />} />
                 <Route path="/visits" element={<VisitsPage />} />
+                <Route path="/plan" element={<PlanDayPage />} />
                 {/* The visit page was replaced by the side panel; old links open it there. */}
                 <Route path="/visits/:visitId" element={<VisitLinkRedirect />} />
                 <Route path="/compliance" element={<CompliancePage />} />

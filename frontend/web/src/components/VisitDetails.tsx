@@ -44,7 +44,7 @@ function visitOutcome(visit: VisitSchedule, checkedIn: boolean, now: number): Ho
   if (visit.status === 'in_progress') {
     return 'ongoing';
   }
-  if (visit.status === 'cancelled') {
+  if (visit.status === 'cancelled' || visit.status === 'reassigned') {
     return 'cancelled';
   }
   // Marked missed, or its end has passed with no check-in (the Overview's rule), is missed.
@@ -100,7 +100,7 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
   const outcome = visitOutcome(visit, Boolean(event?.checkinAt), now);
   // Over: nothing more will happen, so a step without a time now won't happen.
   const over =
-    ['completed', 'missed', 'investigated', 'cancelled'].includes(visit.status) ||
+    ['completed', 'missed', 'investigated', 'cancelled', 'reassigned'].includes(visit.status) ||
     now > Date.parse(visit.scheduledEnd);
 
   const steps: TimelineStep[] = [

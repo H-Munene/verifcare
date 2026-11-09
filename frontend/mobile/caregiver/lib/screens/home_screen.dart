@@ -58,7 +58,10 @@ class _HomeScreenState extends State<HomeScreen> {
           limit: 100,
         ),
       );
-      final visits = page.items.where((v) => v.status != 'cancelled').toList()
+      // A visit someone else took over is no longer this caregiver's to do.
+      final visits = page.items
+          .where((v) => v.status != 'cancelled' && v.status != 'reassigned')
+          .toList()
         ..sort((a, b) => a.scheduledStart.compareTo(b.scheduledStart));
       if (mounted) setState(() => _visits = visits);
     } on ApiException catch (e) {
@@ -110,7 +113,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     )
                   else
                     for (final visit in todays)
-                      _VisitCard(visit: visit, onTap: () => widget.onSelectVisit(visit)),
+                      _VisitCard(
+                        visit: visit,
+                        stopLabel: _stopLabel(visit, todays),
+                        onTap: () => widget.onSelectVisit(visit),
+                      ),
                   const SizedBox(height: 12),
                   const _SectionTitle('Coming up'),
                   if (next == null)
@@ -129,6 +136,13 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+/// "Stop 2 of 6" for a visit in today's planned route; null for one booked by hand.
+String? _stopLabel(VisitSchedule visit, List<VisitSchedule> todays) {
+  final position = visit.routeSequence;
+  if (position == null) return null;
+  return 'Stop $position of ${todays.where((v) => v.routeSequence != null).length}';
 }
 
 class _Greeting extends StatelessWidget {
@@ -188,9 +202,15 @@ class _SectionTitle extends StatelessWidget {
 class _VisitCard extends StatelessWidget {
   final VisitSchedule visit;
   final bool showDate;
+  final String? stopLabel;
   final VoidCallback onTap;
 
-  const _VisitCard({required this.visit, this.showDate = false, required this.onTap});
+  const _VisitCard({
+    required this.visit,
+    this.showDate = false,
+    this.stopLabel,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -222,9 +242,13 @@ class _VisitCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          showDate
-                              ? '${MaterialLocalizations.of(context).formatMediumDate(visit.scheduledStart)}, $window'
-                              : window,
+                          [
+                            ?stopLabel,
+                            if (visit.recoveredFromVisitId != null) 'Covering',
+                            showDate
+                                ? '${MaterialLocalizations.of(context).formatMediumDate(visit.scheduledStart)}, $window'
+                                : window,
+                          ].join(' · '),
                           style: const TextStyle(fontSize: 13, color: inkSecondary),
                         ),
                         const SizedBox(height: 4),

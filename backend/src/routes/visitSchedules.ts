@@ -139,7 +139,13 @@ export interface VisitSchedulesRouterDependencies {
 }
 
 type VisitStatus =
-  'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled' | 'investigated';
+  | 'scheduled'
+  | 'in_progress'
+  | 'completed'
+  | 'missed'
+  | 'cancelled'
+  | 'investigated'
+  | 'reassigned';
 
 interface VisitScheduleResponse {
   id: string;
@@ -158,6 +164,10 @@ interface VisitScheduleResponse {
   scheduledStart: string;
   scheduledEnd: string;
   status: VisitStatus;
+  // This visit's place in its planned route, when it came from a published plan.
+  routeSequence: number | null;
+  // The visit this one replaced, when another caregiver took it over.
+  recoveredFromVisitId: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -177,6 +187,8 @@ function toResponse(
     scheduledStart: row.scheduledStart.toISOString(),
     scheduledEnd: row.scheduledEnd.toISOString(),
     status: row.status as VisitStatus,
+    routeSequence: row.routeSequence,
+    recoveredFromVisitId: row.recoveredFromVisitId,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -224,7 +236,12 @@ const visitStatusSchema = z.enum([
   'missed',
   'cancelled',
   'investigated',
+  'reassigned',
 ]);
+
+// 'reassigned' is only ever set by a caregiver accepting a recovery offer, in the same transaction
+// that creates the replacement. Setting it by hand would leave a visit with no replacement.
+const patchableVisitStatusSchema = visitStatusSchema.exclude(['reassigned']);
 
 const createVisitScheduleRequestSchema = z
   .object({
@@ -241,7 +258,7 @@ const createVisitScheduleRequestSchema = z
 const updateVisitScheduleRequestSchema = z.object({
   scheduledStart: z.string().datetime({ offset: true }).optional(),
   scheduledEnd: z.string().datetime({ offset: true }).optional(),
-  status: visitStatusSchema.optional(),
+  status: patchableVisitStatusSchema.optional(),
 });
 
 // Sortable columns (2026-09-26, the supervisor console's tables). Truncated to milliseconds so

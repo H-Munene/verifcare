@@ -6,6 +6,7 @@ import { createComplianceApi } from './compliance';
 import { createDashboardApi } from './dashboard';
 import { createDependantsApi } from './dependants';
 import { createUsersApi } from './users';
+import { createVisitPlansApi } from './visitPlans';
 import { createVisitSchedulesApi } from './visitSchedules';
 
 // One place that wires the authenticated ApiClient into each resource's typed calls - every
@@ -17,6 +18,7 @@ export function useApi() {
   const caregivers = useMemo(() => createCaregiversApi(client), [client]);
   const users = useMemo(() => createUsersApi(client), [client]);
   const visitSchedules = useMemo(() => createVisitSchedulesApi(client), [client]);
+  const visitPlans = useMemo(() => createVisitPlansApi(client), [client]);
   const dashboard = useMemo(() => createDashboardApi(client), [client]);
   const compliance = useMemo(() => createComplianceApi(client), [client]);
   return {
@@ -24,6 +26,7 @@ export function useApi() {
     caregivers,
     users,
     visitSchedules,
+    visitPlans,
     dashboard,
     compliance,
   };

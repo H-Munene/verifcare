@@ -4,7 +4,8 @@
 // endpoint rather than the page stitching several lists together, because the list endpoints
 // don't carry check-in times or home locations and would need many paged calls to count.
 
-import { and, asc, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
@@ -185,12 +186,61 @@ export function createDashboardRouter(dependencies: DashboardRouterDependencies)
         .where(eq(schema.checkinOverrideRequests.status, 'pending'))
         .orderBy(asc(schema.checkinOverrideRequests.requestedAt));
 
+      // Visits with nobody to cover them: still looking, or a search that came up empty and hasn't
+      // been acknowledged. Once acknowledged, the visit's own alert and report carry it.
+      const original = alias(schema.users, 'original_caregiver');
+      const offered = alias(schema.users, 'offered_caregiver');
+      const coverRows = await db
+        .select({
+          caseId: schema.visitRecoveryCases.id,
+          status: schema.visitRecoveryCases.status,
+          visitScheduleId: schema.visitRecoveryCases.visitScheduleId,
+          scheduledStart: schema.visitSchedules.scheduledStart,
+          dependantName: schema.dependants.fullName,
+          caregiverName: original.fullName,
+          offeredToName: offered.fullName,
+          notificationId: schema.notificationLog.id,
+        })
+        .from(schema.visitRecoveryCases)
+        .innerJoin(
+          schema.visitSchedules,
+          eq(schema.visitSchedules.id, schema.visitRecoveryCases.visitScheduleId),
+        )
+        .innerJoin(schema.dependants, eq(schema.dependants.id, schema.visitSchedules.dependantId))
+        .innerJoin(original, eq(original.id, schema.visitSchedules.caregiverId))
+        .leftJoin(
+          schema.visitRecoveryOffers,
+          and(
+            eq(schema.visitRecoveryOffers.caseId, schema.visitRecoveryCases.id),
+            eq(schema.visitRecoveryOffers.status, 'offered'),
+          ),
+        )
+        .leftJoin(offered, eq(offered.id, schema.visitRecoveryOffers.caregiverId))
+        .leftJoin(
+          schema.notificationLog,
+          and(
+            eq(schema.notificationLog.visitScheduleId, schema.visitRecoveryCases.visitScheduleId),
+            eq(schema.notificationLog.type, 'no_cover_found'),
+            isNull(schema.notificationLog.acknowledgedAt),
+          ),
+        )
+        .where(
+          or(
+            eq(schema.visitRecoveryCases.status, 'open'),
+            and(
+              eq(schema.visitRecoveryCases.status, 'exhausted'),
+              isNotNull(schema.notificationLog.id),
+            ),
+          ),
+        )
+        .orderBy(asc(schema.visitSchedules.scheduledStart));
+
       res.status(200).json({
         date,
         timeZone: TIME_ZONE,
         generatedAt: now.toISOString(),
         visits: dayVisits
-          .filter((v) => v.status !== 'cancelled')
+          .filter((v) => v.status !== 'cancelled' && v.status !== 'reassigned')
           .map((v) => ({
             id: v.id,
             state: visitState(v, now),
@@ -218,6 +268,13 @@ export function createDashboardRouter(dependencies: DashboardRouterDependencies)
               scheduledStart: a.scheduledStart.toISOString(),
               dependantName: a.dependantName,
               caregiverName: a.caregiverName,
+            })),
+          },
+          visitsNeedingCover: {
+            total: coverRows.length,
+            items: coverRows.slice(0, ATTENTION_LIST_LIMIT).map((row) => ({
+              ...row,
+              scheduledStart: row.scheduledStart.toISOString(),
             })),
           },
           pendingCheckinOverrides: {

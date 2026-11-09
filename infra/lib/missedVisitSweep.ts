@@ -70,14 +70,11 @@ export function createMissedVisitSweep(
   // GetSecretValue before reaching the database (found 2026-09-24).
   databaseSecret.grantRead(missedVisitSweepFunction);
 
-  // Every 15 minutes (user decision 2026-09-24, replacing the earlier
-  // every-6-hours choice): the caregiver app's calendar turns a day red as
-  // soon as a visit is marked missed, and a 6-hour lag made that signal
-  // useless on the day. ~2,880 invocations/month stays inside the Lambda
-  // free tier; worst case (a cold start per run) is ~2,880 Secrets Manager
-  // GetSecretValue calls/month, about $0.015 - flagged in project-state.md.
+  // Every minute (2026-11-09): this also runs missed-visit recovery, where an offer lasts five
+  // minutes and each one passing to the next caregiver is time a dependant is left waiting. About
+  // 43,200 invocations a month, inside the Lambda free tier.
   new events.Rule(stack, "MissedVisitSweepSchedule", {
-    schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+    schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
     targets: [new eventsTargets.LambdaFunction(missedVisitSweepFunction)],
   });
 

@@ -62,6 +62,7 @@ const STATUS_OPTIONS: { value: VisitStatus; label: string }[] = [
   { value: 'missed', label: 'Missed' },
   { value: 'investigated', label: 'Investigated' },
   { value: 'cancelled', label: 'Cancelled' },
+  { value: 'reassigned', label: 'Reassigned' },
 ];
 
 // Date presets, as Nairobi days - the service's time zone, as on the Overview.

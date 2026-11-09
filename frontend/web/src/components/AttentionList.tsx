@@ -1,9 +1,17 @@
-// "Needs your attention": missed visits to acknowledge and caregivers waiting at a home for a
-// supervisor to start their visit, one category at a time behind segmented buttons, the list scrolling within whatever height its container gives it. Shared by the
+// "Needs your attention": late visits that need cover, caregivers waiting at a home for a
+// supervisor to start their visit, and missed visits to acknowledge, one category at a time
+// behind segmented buttons, the list scrolling within whatever height its container gives it.
+// Shared by the
 // Overview's panel and the top bar's alerts panel (2026-09-27), so both show the same thing and
 // acknowledge the same way.
 
-import { CalendarRemove02Icon, Clock01Icon, Key01Icon, UserIcon } from '@hugeicons/core-free-icons';
+import {
+  CalendarRemove02Icon,
+  Clock01Icon,
+  Key01Icon,
+  UserIcon,
+  UserSwitchIcon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -22,7 +30,7 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-type AttentionCategory = 'missed' | 'overrides';
+type AttentionCategory = 'cover' | 'overrides' | 'missed';
 
 const OVERRIDE_REASON_LABELS: Record<CheckinOverrideReason, string> = {
   no_family_member_present: 'No family member at the home',
@@ -120,7 +128,7 @@ export function AttentionList({
   const acknowledging = acknowledge.isPending ? acknowledge.variables : undefined;
   const acknowledgeFailed = acknowledge.isError;
   const onAcknowledge = (notificationId: string) => acknowledge.mutate(notificationId);
-  const { missedVisitAlerts, pendingCheckinOverrides } = attention;
+  const { missedVisitAlerts, pendingCheckinOverrides, visitsNeedingCover } = attention;
   // Every entry, in a list that scrolls within the panel (user request, 2026-09-26). The server
   // caps each list at 100, so "N more" only appears past that.
   const alerts = missedVisitAlerts.items;
@@ -131,6 +139,13 @@ export function AttentionList({
       label: 'Missed',
       count: missedVisitAlerts.total,
       icon: CalendarRemove02Icon,
+      iconColor: 'var(--color-state-no-checkin-icon)',
+    },
+    {
+      id: 'cover',
+      label: 'Cover',
+      count: visitsNeedingCover.total,
+      icon: UserSwitchIcon,
       iconColor: 'var(--color-state-no-checkin-icon)',
     },
     {
@@ -226,6 +241,61 @@ export function AttentionList({
                     That alert couldn't be acknowledged. Try again.
                   </li>
                 ) : null}
+              </ul>
+            )
+          ) : null}
+
+          {category === 'cover' ? (
+            visitsNeedingCover.total === 0 ? (
+              <p className="attention__empty">No visits need cover right now.</p>
+            ) : (
+              <ul className="attention__list">
+                {visitsNeedingCover.items.map((item) => (
+                  <li key={item.caseId} className="attention__item">
+                    <div className="attention__item-body">
+                      <p className="attention__title">
+                        {item.status === 'exhausted'
+                          ? `No cover found for ${item.dependantName}`
+                          : `Finding cover for ${item.dependantName}`}
+                      </p>
+                      <p className="attention__meta attention__facts">
+                        <span>
+                          <HugeiconsIcon icon={UserIcon} size={13} strokeWidth={1.8} aria-hidden />
+                          {item.caregiverName} hasn&rsquo;t arrived
+                        </span>
+                        <span>
+                          <HugeiconsIcon
+                            icon={Clock01Icon}
+                            size={13}
+                            strokeWidth={1.8}
+                            aria-hidden
+                          />
+                          Due {due(item.scheduledStart)}
+                        </span>
+                      </p>
+                      <p className="attention__meta">
+                        {item.status === 'exhausted'
+                          ? 'Nobody nearby could take it. Arrange this visit yourself.'
+                          : item.offeredToName
+                            ? `Offered to ${item.offeredToName}.`
+                            : 'Looking for someone nearby.'}
+                      </p>
+                      <div className="attention__actions">
+                        <Link to={`/visits?visit=${item.visitScheduleId}`}>Open visit</Link>
+                      </div>
+                    </div>
+                    {item.notificationId ? (
+                      <Button
+                        type="button"
+                        className="attention__button"
+                        disabled={acknowledging === item.notificationId}
+                        onClick={() => onAcknowledge(item.notificationId!)}
+                      >
+                        {acknowledging === item.notificationId ? 'Acknowledging...' : 'Acknowledge'}
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
               </ul>
             )
           ) : null}

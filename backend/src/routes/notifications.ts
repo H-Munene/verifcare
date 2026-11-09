@@ -38,7 +38,7 @@ export interface NotificationsRouterDependencies {
 
 interface NotificationResponse {
   id: string;
-  type: 'missed_visit' | 'checkin_override';
+  type: 'missed_visit' | 'checkin_override' | 'no_cover_found';
   visitScheduleId: string | null;
   // null: a shared alert, addressed to every supervisor.
   recipientUserId: string | null;
@@ -51,7 +51,7 @@ interface NotificationResponse {
 function toResponse(row: typeof schema.notificationLog.$inferSelect): NotificationResponse {
   return {
     id: row.id,
-    type: row.type as 'missed_visit' | 'checkin_override',
+    type: row.type as 'missed_visit' | 'checkin_override' | 'no_cover_found',
     visitScheduleId: row.visitScheduleId,
     recipientUserId: row.recipientUserId,
     channel: row.channel,
@@ -62,7 +62,7 @@ function toResponse(row: typeof schema.notificationLog.$inferSelect): Notificati
 }
 
 const listNotificationsQuerySchema = z.object({
-  type: z.enum(['missed_visit', 'checkin_override']).optional(),
+  type: z.enum(['missed_visit', 'checkin_override', 'no_cover_found']).optional(),
   // Not z.coerce.boolean() - Boolean("false") is true in JS, so that would silently treat
   // ?acknowledged=false the same as ?acknowledged=true. An explicit enum + transform avoids it.
   acknowledged: z

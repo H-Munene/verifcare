@@ -34,11 +34,13 @@ import {
   pgSequence,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 // ============================================================================
@@ -165,6 +167,11 @@ export const caregivers = pgTable('caregivers', {
   // request as employeeNumber above.
   hireDate: date().default(sql`CURRENT_DATE`),
   active: boolean().notNull().default(true),
+  // Where a planned route starts, and the fallback for "nearest" during missed-visit recovery. An
+  // area, not a tracked position (0018).
+  baseLat: doublePrecision(),
+  baseLng: doublePrecision(),
+  baseAreaText: text(),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
@@ -283,6 +290,57 @@ export const dependantCareTasks = pgTable(
 );
 
 // ============================================================================
+// visit_plans / visit_plan_clusters (0018) - a day's plan, a draft until a supervisor publishes it.
+// Stops are kept as JSON on the draft because they aren't visits yet: publishing creates the real
+// visit_schedules rows.
+// ============================================================================
+
+export const visitPlans = pgTable(
+  'visit_plans',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    planDate: date().notNull(),
+    shiftStart: text().notNull(),
+    shiftEnd: text().notNull(),
+    visitMinutes: integer().notNull(),
+    status: text().notNull().default('draft'),
+    unplaced: jsonb().notNull().default([]),
+    excludedCaregivers: jsonb().notNull().default([]),
+    createdBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    publishedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    check('chk_visit_plans_status', sql`${table.status} IN ('draft', 'published')`),
+    check('chk_visit_plans_visit_minutes', sql`${table.visitMinutes} > 0`),
+    index('idx_visit_plans_date').on(table.planDate),
+  ],
+);
+
+export const visitPlanClusters = pgTable(
+  'visit_plan_clusters',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    planId: uuid()
+      .notNull()
+      .references(() => visitPlans.id),
+    caregiverId: uuid()
+      .notNull()
+      .references(() => caregivers.userId),
+    stops: jsonb().notNull(),
+    totalDistanceMeters: doublePrecision().notNull(),
+    totalTravelMinutes: integer().notNull(),
+  },
+  (table) => [unique('uq_visit_plan_clusters_plan_caregiver').on(table.planId, table.caregiverId)],
+);
+
+// ============================================================================
 // visit_schedules
 // ============================================================================
 
@@ -304,13 +362,18 @@ export const visitSchedules = pgTable(
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
+    // Set when the visit came from a published plan: which route, and its place in it (0018).
+    planClusterId: uuid().references(() => visitPlanClusters.id),
+    routeSequence: smallint(),
+    // The visit this one replaced, when another caregiver took it over (0018).
+    recoveredFromVisitId: uuid().references((): AnyPgColumn => visitSchedules.id),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check(
       'chk_visit_schedules_status',
-      sql`${table.status} IN ('scheduled', 'in_progress', 'completed', 'missed', 'cancelled', 'investigated')`,
+      sql`${table.status} IN ('scheduled', 'in_progress', 'completed', 'missed', 'cancelled', 'investigated', 'reassigned')`,
     ),
     check(
       'chk_visit_schedules_end_after_start',
@@ -322,6 +385,69 @@ export const visitSchedules = pgTable(
     index('idx_visit_schedules_created_by').on(table.createdBy),
     // `excl_visit_schedules_caregiver_overlap` / `excl_visit_schedules_dependant_overlap`
     // (EXCLUDE USING gist, double-booking prevention) are added by HEZ-9 - see file header.
+  ],
+);
+
+// ============================================================================
+// visit_recovery_cases / visit_recovery_offers (0018) - finding cover for a visit whose caregiver
+// is late (src/recovery.ts). One case per visit, one live offer at a time.
+// ============================================================================
+
+export const visitRecoveryCases = pgTable(
+  'visit_recovery_cases',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    visitScheduleId: uuid()
+      .notNull()
+      .references(() => visitSchedules.id)
+      .unique('uq_visit_recovery_cases_visit'),
+    status: text().notNull().default('open'),
+    replacementVisitId: uuid().references(() => visitSchedules.id),
+    openedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'chk_visit_recovery_cases_status',
+      sql`${table.status} IN ('open', 'recovered', 'exhausted', 'closed')`,
+    ),
+    index('idx_visit_recovery_cases_status').on(table.status),
+  ],
+);
+
+export const visitRecoveryOffers = pgTable(
+  'visit_recovery_offers',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    caseId: uuid()
+      .notNull()
+      .references(() => visitRecoveryCases.id),
+    caregiverId: uuid()
+      .notNull()
+      .references(() => caregivers.userId),
+    rank: smallint().notNull(),
+    distanceMeters: doublePrecision().notNull(),
+    proposedStart: timestamp({ withTimezone: true }).notNull(),
+    proposedEnd: timestamp({ withTimezone: true }).notNull(),
+    status: text().notNull().default('offered'),
+    offeredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp({ withTimezone: true }).notNull(),
+    respondedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    unique('uq_visit_recovery_offers_case_caregiver').on(table.caseId, table.caregiverId),
+    check(
+      'chk_visit_recovery_offers_status',
+      sql`${table.status} IN ('offered', 'accepted', 'declined', 'expired', 'withdrawn')`,
+    ),
+    uniqueIndex('uq_visit_recovery_offers_live')
+      .on(table.caseId)
+      .where(sql`${table.status} = 'offered'`),
+    index('idx_visit_recovery_offers_caregiver').on(table.caregiverId, table.status),
   ],
 );
 
@@ -789,7 +915,10 @@ export const notificationLog = pgTable(
     acknowledgedBy: uuid().references(() => users.id),
   },
   (table) => [
-    check('chk_notification_log_type', sql`${table.type} IN ('missed_visit', 'checkin_override')`),
+    check(
+      'chk_notification_log_type',
+      sql`${table.type} IN ('missed_visit', 'checkin_override', 'no_cover_found')`,
+    ),
     check('chk_notification_log_related_entity', sql`${table.visitScheduleId} IS NOT NULL`),
     // One alert per missed visit, so re-running the sweep never raises a second.
     uniqueIndex('uq_notification_log_missed_visit')
