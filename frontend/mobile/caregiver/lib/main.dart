@@ -216,7 +216,7 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
     _refreshVisits();
   }
 
-  // Both photos passed: swap the whole check-in stack for the in-progress visit screen.
+  // The visit has started: swap the whole check-in stack for the in-progress visit screen.
   void _startVisit(VisitSchedule visit) {
     Navigator.of(context).popUntil((route) => route.isFirst);
     _openVisit(

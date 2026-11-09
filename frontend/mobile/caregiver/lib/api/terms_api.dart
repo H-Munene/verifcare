@@ -67,12 +67,12 @@ class TermsApi {
   Future<void> accept({
     required String sub,
     required String version,
-    required bool biometricConsent,
+    required bool locationConsent,
     required bool audioConsent,
   }) async {
     await _client.post('/terms/current/accept', {
       'version': version,
-      'biometricConsent': biometricConsent,
+      'locationConsent': locationConsent,
       'audioConsent': audioConsent,
     });
     _acceptedBy.add(sub);

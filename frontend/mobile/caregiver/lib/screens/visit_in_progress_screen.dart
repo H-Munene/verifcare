@@ -6,7 +6,7 @@ import '../app_ui.dart';
 import '../widgets/visit_audio_recorder.dart';
 import 'checkout_screen.dart';
 
-/// The checked-in visit: the care-plan checklist plus the audio log. Everything shown here is
+/// The checked-in visit: the care-plan checklist plus the visit recording. Everything shown here is
 /// re-read from the server (ticks) or disk (audio) on open, so this same screen is what the
 /// ongoing-visit banner and notification reopen after the app was closed.
 class VisitInProgressScreen extends StatefulWidget {
@@ -28,11 +28,32 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
   String? _error;
   final _checked = <String>{};
   bool _hasRecording = false;
+  // Assumed needed until the server says otherwise, so a slow or failed lookup can't hide the
+  // recorder from a visit that needs it. The server has the last word at check-out anyway.
+  bool _audioRequired = true;
+  bool _alreadyUploaded = false;
 
   @override
   void initState() {
     super.initState();
     _loadTasks();
+    _loadAudioRequirement();
+  }
+
+  Future<void> _loadAudioRequirement() async {
+    try {
+      final result = await widget.visitSchedulesApi.audioRequirement(
+        widget.visit.id,
+      );
+      if (mounted) {
+        setState(() {
+          _audioRequired = result.required;
+          _alreadyUploaded = result.recorded;
+        });
+      }
+    } catch (_) {
+      // Keep the safe assumption above.
+    }
   }
 
   Future<void> _loadTasks() async {
@@ -89,6 +110,8 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
           tasks: tasks,
           checkedTaskIds: Set.of(_checked),
           hasRecording: _hasRecording,
+          audioRequired: _audioRequired,
+          alreadyUploaded: _alreadyUploaded,
         ),
       ),
     );
@@ -122,13 +145,18 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
             _buildChecklist(),
           ];
           final audio = [
-            const _SectionTitle('Audio log'),
+            const _SectionTitle('Visit recording'),
             VisitAudioRecorder(
               key: _recorderKey,
               visitScheduleId: widget.visit.id,
               onRecordingChanged: (has) => setState(() => _hasRecording = has),
             ),
           ];
+          if (!_audioRequired) {
+            return constrainedContent(
+              ListView(padding: const EdgeInsets.all(16), children: checklist),
+            );
+          }
           if (constraints.maxWidth < _twoColumnMinWidth) {
             return constrainedContent(
               ListView(
