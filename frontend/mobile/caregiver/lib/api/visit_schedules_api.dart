@@ -25,6 +25,12 @@ class VisitSchedule {
   final DateTime scheduledStart;
   final DateTime scheduledEnd;
   final VisitStatus status;
+
+  /// This visit's place in a planned route; null for a visit booked by hand.
+  final int? routeSequence;
+
+  /// The visit this one took over from another caregiver, if any.
+  final String? recoveredFromVisitId;
   final String createdBy;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -38,6 +44,8 @@ class VisitSchedule {
     required this.scheduledStart,
     required this.scheduledEnd,
     required this.status,
+    this.routeSequence,
+    this.recoveredFromVisitId,
     required this.createdBy,
     required this.createdAt,
     required this.updatedAt,
@@ -55,6 +63,8 @@ class VisitSchedule {
       ).toLocal(),
       scheduledEnd: DateTime.parse(json['scheduledEnd'] as String).toLocal(),
       status: json['status'] as String,
+      routeSequence: json['routeSequence'] as int?,
+      recoveredFromVisitId: json['recoveredFromVisitId'] as String?,
       createdBy: json['createdBy'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
       updatedAt: DateTime.parse(json['updatedAt'] as String).toLocal(),
@@ -214,6 +224,21 @@ class VisitSchedulesApi {
     }),
   );
 
+  Future<List<RecoveryOffer>> myRecoveryOffers() async {
+    final json = await _client.get('/recovery-offers/mine');
+    return (json['items'] as List)
+        .map((item) => RecoveryOffer.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> acceptRecoveryOffer(String offerId) async {
+    await _client.post('/recovery-offers/$offerId/accept', const {});
+  }
+
+  Future<void> declineRecoveryOffer(String offerId) async {
+    await _client.post('/recovery-offers/$offerId/decline', const {});
+  }
+
   /// Whether this visit needs a recording (the family consented) and whether one is already saved.
   Future<({bool required, bool recorded})> audioRequirement(
     String visitScheduleId,
@@ -247,6 +272,45 @@ class VisitSchedulesApi {
       'durationSeconds': durationSeconds,
     });
   }
+}
+
+/// A request to cover another caregiver's late visit. Deliberately only the area and times: the
+/// name and address follow if it's accepted.
+class RecoveryOffer {
+  final String id;
+  final DateTime proposedStart;
+  final DateTime proposedEnd;
+  final int distanceMeters;
+  final DateTime expiresAt;
+  final String? ward;
+
+  RecoveryOffer({
+    required this.id,
+    required this.proposedStart,
+    required this.proposedEnd,
+    required this.distanceMeters,
+    required this.expiresAt,
+    this.ward,
+  });
+
+  factory RecoveryOffer.fromJson(Map<String, dynamic> json) => switch (json) {
+    {
+      'id': String id,
+      'proposedStart': String start,
+      'proposedEnd': String end,
+      'distanceMeters': int distanceMeters,
+      'expiresAt': String expiresAt,
+    } =>
+      RecoveryOffer(
+        id: id,
+        proposedStart: DateTime.parse(start).toLocal(),
+        proposedEnd: DateTime.parse(end).toLocal(),
+        distanceMeters: distanceMeters,
+        expiresAt: DateTime.parse(expiresAt).toLocal(),
+        ward: json['ward'] as String?,
+      ),
+    _ => throw FormatException('Unexpected recovery offer: $json'),
+  };
 }
 
 /// One care-plan task as seen from a visit (GET .../tasks) - status is null until recorded.

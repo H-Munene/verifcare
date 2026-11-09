@@ -10,6 +10,7 @@ class VisitNotifications {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static const _ongoingId = 1;
   static const _checkedOutId = 2;
+  static const _coverOfferId = 3;
 
   /// The visit id of a tapped ongoing-visit notification (including the one that cold-launched
   /// the app) - the authenticated shell listens and opens that visit's checklist screen.
@@ -75,6 +76,26 @@ class VisitNotifications {
   // For when the visit stopped being in progress without a checkout on this phone (e.g. the
   // missed-visit sweep closed it), so the pinned notification doesn't outlive the visit.
   static Future<void> cancelOngoing() => _plugin.cancel(id: _ongoingId);
+
+  /// A nudge that a cover offer is waiting. No name or address: it can show on a locked screen.
+  static Future<void> showCoverOffer(String? ward) async {
+    await _requestPermission();
+    await _plugin.show(
+      id: _coverOfferId,
+      title: 'Can you cover a visit nearby?',
+      body: ward == null ? 'Open Mzazi Care to answer' : '$ward - open Mzazi Care to answer',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'cover_offers',
+          'Cover offers',
+          channelDescription: 'Requests to cover a nearby late visit',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+    );
+  }
 
   static Future<void> showCheckedOut(VisitSchedule visit) async {
     await _plugin.cancel(id: _ongoingId);
