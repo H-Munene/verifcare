@@ -4,7 +4,7 @@ import '../api/api_client.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
-/// A finished (completed or missed) visit's four milestones - the same steps, from the same
+/// A finished (completed or missed) visit's milestones - the same steps, from the same
 /// GET .../verification data, as the admin web app's VisitDetailPage. On a missed visit every
 /// step that never happened is drawn with an X.
 class VisitTimelineScreen extends StatefulWidget {
@@ -134,9 +134,13 @@ class _VisitTimelineScreenState extends State<VisitTimelineScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     final steps = [
-      ('Checked in', audit.checkinAt),
-      ('Caregiver photo verified', audit.caregiverVerifiedAt),
-      ('Dependant photo verified', audit.dependantVerifiedAt),
+      ('Arrived at the home', audit.arrivedAt),
+      (
+        audit.checkinMethod == 'supervisor_override'
+            ? 'Started by a supervisor'
+            : 'Family code scanned',
+        audit.checkinAt,
+      ),
       ('Checked out', audit.checkoutAt),
     ];
     return Column(

@@ -5,9 +5,9 @@ import {
   CalendarCheckIn01Icon,
   DashboardSquare01Icon,
   HandHeartIcon,
+  Route01Icon,
   SecurityCheckIcon,
   UserGroupIcon,
-  UserSearch01Icon,
 } from '@hugeicons/core-free-icons';
 import { NavItem } from '../design-system/NavItem';
 import { AlertsBell } from './AlertsBell';
@@ -22,15 +22,13 @@ import './AppShell.css';
 // shell matches the design without claiming functionality that doesn't exist yet.
 // Icons are Hugeicons, stroke style (2026-09-26): caregivers are the staff (a group), dependants
 // the people cared for (a hand holding a heart).
-// Order and sections per the user (2026-09-27): Reviews - photos flagged as possible duplicates,
-// formerly "Flagged Enrollments" behind a button on Dependants - is its own section, and alerts
-// moved from here to the top bar's bell.
+// Alerts moved from here to the top bar's bell (2026-09-27, user request).
 const NAV_SECTIONS = [
   { label: 'Overview', path: '/overview', icon: DashboardSquare01Icon },
   { label: 'Visits', path: '/visits', icon: CalendarCheckIn01Icon },
+  { label: 'Plan day', path: '/plan', icon: Route01Icon },
   { label: 'Caregivers', path: '/caregivers', icon: UserGroupIcon },
   { label: 'Dependants', path: '/dependants', icon: HandHeartIcon },
-  { label: 'Reviews', path: '/reviews', icon: UserSearch01Icon },
   { label: 'Compliance', path: '/compliance', icon: SecurityCheckIcon },
 ] as const;
 
@@ -55,6 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const supervisorOnlySections = new Set([
     'Overview',
     'Visits',
+    'Plan day',
     'Caregivers',
     'Reviews',
     'Compliance',

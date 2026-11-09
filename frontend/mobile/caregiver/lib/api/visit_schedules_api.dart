@@ -25,6 +25,12 @@ class VisitSchedule {
   final DateTime scheduledStart;
   final DateTime scheduledEnd;
   final VisitStatus status;
+
+  /// This visit's place in a planned route; null for a visit booked by hand.
+  final int? routeSequence;
+
+  /// The visit this one took over from another caregiver, if any.
+  final String? recoveredFromVisitId;
   final String createdBy;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -38,6 +44,8 @@ class VisitSchedule {
     required this.scheduledStart,
     required this.scheduledEnd,
     required this.status,
+    this.routeSequence,
+    this.recoveredFromVisitId,
     required this.createdBy,
     required this.createdAt,
     required this.updatedAt,
@@ -55,6 +63,8 @@ class VisitSchedule {
       ).toLocal(),
       scheduledEnd: DateTime.parse(json['scheduledEnd'] as String).toLocal(),
       status: json['status'] as String,
+      routeSequence: json['routeSequence'] as int?,
+      recoveredFromVisitId: json['recoveredFromVisitId'] as String?,
       createdBy: json['createdBy'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String).toLocal(),
       updatedAt: DateTime.parse(json['updatedAt'] as String).toLocal(),
@@ -203,12 +213,104 @@ class VisitSchedulesApi {
     String visitScheduleId, {
     required double gpsLat,
     required double gpsLng,
+    String? audioSkipReason,
+    String? audioSkipNote,
   }) async => VisitSchedule.fromJson(
     await _client.post('/visit-schedules/$visitScheduleId/checkout', {
       'gpsLat': gpsLat,
       'gpsLng': gpsLng,
+      'audioSkipReason': ?audioSkipReason,
+      'audioSkipNote': ?audioSkipNote,
     }),
   );
+
+  Future<List<RecoveryOffer>> myRecoveryOffers() async {
+    final json = await _client.get('/recovery-offers/mine');
+    return (json['items'] as List)
+        .map((item) => RecoveryOffer.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> acceptRecoveryOffer(String offerId) async {
+    await _client.post('/recovery-offers/$offerId/accept', const {});
+  }
+
+  Future<void> declineRecoveryOffer(String offerId) async {
+    await _client.post('/recovery-offers/$offerId/decline', const {});
+  }
+
+  /// Whether this visit needs a recording (the family consented) and whether one is already saved.
+  Future<({bool required, bool recorded})> audioRequirement(
+    String visitScheduleId,
+  ) async {
+    final json = await _client.get(
+      '/visit-schedules/$visitScheduleId/audio/requirement',
+    );
+    return (
+      required: json['required'] as bool,
+      recorded: json['recorded'] as bool,
+    );
+  }
+
+  /// Presign, upload straight to S3, then confirm. Safe to repeat: a retry replaces the recording.
+  Future<void> uploadAudio(
+    String visitScheduleId, {
+    required List<int> bytes,
+    required int durationSeconds,
+  }) async {
+    final presign = await _client.post(
+      '/visit-schedules/$visitScheduleId/audio/upload-url',
+      const {},
+    );
+    await ApiClient.uploadToPresignedUrl(
+      presign['uploadUrl'] as String,
+      bytes,
+      'audio/mp4',
+    );
+    await _client.post('/visit-schedules/$visitScheduleId/audio', {
+      's3Key': presign['s3Key'],
+      'durationSeconds': durationSeconds,
+    });
+  }
+}
+
+/// A request to cover another caregiver's late visit. Deliberately only the area and times: the
+/// name and address follow if it's accepted.
+class RecoveryOffer {
+  final String id;
+  final DateTime proposedStart;
+  final DateTime proposedEnd;
+  final int distanceMeters;
+  final DateTime expiresAt;
+  final String? ward;
+
+  RecoveryOffer({
+    required this.id,
+    required this.proposedStart,
+    required this.proposedEnd,
+    required this.distanceMeters,
+    required this.expiresAt,
+    this.ward,
+  });
+
+  factory RecoveryOffer.fromJson(Map<String, dynamic> json) => switch (json) {
+    {
+      'id': String id,
+      'proposedStart': String start,
+      'proposedEnd': String end,
+      'distanceMeters': int distanceMeters,
+      'expiresAt': String expiresAt,
+    } =>
+      RecoveryOffer(
+        id: id,
+        proposedStart: DateTime.parse(start).toLocal(),
+        proposedEnd: DateTime.parse(end).toLocal(),
+        distanceMeters: distanceMeters,
+        expiresAt: DateTime.parse(expiresAt).toLocal(),
+        ward: json['ward'] as String?,
+      ),
+    _ => throw FormatException('Unexpected recovery offer: $json'),
+  };
 }
 
 /// One care-plan task as seen from a visit (GET .../tasks) - status is null until recorded.
@@ -248,16 +350,18 @@ class VisitTask {
 
 /// GET .../verification, trimmed to what the visit timeline reads.
 class VerificationAudit {
+  final DateTime? arrivedAt;
   final DateTime? checkinAt;
   final DateTime? checkoutAt;
-  final DateTime? caregiverVerifiedAt;
-  final DateTime? dependantVerifiedAt;
+
+  /// 'qr' or 'supervisor_override'; null until the visit has started.
+  final String? checkinMethod;
 
   VerificationAudit({
+    this.arrivedAt,
     this.checkinAt,
     this.checkoutAt,
-    this.caregiverVerifiedAt,
-    this.dependantVerifiedAt,
+    this.checkinMethod,
   });
 
   factory VerificationAudit.fromJson(Map<String, dynamic> json) {
@@ -270,18 +374,17 @@ class VerificationAudit {
       'event': Map<String, dynamic>? event,
       'attempts': List<dynamic> attempts,
     }) {
-      // Same rule as the admin web app's VisitDetailPage: the first *passing* attempt per type.
-      DateTime? firstPass(String type) => parse(
-        attempts
-            .map((a) => a as Map<String, dynamic>)
-            .where((a) => a['attemptType'] == type && a['passed'] == true)
-            .firstOrNull?['attemptedAt'],
-      );
       return VerificationAudit(
+        // The first passing geofence check is when the caregiver reached the home.
+        arrivedAt: parse(
+          attempts
+              .map((a) => a as Map<String, dynamic>)
+              .where((a) => a['attemptType'] == 'geofence' && a['passed'] == true)
+              .firstOrNull?['attemptedAt'],
+        ),
         checkinAt: parse(event?['checkinAt']),
         checkoutAt: parse(event?['checkoutAt']),
-        caregiverVerifiedAt: firstPass('caregiver_liveness'),
-        dependantVerifiedAt: firstPass('dependant_liveness'),
+        checkinMethod: event?['checkinMethod'] as String?,
       );
     }
     throw FormatException('Unexpected verification audit: $json');

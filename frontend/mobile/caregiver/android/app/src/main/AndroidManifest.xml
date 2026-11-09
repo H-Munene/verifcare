@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- The in-visit audio log (record package). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- Android 13+ runtime permission for the ongoing-visit and checked-out notifications. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- CAMERA is deliberately NOT declared: image_picker hands off to the system camera app via

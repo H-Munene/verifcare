@@ -177,13 +177,16 @@ class _ScheduleCalendarScreenState extends State<ScheduleCalendarScreen> {
   Color _statusDotColor(String status) => switch (status) {
     'completed' => _successGreen,
     'cancelled' || 'missed' || 'investigated' => _dangerRed,
+    'reassigned' => _inkLight,
     _ => _primaryGreen,
   };
 
   // A day's circle (user spec 2026-09-24): red if any visit that day was missed, green once every
   // visit is completed, otherwise the primary green. Cancelled visits don't count; null = no visits to show.
   Color? _dayColor(DateTime day) {
-    final visits = _visitsOn(day).where((v) => v.status != 'cancelled');
+    final visits = _visitsOn(day).where(
+      (v) => v.status != 'cancelled' && v.status != 'reassigned',
+    );
     if (visits.isEmpty) return null;
     if (visits.any((v) => _isMissed(v.status))) return _dangerRed;
     if (visits.every((v) => v.status == 'completed')) return _successGreen;

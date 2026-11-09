@@ -139,8 +139,10 @@ class _VisitsTabState extends State<VisitsTab> with AutomaticKeepAliveClientMixi
           if (i > 0) const Divider(height: 1, color: borderColor),
           _VisitRow(
             visit: visit,
-            // A cancelled visit never happened, so there is no timeline to show.
-            onTap: visit.status == 'cancelled' ? null : () => _open(visit),
+            // A cancelled or reassigned visit never happened, so there is no timeline to show.
+            onTap: visit.status == 'cancelled' || visit.status == 'reassigned'
+                ? null
+                : () => _open(visit),
           ),
         ],
       ],

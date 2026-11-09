@@ -1,9 +1,11 @@
 # Mzazi Care
 
 Mzazi Care is a geo-verified visit tracking system for home caregivers in Kenya.
-It lets a care agency prove that a scheduled visit happened at the right place, at the right time, with the right two people present.
-At check-in, the caregiver's phone checks it is within the dependant's home geofence and verifies the faces of both the caregiver and the dependant.
-Supervisors schedule and monitor visits from a web console, caregivers check in and out with a mobile app, and family members follow their dependant's care from a second mobile app.
+It lets a care agency prove that a scheduled visit happened at the right place, at the right time, with the right people present.
+At check-in, the caregiver's phone checks it is within the dependant's home geofence, then scans a short-lived code shown on a family member's phone at the home.
+If nobody from the family is there, a supervisor can start the visit, and it is reported as an exception.
+The caregiver can record up to 30 seconds per visit, which only the dependant's family can listen to.
+Supervisors plan each day's routes and monitor visits from a web console, caregivers check in and out with a mobile app, and family members follow their dependant's care from a second mobile app.
 
 | Component | Path | Stack |
 | --- | --- | --- |
@@ -12,7 +14,7 @@ Supervisors schedule and monitor visits from a web console, caregivers check in 
 | Family app | `frontend/mobile/family_member` | Flutter |
 | API | `backend` | Node.js 22, Express 5, Drizzle ORM, PostgreSQL |
 | Infrastructure | `infra` | AWS CDK (TypeScript), one stack: `MzaziCareStack` |
-| Acoustic model | `acoustic-model` | Python research package (not deployed yet) |
+| Acoustic model | `acoustic-model` | Python research package; results are reported only, and it does not run in the system |
 
 The supervisor web console is live at **https://mzazicare.hmunene.com/**.
 
@@ -33,22 +35,24 @@ How a request moves through the system (the numbers match the diagram):
 3. **API calls:** `App -> AWS WAF -> API Gateway -> api Lambda`.
    WAF applies a rate limit and AWS's IP reputation list, and API Gateway's Cognito authorizer rejects requests without a valid JWT.
 4. **Data:** `Lambda -> RDS PostgreSQL`, inside the VPC's private subnet.
-5. **AWS APIs:** `Lambda -> NAT gateway -> internet gateway -> Secrets Manager / Rekognition / S3 / Cognito`.
+5. **AWS APIs:** `Lambda -> NAT gateway -> internet gateway -> Secrets Manager / S3 / Cognito`.
    There are no VPC endpoints, so the single NAT gateway carries all of this traffic.
-6. **Uploads:** `App -> S3` directly, using presigned URLs issued by the API, for enrollment photos and check-in frames.
-7. **Missed visits:** `EventBridge (every 15 minutes) -> missed-visit sweep Lambda -> RDS` marks overdue visits as missed and raises alerts.
+6. **Uploads:** `App -> S3` directly, using presigned URLs issued by the API, for visit recordings.
+7. **Missed visits:** `EventBridge (every minute) -> missed-visit sweep Lambda -> RDS` marks overdue visits as missed, raises alerts, and offers late visits to the nearest available caregiver.
 8. **Operations:** `CloudWatch alarms -> SNS ops topic -> email` on Lambda errors, API 5xx responses, and high RDS CPU or low storage.
 9. **Deploys:** `GitHub Actions (OIDC) or a developer -> IAM deploy role -> CloudFormation`, followed by the migration runner Lambda for schema changes.
 
 Security and data protection:
 
-- RDS, its credentials secret and the three data buckets are encrypted with their own KMS keys.
+- RDS, its credentials secret and the visit-audio bucket are encrypted with their own KMS keys.
 - The database credentials live in Secrets Manager and rotate every 30 days.
 - Every bucket blocks public access and rejects non-TLS requests.
-- Check-in frames are deleted after 1 day and visit audio after 90 days.
+- Visit audio is deleted after 90 days, and each listen is recorded in the audit log.
+- No biometric data is collected.
 - The Lambdas and RDS sit in private subnets with no inbound route from the internet.
 
-Planned pieces, shown faded in the diagram: the acoustic model Lambda (a container image from ECR), its visit audio bucket, and the care alerts SNS topic.
+The diagram predates the move to QR check-in and still shows Rekognition and the acoustic model.
+The care alerts SNS topic is planned; alerts are in-app today.
 
 ## Cost estimate
 

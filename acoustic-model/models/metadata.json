@@ -1,27 +1,7 @@
 {
-  "model": "logistic_regression",
-  "features": [
-    "pause_rate_per_min",
-    "mean_pause_s",
-    "median_pause_s",
-    "long_pause_rate_per_min",
-    "long_pause_time_share",
-    "phonation_time_ratio",
-    "mean_speech_segment_s",
-    "voiced_segments_per_s",
-    "mean_voiced_segment_s",
-    "sd_voiced_segment_s",
-    "mean_unvoiced_segment_s",
-    "articulation_rate_proxy",
-    "jitter_mean",
-    "jitter_cv",
-    "shimmer_db_mean",
-    "shimmer_db_cv",
-    "hnr_db_mean",
-    "hnr_db_cv"
-  ],
+  "model": "xlsr_logistic",
   "best_params": {
-    "C": "0.011526449540315618",
+    "C": "15.741890047456648",
     "class_weight": "None",
     "dual": "False",
     "fit_intercept": "True",
@@ -37,8 +17,8 @@
     "warm_start": "False"
   },
   "calibration": {
-    "slope": 0.6014886778908879,
-    "intercept": -0.7721684157929193
+    "slope": 0.024686505797636458,
+    "intercept": -0.6173047303386616
   },
   "extraction_parameters": {
     "FRAME_SECONDS": 0.025,
@@ -65,7 +45,7 @@
     "search_configs_per_model": 20
   },
   "seed": 42,
-  "trained_on": "2026-10-05",
+  "trained_on": "2026-10-28",
   "package_versions": {
     "numpy": "2.5.3",
     "scipy": "1.18.1",
@@ -75,6 +55,18 @@
     "opensmile": "2.6.0",
     "soundfile": "0.14.0",
     "soxr": "1.1.0",
-    "joblib": "1.6.0"
+    "joblib": "1.6.0",
+    "torch": "2.14.1",
+    "transformers": "5.21.0"
+  },
+  "encoder": "facebook/wav2vec2-xls-r-300m",
+  "encoder_revision": "1a640f32ac3e39899438a2931f9924c02f080a54",
+  "layer": 12,
+  "pca_components": 64,
+  "input": "candidate layers [6, 9, 12, 15, 18] x 1024, flattened (xlsr.layer_columns)",
+  "embedding": {
+    "window_s": 20.0,
+    "min_last_window_s": 5.0,
+    "torch_threads": 4
   }
 }

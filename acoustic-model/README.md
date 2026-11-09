@@ -3,8 +3,15 @@
 Takes one speech recording and returns a calibrated probability in [0, 1] that it shows acoustic signs associated with cognitive decline.
 It is a non-diagnostic screening signal, meant to be trended over repeated caregiver visits.
 
-The model uses only **language-independent** features: pausing and timing (primary), plus voice stability (secondary).
-These can be measured without knowing the language and have published cross-language evidence, which matters because visits may be in English, Swahili, Kikuyu or Dholuo.
+**Current approach (v3, from 2026-10-27):** the audio goes through a frozen pretrained speech model, [XLS-R 300M](https://huggingface.co/facebook/wav2vec2-xls-r-300m) (Apache-2.0, pretrained on 128 languages including Swahili, but not Luo or Kikuyu). A small logistic regression is then trained on its embeddings.
+Five pre-registered checks (C1-C5) test whether the model has learned the recording conditions instead of the speaker.
+The held-out test set was used once, by v2, and stays locked, so every v3 figure is an exploratory cross-validation estimate.
+
+**Previous approach (v2, cleared 2026-10-27, kept in git history):** 18 language-independent features, covering pausing and timing plus voice stability.
+It scored at chance: test ROC-AUC 0.409 [0.184, 0.642], CV 0.522.
+Its feature code is still used, as comparator C1.
+
+Visits may be in English, Swahili, Kikuyu or Dholuo, which is why both approaches avoid anything that depends on knowing the language.
 The full method, every pre-registered decision and its reason are in `PLAN.md`.
 The chronological record of decisions and progress is `docs/ml-dev-log.md` (local, like the rest of `docs/`).
 
@@ -52,3 +59,14 @@ venv\Scripts\python scripts\01b_age_at_recording.py  # downloads the DementiaNet
 
 Committed results never contain real names.
 Name lookups are written to `*.local.csv` files, which are git-ignored; `tests/data_collection/test_no_names_committed.py` checks this on any machine that has the dataset.
+
+### v3 (embeddings)
+
+Needs `torch` and `transformers` (in `requirements.txt`). The encoder downloads once, about 1.2 GB, to the Hugging Face cache; nothing goes into the repo. Embeddings are cached under `data/embeddings/`.
+
+```
+venv\Scripts\python scripts\03v3_embeddings.py --time 5   # time 5 clips, print the encoder revision to pin in config
+venv\Scripts\python scripts\03v3_embeddings.py            # all variants (resumable), plus C1's v2 features
+venv\Scripts\python scripts\04v3_train.py                 # v3 model + C1-C3 on the 5 x 5 folds, final model
+venv\Scripts\python scripts\05v3_validation.py            # threshold, C4, C5, single-speaker, trajectory
+```

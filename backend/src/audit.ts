@@ -4,7 +4,7 @@ import * as schema from './db/schema.js';
 // The audit trail (2026-09-27, the Compliance tab): who did what to which record, and when, for
 // the Kenya Data Protection Act's accountability duties (s.41-42) and the Digital Health Act's
 // s.33(2). The product owner chose to record every change, every compliance export, and reads of
-// the most sensitive records (check-in photos, GPS and face scores), not changes alone.
+// the most sensitive records (check-in details, GPS and visit recordings), not changes alone.
 //
 // Written inside the same transaction as the change it describes, so a change that rolls back
 // leaves no audit row and a committed change always has one. audit_log is append-only (trigger
@@ -40,7 +40,7 @@ export async function recordAudit(db: DbOrTx, entry: AuditEntry): Promise<void> 
 /**
  * The fields of [keys] whose values differ between [before] and [after], as `{ field: { from, to } }`,
  * for an update's audit metadata. Only the keys given are compared, so a caller lists the fields
- * that are safe to copy into the audit log and leaves out sensitive ones (ID numbers, photos, GPS),
+ * that are safe to copy into the audit log and leaves out sensitive ones (ID numbers, GPS),
  * which are then recorded only as changed via [redacted].
  */
 export function changedFields<T extends Record<string, unknown>>(

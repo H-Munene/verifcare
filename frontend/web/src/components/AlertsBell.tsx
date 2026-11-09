@@ -15,7 +15,8 @@ import { AttentionList } from './AttentionList';
 import { todayInNairobi } from './visitStates';
 import './AlertsBell.css';
 
-const REFRESH_MS = 60_000;
+// Short, because a caregiver can be standing at a home waiting on an override.
+const REFRESH_MS = 30_000;
 
 export function AlertsBell() {
   const { dashboard } = useApi();
@@ -35,8 +36,8 @@ export function AlertsBell() {
   const attention = query.data?.attention;
   const count = attention
     ? attention.missedVisitAlerts.total +
-      attention.flaggedPhotos +
-      attention.dependantsWithoutPhoto.total
+      attention.pendingCheckinOverrides.total +
+      attention.visitsNeedingCover.total
     : 0;
 
   return (

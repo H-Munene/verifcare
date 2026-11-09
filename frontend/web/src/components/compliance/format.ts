@@ -52,12 +52,13 @@ export const EXCEPTION_KIND_LABELS: Record<ExceptionKind, string> = {
   missed: 'Missed',
   missing_checkout: 'No checkout',
   failed_check: 'Failed check',
+  supervisor_override: 'Supervisor override',
 };
 
 const ATTEMPT_LABELS: Record<string, string> = {
   geofence: 'Location',
-  caregiver_liveness: 'Caregiver photo',
-  dependant_liveness: 'Dependant photo',
+  family_location: 'Family phone location',
+  qr_scan: 'Code scan',
 };
 
 /** "Location: out of range (2)". */

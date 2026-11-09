@@ -7,6 +7,7 @@ import { RESOLUTION_OUTCOME_LABELS } from '../api/compliance';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
 import type {
+  AudioSkipReason,
   VerificationAttempt,
   VerificationAttemptType,
   VisitSchedule,
@@ -22,10 +23,17 @@ import './VisitDetails.css';
 // Explicit am/pm (user request), rather than whatever the browser's locale prefers.
 const TIME: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
 
+const AUDIO_SKIP_LABELS: Record<AudioSkipReason, string> = {
+  dependant_declined: 'Dependant preferred not to be recorded',
+  dependant_unwell_or_asleep: 'Dependant unwell or asleep',
+  technical_problem: 'Technical problem',
+  other: 'Other reason',
+};
+
 const ATTEMPT_LABELS: Record<VerificationAttemptType, string> = {
   geofence: 'location',
-  caregiver_liveness: 'caregiver photo',
-  dependant_liveness: 'dependant photo',
+  family_location: 'family phone location',
+  qr_scan: 'code scan',
 };
 
 /** How the visit went, for the home pin and the timeline. */
@@ -36,7 +44,7 @@ function visitOutcome(visit: VisitSchedule, checkedIn: boolean, now: number): Ho
   if (visit.status === 'in_progress') {
     return 'ongoing';
   }
-  if (visit.status === 'cancelled') {
+  if (visit.status === 'cancelled' || visit.status === 'reassigned') {
     return 'cancelled';
   }
   // Marked missed, or its end has passed with no check-in (the Overview's rule), is missed.
@@ -92,14 +100,17 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
   const outcome = visitOutcome(visit, Boolean(event?.checkinAt), now);
   // Over: nothing more will happen, so a step without a time now won't happen.
   const over =
-    ['completed', 'missed', 'investigated', 'cancelled'].includes(visit.status) ||
+    ['completed', 'missed', 'investigated', 'cancelled', 'reassigned'].includes(visit.status) ||
     now > Date.parse(visit.scheduledEnd);
 
   const steps: TimelineStep[] = [
     attemptStep('Arrived at the home', attempts, 'geofence'),
-    attemptStep('Caregiver photo verified', attempts, 'caregiver_liveness'),
-    attemptStep('Dependant photo verified', attempts, 'dependant_liveness'),
-    { label: 'Checked in', timestamp: event?.checkinAt ?? null },
+    {
+      ...attemptStep('Family code scanned', attempts, 'qr_scan'),
+      ...(event?.checkinMethod === 'supervisor_override'
+        ? { label: 'Started by a supervisor', timestamp: event.checkinAt }
+        : {}),
+    },
     { label: 'Checked out', timestamp: event?.checkoutAt ?? null },
   ].map((step) => ({
     ...step,
@@ -183,6 +194,26 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
           <div className="visit-details__wide">
             <dt>Checked in</dt>
             <dd>{Math.round(event.distanceFromGeofenceMeters)} m from the home</dd>
+          </div>
+        ) : null}
+        {event?.qrFamilyMemberName ? (
+          <div className="visit-details__wide">
+            <dt>Confirmed by</dt>
+            <dd>{event.qrFamilyMemberName}</dd>
+          </div>
+        ) : null}
+        {event?.audioRecordedAt ? (
+          <div className="visit-details__wide">
+            <dt>Recording</dt>
+            <dd>{event.audioDurationSeconds} seconds, available to the family only</dd>
+          </div>
+        ) : event?.audioSkipReason ? (
+          <div className="visit-details__wide">
+            <dt>Recording</dt>
+            <dd>
+              None: {AUDIO_SKIP_LABELS[event.audioSkipReason]}
+              {event.audioSkipNote ? ` (${event.audioSkipNote})` : ''}
+            </dd>
           </div>
         ) : null}
       </dl>

@@ -159,15 +159,13 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
     await visit('verified', amina!.id, joseph!.id, '2026-09-10T09:00', 'completed', {
       checkinAt: at('2026-09-10T09:15'), // exactly the tolerance: on time
       checkoutAt: at('2026-09-10T09:55'),
-      caregiverLivenessPassed: true,
-      dependantLivenessPassed: true,
+      checkinMethod: 'qr',
       checkoutDistanceFromGeofenceMeters: 10,
     });
     await visit('lateOutside', amina!.id, joseph!.id, '2026-09-11T09:00', 'completed', {
       checkinAt: at('2026-09-11T09:16'), // a minute past the tolerance: late
       checkoutAt: at('2026-09-11T09:58'),
-      caregiverLivenessPassed: true,
-      dependantLivenessPassed: true,
+      checkinMethod: 'qr',
       checkoutDistanceFromGeofenceMeters: 30, // outside the 20 m radius
     });
     await db.insert(schema.verificationAttempts).values({
@@ -180,8 +178,7 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
     await visit('cancelled', amina!.id, joseph!.id, '2026-09-13T09:00', 'cancelled');
     await visit('noCheckout', brian!.id, wanjiku!.id, '2026-09-20T09:00', 'in_progress', {
       checkinAt: at('2026-09-20T09:05'),
-      caregiverLivenessPassed: true,
-      dependantLivenessPassed: true,
+      checkinMethod: 'qr',
     });
     await visit('upcoming', brian!.id, wanjiku!.id, '2026-10-02T09:00', 'scheduled');
 
@@ -363,7 +360,7 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
   it('lists consent per person, with who revoked it and visits booked without it', async () => {
     const db = getDb();
     const granted = (subject: { caregiverId?: string; dependantId?: string }) =>
-      (['biometric_verification', 'audio_cognitive_monitoring'] as const).map((consentType) => ({
+      (['location_verification', 'visit_audio'] as const).map((consentType) => ({
         subjectType: subject.caregiverId ? ('caregiver' as const) : ('dependant' as const),
         ...subject,
         consentType,
@@ -392,21 +389,56 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
       name: 'Wanjiku Kamau',
       subjectType: 'dependant',
       upcomingVisitsWithoutConsent: 1,
-      consents: { biometric_verification: { status: 'revoked', revokedByName: 'Sarah Kimani' } },
+      consents: { location_verification: { status: 'revoked', revokedByName: 'Sarah Kimani' } },
     });
+  });
+
+  it('reports caregiver performance from the same visit records as the other reports', async () => {
+    const response = await request(app)
+      .get('/compliance/caregiver-performance?from=2026-09-01&to=2026-09-30')
+      .set('x-test-auth', supervisorAuth);
+
+    expect(response.status).toBe(200);
+    const { items } = response.body as {
+      items: { caregiverName: string; completed: number; missed: number; assigned: number }[];
+    };
+    expect(items.map((row) => row.caregiverName)).toEqual(['Amina Wanjiru', 'Brian Otieno']);
+    expect(items[0]).toMatchObject({ assigned: 3, completed: 2, missed: 1 });
+  });
+
+  it('exports caregiver performance as CSV and logs the export', async () => {
+    const response = await request(app)
+      .get('/compliance/exports/caregiver-performance?from=2026-09-01&to=2026-09-30')
+      .set('x-test-auth', supervisorAuth);
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('Amina Wanjiru');
+    const audits = await getDb()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, 'compliance.export'));
+    expect(audits[0]?.metadata).toMatchObject({ report: 'caregiver-performance' });
+  });
+
+  it('keeps caregiver performance from non-supervisors', async () => {
+    const response = await request(app)
+      .get('/compliance/caregiver-performance')
+      .set('x-test-auth', testAuthHeader('someone', 'caregiver'));
+
+    expect(response.status).toBe(403);
   });
 
   it('reports who has accepted the current terms', async () => {
     const db = getDb();
     await db.insert(schema.termsAcceptances).values([
-      { userId: ids.amina!, document: 'caregiver', version: '2' },
+      { userId: ids.amina!, document: 'caregiver', version: '3' },
       { userId: ids.brian!, document: 'caregiver', version: '1' },
     ]);
     const response = await request(app).get('/compliance/terms').set('x-test-auth', supervisorAuth);
     const caregiverDoc = (response.body as TermsBody).documents.find(
       (d) => d.document === 'caregiver',
     );
-    expect(caregiverDoc).toMatchObject({ currentVersion: '2', activeUsers: 2, acceptedCurrent: 1 });
+    expect(caregiverDoc).toMatchObject({ currentVersion: '3', activeUsers: 2, acceptedCurrent: 1 });
     expect(caregiverDoc?.users[0]).toMatchObject({
       name: 'Brian Otieno',
       acceptedCurrent: false,

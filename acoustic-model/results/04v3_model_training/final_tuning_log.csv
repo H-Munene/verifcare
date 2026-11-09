@@ -1,0 +1,21 @@
+model,config,params,inner_roc_auc_person,rank
+xlsr_logistic,0,"{'model__C': np.float64(0.017670169402947963), 'pca__n_components': 8, 'select__layer': 12}",0.5357357804232804,17
+xlsr_logistic,1,"{'model__C': np.float64(4.765911808680843), 'pca__n_components': 8, 'select__layer': 9}",0.5570825066137567,14
+xlsr_logistic,2,"{'model__C': np.float64(0.0008629132190071859), 'pca__n_components': 32, 'select__layer': 12}",0.6128753306878307,6
+xlsr_logistic,3,"{'model__C': np.float64(15.741890047456648), 'pca__n_components': 64, 'select__layer': 12}",0.6429704034391533,1
+xlsr_logistic,4,"{'model__C': np.float64(0.00013289448722869195), 'pca__n_components': 16, 'select__layer': 15}",0.5392402447089948,16
+xlsr_logistic,5,"{'model__C': np.float64(42.78743516759822), 'pca__n_components': 16, 'select__layer': 15}",0.5735904431216932,12
+xlsr_logistic,6,"{'model__C': np.float64(0.0012601639723276807), 'pca__n_components': 64, 'select__layer': 9}",0.6301248346560846,3
+xlsr_logistic,7,"{'model__C': np.float64(0.14077923139972406), 'pca__n_components': 64, 'select__layer': 6}",0.5670221560846561,13
+xlsr_logistic,8,"{'model__C': np.float64(0.005589524205217926), 'pca__n_components': 32, 'select__layer': 9}",0.6215749007936507,4
+xlsr_logistic,9,"{'model__C': np.float64(0.00019054343023324128), 'pca__n_components': 64, 'select__layer': 12}",0.6044733796296297,8
+xlsr_logistic,10,"{'model__C': np.float64(0.01971387269004537), 'pca__n_components': 64, 'select__layer': 6}",0.6073296957671958,7
+xlsr_logistic,11,"{'model__C': np.float64(0.0001899776347411129), 'pca__n_components': 32, 'select__layer': 18}",0.5247056878306878,19
+xlsr_logistic,12,"{'model__C': np.float64(0.050465608220732025), 'pca__n_components': 16, 'select__layer': 15}",0.5802108134920635,11
+xlsr_logistic,13,"{'model__C': np.float64(44.99979487472008), 'pca__n_components': 16, 'select__layer': 9}",0.5922734788359789,10
+xlsr_logistic,14,"{'model__C': np.float64(0.020535203701049935), 'pca__n_components': 16, 'select__layer': 18}",0.4955671296296296,20
+xlsr_logistic,15,"{'model__C': np.float64(0.002428638938104362), 'pca__n_components': 64, 'select__layer': 15}",0.6201744378306878,5
+xlsr_logistic,16,"{'model__C': np.float64(0.0005397956855996448), 'pca__n_components': 8, 'select__layer': 12}",0.5304125330687831,18
+xlsr_logistic,17,"{'model__C': np.float64(28.57080075040724), 'pca__n_components': 64, 'select__layer': 9}",0.6328678902116401,2
+xlsr_logistic,18,"{'model__C': np.float64(0.944351568796268), 'pca__n_components': 16, 'select__layer': 9}",0.5926438492063492,9
+xlsr_logistic,19,"{'model__C': np.float64(0.2548014921296846), 'pca__n_components': 8, 'select__layer': 9}",0.5570825066137566,15

@@ -54,16 +54,28 @@ class VisitSchedule {
 
 /// GET .../verification, trimmed to what the visit timeline reads.
 class VerificationAudit {
+  final DateTime? arrivedAt;
   final DateTime? checkinAt;
   final DateTime? checkoutAt;
-  final DateTime? caregiverVerifiedAt;
-  final DateTime? dependantVerifiedAt;
+
+  /// 'qr' or 'supervisor_override'; null until the visit has started.
+  final String? checkinMethod;
+  final String? qrFamilyMemberName;
+  final DateTime? audioRecordedAt;
+  final int? audioDurationSeconds;
+  final String? audioSkipReason;
+  final String? audioSkipNote;
 
   VerificationAudit({
+    this.arrivedAt,
     this.checkinAt,
     this.checkoutAt,
-    this.caregiverVerifiedAt,
-    this.dependantVerifiedAt,
+    this.checkinMethod,
+    this.qrFamilyMemberName,
+    this.audioRecordedAt,
+    this.audioDurationSeconds,
+    this.audioSkipReason,
+    this.audioSkipNote,
   });
 
   factory VerificationAudit.fromJson(Map<String, dynamic> json) {
@@ -76,22 +88,40 @@ class VerificationAudit {
       'event': Map<String, dynamic>? event,
       'attempts': List<dynamic> attempts,
     }) {
-      // Same rule as the admin web app's VisitDetailPage: the first *passing* attempt per type.
-      DateTime? firstPass(String type) => parse(
-        attempts
-            .map((a) => a as Map<String, dynamic>)
-            .where((a) => a['attemptType'] == type && a['passed'] == true)
-            .firstOrNull?['attemptedAt'],
-      );
       return VerificationAudit(
+        // The first passing geofence check is when the caregiver reached the home.
+        arrivedAt: parse(
+          attempts
+              .map((a) => a as Map<String, dynamic>)
+              .where((a) => a['attemptType'] == 'geofence' && a['passed'] == true)
+              .firstOrNull?['attemptedAt'],
+        ),
         checkinAt: parse(event?['checkinAt']),
         checkoutAt: parse(event?['checkoutAt']),
-        caregiverVerifiedAt: firstPass('caregiver_liveness'),
-        dependantVerifiedAt: firstPass('dependant_liveness'),
+        checkinMethod: event?['checkinMethod'] as String?,
+        qrFamilyMemberName: event?['qrFamilyMemberName'] as String?,
+        audioRecordedAt: parse(event?['audioRecordedAt']),
+        audioDurationSeconds: event?['audioDurationSeconds'] as int?,
+        audioSkipReason: event?['audioSkipReason'] as String?,
+        audioSkipNote: event?['audioSkipNote'] as String?,
       );
     }
     throw FormatException('Unexpected verification audit: $json');
   }
+}
+
+/// A code for the caregiver to scan (POST .../checkin/qr).
+class CheckinCode {
+  final String token;
+  final String caregiverDisplayName;
+
+  CheckinCode({required this.token, required this.caregiverDisplayName});
+
+  factory CheckinCode.fromJson(Map<String, dynamic> json) => switch (json) {
+    {'token': String token, 'caregiverDisplayName': String caregiver} =>
+      CheckinCode(token: token, caregiverDisplayName: caregiver),
+    _ => throw FormatException('Unexpected check-in code: $json'),
+  };
 }
 
 /// One recorded care-task outcome for a visit (GET .../task-outcomes).
@@ -170,6 +200,30 @@ class VisitSchedulesApi {
     } while (cursor != null);
     return visits;
   }
+
+  Future<VisitSchedule> getVisit(String visitScheduleId) async =>
+      VisitSchedule.fromJson(await _client.get('/visit-schedules/$visitScheduleId'));
+
+  /// Asks for a code to show the caregiver. The server refuses (422) if this phone isn't at the
+  /// home, and answers 409 once the visit is no longer waiting for check-in.
+  Future<CheckinCode> issueCheckinCode(
+    String visitScheduleId, {
+    required double gpsLat,
+    required double gpsLng,
+    required double accuracyMeters,
+    required bool isMockLocation,
+  }) async => CheckinCode.fromJson(
+    await _client.post('/visit-schedules/$visitScheduleId/checkin/qr', {
+      'gpsLat': gpsLat,
+      'gpsLng': gpsLng,
+      'accuracyMeters': accuracyMeters,
+      'isMockLocation': isMockLocation,
+    }),
+  );
+
+  /// A short-lived link to the visit's recording. Each call is logged as someone listening.
+  Future<String> getRecordingUrl(String visitScheduleId) async =>
+      (await _client.get('/visit-schedules/$visitScheduleId/audio'))['url'] as String;
 
   Future<VerificationAudit> getVerification(String visitScheduleId) async =>
       VerificationAudit.fromJson(

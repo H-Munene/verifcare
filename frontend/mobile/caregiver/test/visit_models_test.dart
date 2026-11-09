@@ -1,35 +1,33 @@
-import 'package:caregiver/api/checkin_api.dart';
 import 'package:caregiver/api/visit_schedules_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('VerificationAudit.fromJson', () {
-    test('takes the first passing attempt of each photo type', () {
+    test('takes the first passing geofence check as the arrival', () {
       final audit = VerificationAudit.fromJson({
-        'event': {'checkinAt': '2026-09-24T09:05:00Z', 'checkoutAt': null},
+        'event': {
+          'checkinAt': '2026-09-24T09:05:00Z',
+          'checkoutAt': null,
+          'checkinMethod': 'qr',
+        },
         'attempts': [
           {
-            'attemptType': 'caregiver_liveness',
+            'attemptType': 'geofence',
             'passed': false,
             'attemptedAt': '2026-09-24T09:01:00Z',
           },
           {
-            'attemptType': 'caregiver_liveness',
+            'attemptType': 'geofence',
             'passed': true,
             'attemptedAt': '2026-09-24T09:02:00Z',
-          },
-          {
-            'attemptType': 'dependant_liveness',
-            'passed': true,
-            'attemptedAt': '2026-09-24T09:05:00Z',
           },
         ],
       });
       expect(
-        audit.caregiverVerifiedAt,
+        audit.arrivedAt,
         DateTime.parse('2026-09-24T09:02:00Z').toLocal(),
       );
-      expect(audit.dependantVerifiedAt, isNotNull);
+      expect(audit.checkinMethod, 'qr');
       expect(audit.checkinAt, isNotNull);
       expect(audit.checkoutAt, isNull);
     });
@@ -37,9 +35,8 @@ void main() {
     test('a missed visit that never started has every step empty', () {
       final audit = VerificationAudit.fromJson({'event': null, 'attempts': []});
       expect([
+        audit.arrivedAt,
         audit.checkinAt,
-        audit.caregiverVerifiedAt,
-        audit.dependantVerifiedAt,
         audit.checkoutAt,
       ], everyElement(isNull));
     });
@@ -63,19 +60,6 @@ void main() {
     expect(
       (task.title, task.required, task.status),
       ('Give medication', true, null),
-    );
-  });
-
-  test('LivenessResult.fromJson reads a failed check', () {
-    final result = LivenessResult.fromJson({
-      'passed': false,
-      'matchConfidence': 41.2,
-      'failureReason': 'identity_mismatch',
-    });
-    expect(result.passed, isFalse);
-    expect(
-      describeLivenessFailure(result.failureReason),
-      contains("didn't match"),
     );
   });
 }

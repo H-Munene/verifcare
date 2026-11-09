@@ -27,7 +27,7 @@ function testAuthHeader(sub: string, role: UserRole): string {
 
 interface NotificationBody {
   id: string;
-  type: 'missed_visit' | 'cognitive_risk';
+  type: 'missed_visit' | 'checkin_override';
   recipientUserId: string;
   acknowledgedAt: string | null;
   acknowledgedBy: string | null;
@@ -85,9 +85,8 @@ async function createTestUser(
 
 let testVisitCounter = 0;
 
-// notification_log's own chk_notification_log_related_entity CHECK requires a real
-// visit_schedules row (missed_visit) or audio_records row (cognitive_risk) - this builds whichever
-// chain a given type needs, rather than every test constructing it by hand.
+// notification_log's own chk_notification_log_related_entity CHECK requires a real visit_schedules
+// row - this builds that chain, rather than every test constructing it by hand.
 async function createTestVisitScheduleId(): Promise<string> {
   const db = getDb();
   testVisitCounter += 1;
@@ -138,29 +137,12 @@ async function createTestVisitScheduleId(): Promise<string> {
   return visit.id;
 }
 
-async function createTestAudioRecordId(): Promise<string> {
-  const db = getDb();
-  const visitScheduleId = await createTestVisitScheduleId();
-  await db.insert(schema.verificationEvents).values({ visitScheduleId });
-  const [audioRecord] = await db
-    .insert(schema.audioRecords)
-    .values({ verificationEventId: visitScheduleId, s3Key: `test/${visitScheduleId}.wav` })
-    .returning();
-  if (!audioRecord) {
-    throw new Error('Failed to insert test audio record.');
-  }
-  return audioRecord.id;
-}
-
 async function createTestNotification(
   recipientUserId: string,
-  type: 'missed_visit' | 'cognitive_risk' = 'missed_visit',
+  type: 'missed_visit' | 'checkin_override' = 'missed_visit',
 ): Promise<typeof schema.notificationLog.$inferSelect> {
   const db = getDb();
-  const values =
-    type === 'missed_visit'
-      ? { type, recipientUserId, visitScheduleId: await createTestVisitScheduleId() }
-      : { type, recipientUserId, audioRecordId: await createTestAudioRecordId() };
+  const values = { type, recipientUserId, visitScheduleId: await createTestVisitScheduleId() };
   const [row] = await db.insert(schema.notificationLog).values(values).returning();
   if (!row) {
     throw new Error('Failed to insert test notification.');
@@ -219,15 +201,15 @@ describe.skipIf(!hasTestDb)(
       it('filters by type', async () => {
         const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
         await createTestNotification(supervisor.id, 'missed_visit');
-        await createTestNotification(supervisor.id, 'cognitive_risk');
+        await createTestNotification(supervisor.id, 'checkin_override');
 
         const response = await request(app)
-          .get('/notifications?type=cognitive_risk')
+          .get('/notifications?type=checkin_override')
           .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
 
         expect(response.status).toBe(200);
         expect(pageBody(response).items).toHaveLength(1);
-        expect(pageBody(response).items[0]?.type).toBe('cognitive_risk');
+        expect(pageBody(response).items[0]?.type).toBe('checkin_override');
       });
 
       it('filters by acknowledged', async () => {

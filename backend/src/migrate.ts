@@ -21,10 +21,6 @@ import path from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { getLambdaDb } from './db/lambdaDb.js';
 import * as schema from './db/schema.js';
-import {
-  resetBiometricEnrollments,
-  type ResetBiometricEnrollmentsResult,
-} from './resetBiometricEnrollments.js';
 
 // Plain __dirname, not testSupport.ts's fileURLToPath(import.meta.url) dance - this file is a
 // NodejsFunction entry, and aws-lambda-nodejs's esbuild bundling defaults to CJS output regardless
@@ -45,23 +41,12 @@ interface MigrationRunnerEvent {
     email: string;
     fullName: string;
   };
-  // Also a guarded one-off (2026-09-26): wipe every enrollment row so photos can be retaken - see
-  // resetBiometricEnrollments.ts. A dry run (counts only) unless `confirm` is the exact phrase.
-  resetBiometricEnrollments?: { confirm?: string };
 }
 
 // drizzle-orm's migrate() already tracks which migrations are applied and no-ops on the rest, so a
 // repeat invocation (e.g. after a deploy with no new migrations) is safe to run again.
-export async function handler(
-  event: MigrationRunnerEvent = {},
-): Promise<{ status: 'ok'; resetBiometricEnrollments?: ResetBiometricEnrollmentsResult }> {
+export async function handler(event: MigrationRunnerEvent = {}): Promise<{ status: 'ok' }> {
   const db = await getLambdaDb();
-
-  if (event.resetBiometricEnrollments) {
-    const result = await resetBiometricEnrollments(db, event.resetBiometricEnrollments.confirm);
-    console.log('reset biometric enrollments', result);
-    return { status: 'ok', resetBiometricEnrollments: result };
-  }
 
   if (event.bootstrapSupervisor) {
     const { cognitoSub, email, fullName } = event.bootstrapSupervisor;

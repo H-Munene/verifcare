@@ -15,6 +15,7 @@ import 'screens/schedule_calendar_screen.dart';
 import 'screens/visit_in_progress_screen.dart';
 import 'screens/visit_timeline_screen.dart';
 import 'visit_notifications.dart';
+import 'widgets/recovery_offer_banner.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -200,7 +201,7 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
         visit: visit,
         visitSchedulesApi: _visitSchedulesApi,
       ),
-      'completed' || 'missed' => VisitTimelineScreen(
+      'completed' || 'missed' || 'investigated' || 'reassigned' => VisitTimelineScreen(
         visit: visit,
         visitSchedulesApi: _visitSchedulesApi,
       ),
@@ -216,7 +217,7 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
     _refreshVisits();
   }
 
-  // Both photos passed: swap the whole check-in stack for the in-progress visit screen.
+  // The visit has started: swap the whole check-in stack for the in-progress visit screen.
   void _startVisit(VisitSchedule visit) {
     Navigator.of(context).popUntil((route) => route.isFirst);
     _openVisit(
@@ -229,6 +230,8 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
         scheduledStart: visit.scheduledStart,
         scheduledEnd: visit.scheduledEnd,
         status: 'in_progress',
+        routeSequence: visit.routeSequence,
+        recoveredFromVisitId: visit.recoveredFromVisitId,
         createdBy: visit.createdBy,
         createdAt: visit.createdAt,
         updatedAt: visit.updatedAt,
@@ -261,6 +264,10 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
     return Scaffold(
       body: Column(
         children: [
+          RecoveryOfferBanner(
+            api: _visitSchedulesApi,
+            onAccepted: _refreshVisits,
+          ),
           if (ongoing != null)
             _OngoingVisitBanner(
               visit: ongoing,

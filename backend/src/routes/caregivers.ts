@@ -25,8 +25,6 @@ import { z } from 'zod';
 import { isCognitoUserAlreadyExistsError, type CognitoAdmin } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import { changedFields, recordAudit } from '../audit.js';
-import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
-import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
@@ -46,9 +44,6 @@ import { parseOrSendProblem } from '../validation.js';
 export interface CaregiversRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
-  // Optional so existing callers/tests that don't touch biometric enrollment at all (most of them)
-  // don't need to construct one - offboarding cleanup (HEZ-85) is simply skipped without it.
-  faceCollection?: BiometricFaceCollection;
 }
 
 interface CaregiverResponse {
@@ -66,6 +61,9 @@ interface CaregiverResponse {
   // to see or later correct one via PATCH.
   employeeNumber: string | null;
   hireDate: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+  baseAreaText: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -77,30 +75,48 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // confirmed with the user) - employeeNumber/hireDate are deliberately absent here (DB-generated,
 // see schema.ts), unlike updateCaregiverRequestSchema below where a supervisor may still want to
 // correct either by hand later.
-const createCaregiverRequestSchema = z.object({
-  fullName: z.string().min(1),
-  email: z.string().email(),
-  phoneNumber: z.string().min(1),
-  idType: z.enum(['national_id', 'passport']),
-  idNumber: z.string().min(1),
-  dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
-  gender: z.enum(['male', 'female']),
-  occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']),
-});
+// Where a planned route starts. Optional so a caregiver can exist before it's known, but a caregiver
+// without one is left out of day plans, and the plan says so.
+const homeBaseFields = {
+  baseLat: z.number().min(-90).max(90).optional(),
+  baseLng: z.number().min(-180).max(180).optional(),
+  baseAreaText: z.string().trim().min(1).max(200).optional(),
+};
 
-const updateCaregiverRequestSchema = z.object({
-  fullName: z.string().min(1).optional(),
-  email: z.string().email().optional(),
-  phoneNumber: z.string().min(1).optional(),
-  idType: z.enum(['national_id', 'passport']).optional(),
-  idNumber: z.string().min(1).optional(),
-  dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD').optional(),
-  gender: z.enum(['male', 'female']).optional(),
-  occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']).optional(),
-  employeeNumber: z.string().min(1).optional(),
-  hireDate: z.string().regex(DATE_ONLY, 'hireDate must be YYYY-MM-DD').optional(),
-  active: z.boolean().optional(),
-});
+const caregiverHomeBase = (body: { baseLat?: number; baseLng?: number }) =>
+  (body.baseLat === undefined) === (body.baseLng === undefined);
+const HOME_BASE_MESSAGE = 'baseLat and baseLng must be given together.';
+
+const createCaregiverRequestSchema = z
+  .object({
+    fullName: z.string().min(1),
+    email: z.string().email(),
+    phoneNumber: z.string().min(1),
+    idType: z.enum(['national_id', 'passport']),
+    idNumber: z.string().min(1),
+    dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
+    gender: z.enum(['male', 'female']),
+    occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']),
+    ...homeBaseFields,
+  })
+  .refine(caregiverHomeBase, { message: HOME_BASE_MESSAGE, path: ['baseLng'] });
+
+const updateCaregiverRequestSchema = z
+  .object({
+    fullName: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phoneNumber: z.string().min(1).optional(),
+    idType: z.enum(['national_id', 'passport']).optional(),
+    idNumber: z.string().min(1).optional(),
+    dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD').optional(),
+    gender: z.enum(['male', 'female']).optional(),
+    occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']).optional(),
+    employeeNumber: z.string().min(1).optional(),
+    hireDate: z.string().regex(DATE_ONLY, 'hireDate must be YYYY-MM-DD').optional(),
+    active: z.boolean().optional(),
+    ...homeBaseFields,
+  })
+  .refine(caregiverHomeBase, { message: HOME_BASE_MESSAGE, path: ['baseLng'] });
 
 // Express 5's params type allows string | string[], so req.params.caregiverId isn't a plain
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
@@ -136,6 +152,9 @@ function caregiverSelection() {
     occupation: schema.caregivers.occupation,
     employeeNumber: schema.caregivers.employeeNumber,
     hireDate: schema.caregivers.hireDate,
+    baseLat: schema.caregivers.baseLat,
+    baseLng: schema.caregivers.baseLng,
+    baseAreaText: schema.caregivers.baseAreaText,
     active: schema.caregivers.active,
     createdAt: schema.caregivers.createdAt,
     updatedAt: schema.caregivers.updatedAt,
@@ -154,6 +173,9 @@ function toCaregiverResponse(row: {
   occupation: 'nurse' | 'community_health_worker' | 'caregiver' | null;
   employeeNumber: string | null;
   hireDate: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+  baseAreaText: string | null;
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -170,6 +192,9 @@ function toCaregiverResponse(row: {
     occupation: row.occupation,
     employeeNumber: row.employeeNumber,
     hireDate: row.hireDate,
+    baseLat: row.baseLat,
+    baseLng: row.baseLng,
+    baseAreaText: row.baseAreaText,
     active: row.active,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -191,7 +216,7 @@ function getDb(res: import('express').Response): Db | undefined {
 
 export function createCaregiversRouter(dependencies: CaregiversRouterDependencies): Router {
   const router = Router();
-  const { cognitoAdmin, requireAuth, faceCollection } = dependencies;
+  const { cognitoAdmin, requireAuth } = dependencies;
   // Every route in this router needs the same auth (see the file header comment) - applied once
   // here rather than repeated on each route.
   router.use(requireAuth, requireRole('supervisor'));
@@ -255,6 +280,9 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
             dob: body.dob,
             gender: body.gender,
             occupation: body.occupation,
+            baseLat: body.baseLat,
+            baseLng: body.baseLng,
+            baseAreaText: body.baseAreaText,
           })
           .returning();
         if (!caregiverRow) {
@@ -287,6 +315,9 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           occupation: result.caregiverRow.occupation,
           employeeNumber: result.caregiverRow.employeeNumber,
           hireDate: result.caregiverRow.hireDate,
+          baseLat: result.caregiverRow.baseLat,
+          baseLng: result.caregiverRow.baseLng,
+          baseAreaText: result.caregiverRow.baseAreaText,
           active: result.caregiverRow.active,
           createdAt: result.caregiverRow.createdAt,
           updatedAt: result.caregiverRow.updatedAt,
@@ -524,12 +555,6 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
         return;
       }
 
-      // Best-effort, after the transaction above has already committed - see
-      // db/biometricOffboarding.ts's header comment for why this isn't inside it.
-      if (body.active === false && faceCollection) {
-        await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'caregiver', caregiverId);
-      }
-
       res.status(200).json(
         toCaregiverResponse({
           userId: result.caregiverRow.userId,
@@ -543,6 +568,9 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           occupation: result.caregiverRow.occupation,
           employeeNumber: result.caregiverRow.employeeNumber,
           hireDate: result.caregiverRow.hireDate,
+          baseLat: result.caregiverRow.baseLat,
+          baseLng: result.caregiverRow.baseLng,
+          baseAreaText: result.caregiverRow.baseAreaText,
           active: result.caregiverRow.active,
           createdAt: result.caregiverRow.createdAt,
           updatedAt: result.caregiverRow.updatedAt,

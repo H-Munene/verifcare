@@ -4,8 +4,6 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import * as iam from "aws-cdk-lib/aws-iam";
-import * as rekognition from "aws-cdk-lib/aws-rekognition";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
@@ -19,10 +17,7 @@ export interface ApiParams {
   userPoolClient: cognito.UserPoolClient;
   caregiverAppUserPoolClient: cognito.UserPoolClient;
   familyMemberAppUserPoolClient: cognito.UserPoolClient;
-  biometricEnrollmentsBucket: s3.Bucket;
   visitAudioBucket: s3.Bucket;
-  checkinLivenessFramesBucket: s3.Bucket;
-  biometricFacesCollection: rekognition.CfnCollection;
 }
 
 export interface Api {
@@ -39,19 +34,9 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     userPoolClient,
     caregiverAppUserPoolClient,
     familyMemberAppUserPoolClient,
-    biometricEnrollmentsBucket,
     visitAudioBucket,
-    checkinLivenessFramesBucket,
-    biometricFacesCollection,
   } = params;
 
-  // acoustic-model's Lambda function is deliberately not created yet: it's a
-  // container-image Lambda, and the ECR repository above has no image in it
-  // yet (the real acoustic-model implementation is later work, Linear
-  // HEZ-43 onward) - CDK cannot create a container-image Lambda against an
-  // empty repository. api's function is created now since the Express app
-  // it wraps already exists and is tested (HEZ-7), even though it currently
-  // only has a health-check route.
   const apiFunction = new NodejsFunction(stack, "ApiFunction", {
     // An explicit absolute path, not a bare relative string: NodejsFunction
     // normally infers the entry's base directory from the call site via
@@ -93,11 +78,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
         caregiverAppUserPoolClient.userPoolClientId,
       FAMILY_MEMBER_USER_POOL_CLIENT_ID:
         familyMemberAppUserPoolClient.userPoolClientId,
-      BIOMETRIC_ENROLLMENTS_BUCKET_NAME: biometricEnrollmentsBucket.bucketName,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
-      BIOMETRIC_FACES_COLLECTION_ID: biometricFacesCollection.collectionId,
-      CHECKIN_LIVENESS_FRAMES_BUCKET_NAME:
-        checkinLivenessFramesBucket.bucketName,
     },
   });
 
@@ -126,57 +107,12 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // same pattern as the grant above.
   userPool.grant(apiFunction, "cognito-idp:AdminCreateUser");
 
-  // Lets api's biometric-enrollment upload flow (HEZ-31) sign a presigned PUT
-  // URL that S3 will actually honor - a presigned URL is only valid if the
-  // signing principal's own IAM policy allows the signed action, so grantPut
-  // is required even though the Lambda itself never uploads the bytes.
-  // grantRead covers both the confirm-time HeadObject existence check and
-  // Rekognition's own need to read the S3 object when the Lambda calls
-  // DetectFaces with an S3Object reference instead of downloading the image.
-  biometricEnrollmentsBucket.grantPut(apiFunction);
-  biometricEnrollmentsBucket.grantRead(apiFunction);
-
-  // Lets api's check-in liveness flow (HEZ-34) sign presigned PUT URLs for capture frames
-  // (grantPut, same "the signing principal needs its own PutObject permission" reasoning as
-  // biometricEnrollmentsBucket above), run DetectFaces/CompareFaces against them via S3Object
-  // references (grantRead), and delete each frame right after it's processed - pass or fail, these
-  // frames are never needed again, per infra/lib/storage.ts's own retention reasoning
-  // (grantDelete, a grant biometricEnrollmentsBucket deliberately does NOT have, since enrollment
-  // images are deleted only via the application's offboarding path, not a general-purpose delete).
-  checkinLivenessFramesBucket.grantPut(apiFunction);
-  checkinLivenessFramesBucket.grantRead(apiFunction);
-  checkinLivenessFramesBucket.grantDelete(apiFunction);
-
-  // Lets api's biometric-enrollment confirm endpoint (HEZ-31) and check-in liveness endpoint
-  // (HEZ-34) call Rekognition DetectFaces/CompareFaces. Neither action supports resource-level
-  // permissions (confirmed against AWS's Service Authorization Reference for DetectFaces when
-  // HEZ-31 was built - CompareFaces is the same class of plain image-comparison API, with no
-  // resource type listed there either, so it requires Resource: "*" the same way), so the only
-  // controllable least-privilege axis is the action list itself - scoped to exactly these two
-  // actions, not a wildcard "rekognition:*" grant.
-  apiFunction.addToRolePolicy(
-    new iam.PolicyStatement({
-      actions: ["rekognition:DetectFaces", "rekognition:CompareFaces"],
-      resources: ["*"],
-    }),
-  );
-
-  // Lets api's biometric-enrollment confirm/approve endpoints (HEZ-85) search and add to the
-  // enrollment-uniqueness Rekognition Collection, and lets offboarding cleanup remove from it.
-  // Unlike DetectFaces above, these three actions DO support resource-level permissions scoped to
-  // a specific collection (confirmed directly against AWS's own "How Amazon Rekognition works with
-  // IAM" guide, which gives exactly this ARN shape as a real example) - scoped to this one
-  // collection, not every collection in the account.
-  apiFunction.addToRolePolicy(
-    new iam.PolicyStatement({
-      actions: [
-        "rekognition:IndexFaces",
-        "rekognition:SearchFacesByImage",
-        "rekognition:DeleteFaces",
-      ],
-      resources: [biometricFacesCollection.attrArn],
-    }),
-  );
+  // Lets api sign presigned URLs for the visit recording that S3 will honor: a presigned URL is
+  // only valid if the signing principal's own IAM policy allows the signed action, so grantPut and
+  // grantRead are needed even though the Lambda never handles the audio bytes. grantRead also covers
+  // the size check at confirm time and the KMS decrypt that playback needs.
+  visitAudioBucket.grantPut(apiFunction);
+  visitAudioBucket.grantRead(apiFunction);
 
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,

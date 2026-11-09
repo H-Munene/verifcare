@@ -95,7 +95,18 @@ class FeedEvent {
   /// were recorded or they couldn't be loaded.
   final ({int done, int total})? tasks;
 
-  const FeedEvent(this.at, this.kind, this.visit, {this.tasks});
+  /// For [FeedKind.started]: who showed the code, or that a supervisor started it instead.
+  final String? confirmedBy;
+  final bool startedBySupervisor;
+
+  const FeedEvent(
+    this.at,
+    this.kind,
+    this.visit, {
+    this.tasks,
+    this.confirmedBy,
+    this.startedBySupervisor = false,
+  });
 }
 
 /// Newest first. Events later than [now] (clock skew) are left out.
@@ -104,11 +115,19 @@ List<FeedEvent> buildFeed(Iterable<VisitWithDetails> visits, DateTime now) {
   for (final item in visits) {
     final visit = item.visit;
     final audit = item.audit;
-    if (audit?.caregiverVerifiedAt case final at?) {
+    if (audit?.arrivedAt case final at?) {
       events.add(FeedEvent(at, FeedKind.arrived, visit));
     }
     if (audit?.checkinAt case final at?) {
-      events.add(FeedEvent(at, FeedKind.started, visit));
+      events.add(
+        FeedEvent(
+          at,
+          FeedKind.started,
+          visit,
+          confirmedBy: audit?.qrFamilyMemberName,
+          startedBySupervisor: audit?.checkinMethod == 'supervisor_override',
+        ),
+      );
     }
     if (audit?.checkoutAt case final at?) {
       events.add(

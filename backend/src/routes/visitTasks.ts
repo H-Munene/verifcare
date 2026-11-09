@@ -1,7 +1,7 @@
 // GET/PUT /visit-schedules/{visitScheduleId}/tasks[/{careTaskId}] (docs/visit-task-checklist-plan.md).
 // Mounted at the same /visit-schedules prefix as visitSchedules.ts and checkin.ts, kept as its own
 // router/file since this is a materially different concern from both (not schedule CRUD, not
-// geofence/liveness verification) - matches checkin.ts's own precedent for splitting concerns
+// geofence and code-scan verification) - matches checkin.ts's own precedent for splitting concerns
 // under a shared path prefix rather than growing either existing (already 700+ line) file further.
 //
 // RBAC: caregiver-only, own visit, status === 'in_progress' - the checklist is worked through

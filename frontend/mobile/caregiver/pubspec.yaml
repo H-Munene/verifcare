@@ -43,7 +43,7 @@ dependencies:
   # GPS read with accuracy + Android-only Position.isMocked (matches architecture.md's own
   # "on Android, the app also reports the OS mock-location flag" framing).
   geolocator: ^14.0.3
-  image_picker: ^1.2.3
+  mobile_scanner: ^7.1.2
   record: ^7.1.1
   audioplayers: ^6.8.1
   path_provider: ^2.1.6

@@ -35,6 +35,30 @@ export interface MissedVisitAlert {
   caregiverName: string;
 }
 
+export type CheckinOverrideReason =
+  'no_family_member_present' | 'family_phone_unavailable' | 'network_problem' | 'other';
+
+export interface PendingCheckinOverride {
+  id: string;
+  visitScheduleId: string;
+  reason: CheckinOverrideReason;
+  note: string | null;
+  requestedAt: string;
+  dependantName: string;
+  caregiverName: string;
+}
+
+export interface VisitNeedingCover {
+  caseId: string;
+  status: 'open' | 'exhausted';
+  visitScheduleId: string;
+  scheduledStart: string;
+  dependantName: string;
+  caregiverName: string;
+  offeredToName: string | null;
+  notificationId: string | null;
+}
+
 export interface DashboardOverview {
   date: string;
   timeZone: string;
@@ -49,8 +73,8 @@ export interface DashboardOverview {
   previousPeriod?: { completed: number; missed: number };
   attention: {
     missedVisitAlerts: { total: number; items: MissedVisitAlert[] };
-    flaggedPhotos: number;
-    dependantsWithoutPhoto: { total: number; items: { id: string; fullName: string }[] };
+    visitsNeedingCover: { total: number; items: VisitNeedingCover[] };
+    pendingCheckinOverrides: { total: number; items: PendingCheckinOverride[] };
   };
 }
 
@@ -60,5 +84,7 @@ export function createDashboardApi(client: ApiClient) {
       client.get<DashboardOverview>(`/dashboard/overview?date=${encodeURIComponent(date)}`),
     acknowledgeAlert: (notificationId: string) =>
       client.post<unknown>(`/notifications/${notificationId}/acknowledge`),
+    decideCheckinOverride: (id: string, decision: 'approve' | 'deny', note: string) =>
+      client.post<unknown>(`/checkin-overrides/${id}/${decision}`, { note }),
   };
 }

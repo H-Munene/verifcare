@@ -16,8 +16,8 @@
 //   Kept consistent with the rest of the check-in flow (HEZ-33/34/35: same caregiver-only-own-
 //   visit rule) rather than introducing a new authorization branch this flow doesn't otherwise
 //   need. Lives here, not routes/checkin.ts, matching openapi.yaml's own tag scoping - the
-//   "Check-in" tag is explicitly limited to "the geofence, caregiver-liveness, and
-//   dependant-liveness steps," and checkout is tagged "Visit Schedules" instead.
+//   "Check-in" tag covers the geofence and code-scan steps, and checkout is tagged "Visit
+//   Schedules" instead.
 // - GET /{id}/verification (HEZ-42) uses the exact same ownership rule as GET /{id} - confirmed
 //   with the user rather than assumed, since its own openapi.yaml description ("the admin web
 //   app's visit-history view") could plausibly have meant supervisor-only. A caregiver/family
@@ -33,8 +33,7 @@
 // response says which side (caregiver or dependant) is double-booked.
 //
 // caregiverId/dependantId existence is checked explicitly with a SELECT before insert, the same
-// "send the response, return a falsy sentinel" style routes/biometricEnrollments.ts's
-// authorizeSubject already uses - a clean 400 naming which field is wrong, rather than letting a
+// "send the response, return a falsy sentinel" style used across these routers - a clean 400 naming which field is wrong, rather than letting a
 // foreign-key violation surface as an unclassified 500.
 //
 // PATCH's scheduledStart/scheduledEnd are independently optional (either, both, or neither may be
@@ -42,14 +41,13 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/verifier.js';
 import { changedFields, recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
-import { isCheckinPhoto } from '../db/checkinPhotos.js';
 import { assessVisit, visitRecords, visitResolutionHistory } from '../db/complianceReports.js';
 import type { Db } from '../db/client.js';
 import { subjectsWithActiveConsent } from '../db/consents.js';
@@ -78,14 +76,21 @@ interface VerificationEventResponse {
   checkoutGpsLat: number | null;
   checkoutGpsLng: number | null;
   checkoutDistanceFromGeofenceMeters: number | null;
-  caregiverMatchConfidence: number | null;
-  dependantMatchConfidence: number | null;
-  caregiverLivenessPassed: boolean | null;
-  dependantLivenessPassed: boolean | null;
+  checkinMethod: schema.CheckinMethod | null;
+  // Who showed the code that was scanned, and how far their phone was from the home.
+  qrFamilyMemberName: string | null;
+  familyDistanceFromGeofenceMeters: number | null;
+  // The recording's facts or why there isn't one. Never its location: see routes/visitAudio.ts.
+  audioRecordedAt: string | null;
+  audioDurationSeconds: number | null;
+  audioSkipReason: schema.AudioSkipReason | null;
+  audioSkipNote: string | null;
 }
 
 function toVerificationEventResponse(
   row: typeof schema.verificationEvents.$inferSelect,
+  qrFamilyMemberName: string | null,
+  recording: typeof schema.audioRecords.$inferSelect | undefined,
 ): VerificationEventResponse {
   return {
     visitScheduleId: row.visitScheduleId,
@@ -97,19 +102,20 @@ function toVerificationEventResponse(
     checkoutGpsLat: row.checkoutGpsLat,
     checkoutGpsLng: row.checkoutGpsLng,
     checkoutDistanceFromGeofenceMeters: row.checkoutDistanceFromGeofenceMeters,
-    caregiverMatchConfidence:
-      row.caregiverMatchConfidence === null ? null : Number(row.caregiverMatchConfidence),
-    dependantMatchConfidence:
-      row.dependantMatchConfidence === null ? null : Number(row.dependantMatchConfidence),
-    caregiverLivenessPassed: row.caregiverLivenessPassed,
-    dependantLivenessPassed: row.dependantLivenessPassed,
+    checkinMethod: row.checkinMethod,
+    qrFamilyMemberName,
+    familyDistanceFromGeofenceMeters: row.familyDistanceFromGeofenceMeters,
+    audioRecordedAt: recording ? recording.uploadedAt.toISOString() : null,
+    audioDurationSeconds: recording ? recording.durationSeconds : null,
+    audioSkipReason: row.audioSkipReason,
+    audioSkipNote: row.audioSkipNote,
   };
 }
 
 interface VerificationAttemptResponse {
   id: string;
   visitScheduleId: string;
-  attemptType: 'geofence' | 'caregiver_liveness' | 'dependant_liveness';
+  attemptType: 'geofence' | 'family_location' | 'qr_scan';
   passed: boolean;
   failureReason: string | null;
   attemptedAt: string;
@@ -133,7 +139,13 @@ export interface VisitSchedulesRouterDependencies {
 }
 
 type VisitStatus =
-  'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled' | 'investigated';
+  | 'scheduled'
+  | 'in_progress'
+  | 'completed'
+  | 'missed'
+  | 'cancelled'
+  | 'investigated'
+  | 'reassigned';
 
 interface VisitScheduleResponse {
   id: string;
@@ -152,6 +164,10 @@ interface VisitScheduleResponse {
   scheduledStart: string;
   scheduledEnd: string;
   status: VisitStatus;
+  // This visit's place in its planned route, when it came from a published plan.
+  routeSequence: number | null;
+  // The visit this one replaced, when another caregiver took it over.
+  recoveredFromVisitId: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -171,6 +187,8 @@ function toResponse(
     scheduledStart: row.scheduledStart.toISOString(),
     scheduledEnd: row.scheduledEnd.toISOString(),
     status: row.status as VisitStatus,
+    routeSequence: row.routeSequence,
+    recoveredFromVisitId: row.recoveredFromVisitId,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -218,7 +236,12 @@ const visitStatusSchema = z.enum([
   'missed',
   'cancelled',
   'investigated',
+  'reassigned',
 ]);
+
+// 'reassigned' is only ever set by a caregiver accepting a recovery offer, in the same transaction
+// that creates the replacement. Setting it by hand would leave a visit with no replacement.
+const patchableVisitStatusSchema = visitStatusSchema.exclude(['reassigned']);
 
 const createVisitScheduleRequestSchema = z
   .object({
@@ -235,7 +258,7 @@ const createVisitScheduleRequestSchema = z
 const updateVisitScheduleRequestSchema = z.object({
   scheduledStart: z.string().datetime({ offset: true }).optional(),
   scheduledEnd: z.string().datetime({ offset: true }).optional(),
-  status: visitStatusSchema.optional(),
+  status: patchableVisitStatusSchema.optional(),
 });
 
 // Sortable columns (2026-09-26, the supervisor console's tables). Truncated to milliseconds so
@@ -264,49 +287,24 @@ const visitScheduleIdParamSchema = z.string().uuid();
 
 // The caregiver's GPS fix at checkout. Named and bounded exactly like check-in's geofence request
 // (routes/checkin.ts), so the app sends the same shape for both ends of a visit.
-const checkoutRequestSchema = z.object({
-  gpsLat: z.number().min(-90).max(90),
-  gpsLng: z.number().min(-180).max(180),
-});
-
-// Scheduling guardrail (2026-09-26, user request): a visit can't be scheduled or rescheduled until
-// both the caregiver and the dependant have a photo check-in can verify against - otherwise the
-// visit is bound to fail at the door with 'not_enrolled'. "Has a photo" is db/checkinPhotos.ts's
-// isCheckinPhoto, the same rule check-in's face match and the apps' "photo needed" alert use.
-// Returns the Problem detail, or null when both have one.
-async function missingPhotoDetail(
-  db: Db,
-  caregiverId: string,
-  dependantId: string,
-): Promise<string | null> {
-  const rows = await db
-    .select({ subjectType: schema.biometricEnrollments.subjectType })
-    .from(schema.biometricEnrollments)
-    .where(
-      and(
-        isCheckinPhoto,
-        or(
-          eq(schema.biometricEnrollments.caregiverId, caregiverId),
-          eq(schema.biometricEnrollments.dependantId, dependantId),
-        ),
-      ),
-    );
-  const has = new Set(rows.map((row) => row.subjectType));
-  const missing = [
-    has.has('caregiver') ? null : 'the caregiver',
-    has.has('dependant') ? null : 'the dependant',
-  ].filter((who): who is string => who !== null);
-  if (missing.length === 0) {
-    return null;
-  }
-  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} a photo for check-in. Add the photo first (a photo awaiting review doesn't count yet).`;
-}
+// The skip reason is how a caregiver accounts for a visit with no recording.
+const checkoutRequestSchema = z
+  .object({
+    gpsLat: z.number().min(-90).max(90),
+    gpsLng: z.number().min(-180).max(180),
+    audioSkipReason: z.enum(schema.AUDIO_SKIP_REASONS).optional(),
+    audioSkipNote: z.string().trim().max(500).optional(),
+  })
+  .refine((body) => body.audioSkipReason !== 'other' || (body.audioSkipNote?.length ?? 0) > 0, {
+    message: "A note is required when the reason is 'other'.",
+    path: ['audioSkipNote'],
+  });
 
 // Consent guardrail (2026-09-27, user request): a visit can't be scheduled or rescheduled until
-// both the caregiver and the dependant have an active (unrevoked) biometric_verification consent -
-// check-in photographs both of them, so a visit without that consent could only be carried out by
-// processing someone's biometric data without their consent. Same structure as the photo guardrail
-// above; "has consent" is db/consents.ts's rule, shared with the consent screen that grants it.
+// both the caregiver and the dependant have an active (unrevoked) location_verification consent -
+// check-in checks phones' positions against the home, so a visit without that consent could only
+// be carried out by processing location data without it. "Has consent" is db/consents.ts's rule,
+// shared with the consent screen that grants it.
 // Returns the Problem detail, or null when both have consented.
 async function missingConsentDetail(
   db: Db,
@@ -319,7 +317,7 @@ async function missingConsentDetail(
       { subjectType: 'caregiver', id: caregiverId },
       { subjectType: 'dependant', id: dependantId },
     ],
-    'biometric_verification',
+    'location_verification',
   );
   const missing = [
     consented.has(caregiverId) ? null : 'the caregiver',
@@ -328,11 +326,10 @@ async function missingConsentDetail(
   if (missing.length === 0) {
     return null;
   }
-  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to photo identity verification. Consent is given by accepting the terms in the Mzazi Care app.`;
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to location checks at visits. Consent is given by accepting the terms in the Mzazi Care app.`;
 }
 
-// Shared by both guardrails: each means "this visit can't go ahead as scheduled", not a malformed
-// request.
+// The guardrail means "this visit can't go ahead as scheduled", not a malformed request.
 function sendUnschedulable(res: Response, detail: string): void {
   sendProblem(res, { type: 'about:blank', title: 'Unprocessable Entity', status: 422, detail });
 }
@@ -371,6 +368,17 @@ async function canReadVisit(
     sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
   }
   return allowed;
+}
+
+async function userNameOf(db: Db, userId: string | null): Promise<string | null> {
+  if (!userId) {
+    return null;
+  }
+  const [row] = await db
+    .select({ fullName: schema.users.fullName })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId));
+  return row?.fullName ?? null;
 }
 
 // Maps an EXCLUDE-constraint violation to a specific, readable detail message rather than a
@@ -444,11 +452,6 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
-      const photoDetail = await missingPhotoDetail(db, body.caregiverId, body.dependantId);
-      if (photoDetail) {
-        sendUnschedulable(res, photoDetail);
-        return;
-      }
       const consentDetail = await missingConsentDetail(db, body.caregiverId, body.dependantId);
       if (consentDetail) {
         sendUnschedulable(res, consentDetail);
@@ -688,6 +691,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         .select()
         .from(schema.verificationEvents)
         .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
+      const [recording] = await db
+        .select()
+        .from(schema.audioRecords)
+        .where(eq(schema.audioRecords.verificationEventId, visitScheduleId));
       const attempts = await db
         .select()
         .from(schema.verificationAttempts)
@@ -719,7 +726,13 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
       }
 
       res.status(200).json({
-        event: event ? toVerificationEventResponse(event) : null,
+        event: event
+          ? toVerificationEventResponse(
+              event,
+              await userNameOf(db, event.qrFamilyMemberUserId),
+              recording,
+            )
+          : null,
         attempts: attempts.map(toVerificationAttemptResponse),
         ...compliance,
       });
@@ -851,19 +864,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
-      // Moving a visit is scheduling it again, so the photo and consent guardrails apply; a
+      // Moving a visit is scheduling it again, so the consent guardrail applies; a
       // status-only change (e.g. cancelling) doesn't, so an existing visit can always be cancelled
       // - including after a consent is withdrawn, which is exactly when cancelling is needed.
       if (body.scheduledStart !== undefined || body.scheduledEnd !== undefined) {
-        const photoDetail = await missingPhotoDetail(
-          db,
-          existing.caregiverId,
-          existing.dependantId,
-        );
-        if (photoDetail) {
-          sendUnschedulable(res, photoDetail);
-          return;
-        }
         const consentDetail = await missingConsentDetail(
           db,
           existing.caregiverId,
@@ -926,8 +930,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
   // time actually spent at the home. The fix and its distance are stored on verification_events
   // as the record of where checkout happened. Accuracy and mock-location aren't checked here
   // (check-in checks them); only the position was asked for.
-  // Deliberately does not depend on HEZ-38 (audio upload + acoustic-model call), which is
-  // separately deferred (milestone 4) - nothing here checks for an audio_records row.
+  //
+  // A visit whose dependant has consented to visit audio needs a recording or a stated reason for
+  // not having one (2026-11-09). A dependant is never made to speak, so the rule is that its
+  // absence has to be explained, and the reason is kept for the family and the reports.
   router.post('/:visitScheduleId/checkout', async (req, res, next) => {
     const visitScheduleId = parseOrSendProblem(
       visitScheduleIdParamSchema,
@@ -1047,6 +1053,28 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         return;
       }
 
+      const [recording] = await db
+        .select({ id: schema.audioRecords.id })
+        .from(schema.audioRecords)
+        .where(eq(schema.audioRecords.verificationEventId, visitScheduleId));
+      const audioConsent = await subjectsWithActiveConsent(
+        db,
+        [{ subjectType: 'dependant', id: visit.dependantId }],
+        'visit_audio',
+      );
+      if (audioConsent.has(visit.dependantId) && !recording && !body.audioSkipReason) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'Add the visit recording, or give a reason for not having one, to check out.',
+          failureReason: 'audio_required',
+        });
+        return;
+      }
+      // A reason only means something when there's no recording to explain.
+      const skip = recording ? undefined : body.audioSkipReason;
+
       const now = new Date();
       const [updated] = await db.transaction(async (tx) => {
         await tx
@@ -1056,6 +1084,8 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
             checkoutGpsLat: body.gpsLat,
             checkoutGpsLng: body.gpsLng,
             checkoutDistanceFromGeofenceMeters: distanceMeters,
+            audioSkipReason: skip ?? null,
+            audioSkipNote: skip ? body.audioSkipNote || null : null,
           })
           .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
         const rows = await tx
@@ -1069,7 +1099,10 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
           action: 'visit.checkout',
           entityType: 'visit_schedule',
           entityId: visitScheduleId,
-          metadata: { distanceMeters: Math.round(distanceMeters) },
+          metadata: {
+            distanceMeters: Math.round(distanceMeters),
+            audio: recording ? 'recorded' : (skip ?? null),
+          },
         });
         return rows;
       });

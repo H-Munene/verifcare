@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { recordAudit } from '../audit.js';
 import { requireRole } from '../auth/middleware.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
+import { caregiverPerformance } from '../db/caregiverPerformance.js';
 import type { Db } from '../db/client.js';
 import {
   alertResponse,
@@ -94,7 +95,7 @@ const visitsQuerySchema = periodSchema.extend({
 const EXCEPTION_SORT = '-scheduledStart';
 
 const exceptionsQuerySchema = periodSchema.extend({
-  kind: z.enum(['missed', 'missing_checkout', 'failed_check']).optional(),
+  kind: z.enum(['missed', 'missing_checkout', 'failed_check', 'supervisor_override']).optional(),
   resolved: z
     .enum(['true', 'false'])
     .optional()
@@ -118,7 +119,14 @@ const auditLogQuerySchema = periodSchema.extend({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-const EXPORT_REPORTS = ['visits', 'visit-summary', 'consents', 'terms', 'audit-log'] as const;
+const EXPORT_REPORTS = [
+  'visits',
+  'visit-summary',
+  'caregiver-performance',
+  'consents',
+  'terms',
+  'audit-log',
+] as const;
 const exportParamSchema = z.enum(EXPORT_REPORTS);
 // Every export's filters in one schema: each report reads the ones that apply to it.
 const exportQuerySchema = periodSchema.extend({
@@ -244,6 +252,26 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
         rows: sortSummary(summary.rows, query.sort),
         totals: summary.totals,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/caregiver-performance', async (req, res, next) => {
+    const query = parseOrSendProblem(periodSchema, req.query, res);
+    if (!query) {
+      return;
+    }
+    const at = now();
+    const period = resolvePeriod(query, at, res);
+    const db = period && getDb(res);
+    if (!period || !db) {
+      return;
+    }
+    try {
+      const items = await caregiverPerformance(db, period, at);
+      items.sort((a, b) => a.caregiverName.localeCompare(b.caregiverName));
+      res.status(200).json({ period, items });
     } catch (err) {
       next(err);
     }
@@ -434,7 +462,11 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
       return;
     }
     const at = now();
-    const needsPeriod = report === 'visits' || report === 'visit-summary' || report === 'audit-log';
+    const needsPeriod =
+      report === 'visits' ||
+      report === 'visit-summary' ||
+      report === 'caregiver-performance' ||
+      report === 'audit-log';
     const query = parseOrSendProblem(exportQuerySchema, req.query, res);
     if (!query) {
       return;
@@ -465,8 +497,9 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
           'Check-in distance from home (m)',
           'Checkout distance from home (m)',
           'Home radius (m)',
-          'Caregiver face matched',
-          'Dependant face matched',
+          'Check-in method',
+          'Family phone distance from home (m)',
+          'Recording',
           'Fully verified',
           'Late check-in',
           'Failed checks',
@@ -491,8 +524,9 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
             metres(visit.distanceFromGeofenceMeters),
             metres(visit.checkoutDistanceFromGeofenceMeters),
             visit.geofenceRadiusMeters,
-            yesNo(visit.caregiverFaceMatched),
-            yesNo(visit.dependantFaceMatched),
+            visit.checkinMethod,
+            metres(visit.familyDistanceFromGeofenceMeters),
+            visit.audioRecorded ? 'recorded' : visit.audioSkipReason,
             yesNo(assessment.fullyVerified),
             yesNo(visit.checkinAt ? assessment.late : null),
             visit.failedChecks
@@ -529,26 +563,78 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
           ...sortSummary(summary.rows, 'name').map((row) => summaryCsvRow(row.personName, row)),
           summaryCsvRow('All', summary.totals),
         ];
+      } else if (report === 'caregiver-performance' && period) {
+        headers = [
+          'Caregiver',
+          'Visits assigned',
+          'Completed',
+          'Missed',
+          'Excused',
+          'Completion rate',
+          'On-time rate',
+          'Average check-in delay (min)',
+          'Average visit length (min)',
+          'Planned visit length (min)',
+          'Required tasks done',
+          'Confirmed by family code',
+          'Supervisor overrides',
+          'Failed check-in attempts',
+          'Recordings provided',
+          'Recordings skipped',
+          'Cover offers received',
+          'Offers accepted',
+          'Offers declined',
+          'Offers expired',
+          'Average offer response (min)',
+          'Visits covered for others',
+        ];
+        const whole = (value: number | null) => (value === null ? null : Math.round(value));
+        rows = (await caregiverPerformance(db, period, at))
+          .sort((a, b) => a.caregiverName.localeCompare(b.caregiverName))
+          .map((row) => [
+            row.caregiverName,
+            row.assigned,
+            row.completed,
+            row.missed,
+            row.excused,
+            percent(row.completionRate),
+            percent(row.onTimeRate),
+            whole(row.averageCheckinDelayMinutes),
+            whole(row.averageVisitMinutes),
+            whole(row.averagePlannedMinutes),
+            percent(row.requiredTasksDoneRate),
+            percent(row.qrVerifiedRate),
+            row.supervisorOverrides,
+            row.failedCheckins,
+            row.recordingsProvided,
+            Object.values(row.recordingsSkipped).reduce((sum, count) => sum + count, 0),
+            row.offersReceived,
+            row.offersAccepted,
+            row.offersDeclined,
+            row.offersExpired,
+            whole(row.averageOfferResponseMinutes),
+            row.visitsCovered,
+          ]);
       } else if (report === 'consents') {
         headers = [
           'Subject type',
           'Name',
-          'Photo verification consent',
-          'Photo consent granted by',
-          'Photo consent granted at (Nairobi)',
-          'Photo consent revoked by',
-          'Photo consent revoked at (Nairobi)',
-          'Audio monitoring consent',
+          'Location verification consent',
+          'Location consent granted by',
+          'Location consent granted at (Nairobi)',
+          'Location consent revoked by',
+          'Location consent revoked at (Nairobi)',
+          'Visit audio consent',
           'Audio consent granted by',
           'Audio consent granted at (Nairobi)',
           'Audio consent revoked by',
           'Audio consent revoked at (Nairobi)',
-          'Upcoming visits without photo consent',
+          'Upcoming visits without location consent',
         ];
         rows = (await consentRegister(db, at)).map((row) => [
           row.subjectType,
           row.name,
-          ...(['biometric_verification', 'audio_cognitive_monitoring'] as const).flatMap((type) => {
+          ...(['location_verification', 'visit_audio'] as const).flatMap((type) => {
             const c = row.consents[type];
             return [
               c.status,

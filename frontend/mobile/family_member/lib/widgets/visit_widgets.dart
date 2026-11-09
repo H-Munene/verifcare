@@ -21,6 +21,8 @@ StatusStyle visitStatusStyle(VisitStatus status) => switch (status) {
   // A missed visit a supervisor is looking into.
   'investigated' => (label: 'Under review', ink: dangerRed, tint: dangerTint),
   'cancelled' => (label: 'Cancelled', ink: inkSecondary, tint: _neutralTint),
+  // Another caregiver took this visit over; the replacement has its own entry.
+  'reassigned' => (label: 'Caregiver changed', ink: inkSecondary, tint: _neutralTint),
   _ => (
     label: status.replaceAll('_', ' '),
     ink: inkSecondary,

@@ -3,7 +3,7 @@
 // Visibility (matching openapi.yaml's own already-drafted description, not a fresh judgment
 // call): a caller sees only notifications addressed to them (`recipientUserId`), except a
 // supervisor sees the whole inbox regardless of who a given alert is addressed to - architecture.md
-// currently only ever addresses missed-visit/cognitive-risk alerts to a supervisor, so a
+// currently only ever addresses missed-visit and check-in-override alerts to a supervisor, so a
 // caregiver/family_member caller will simply see an empty list today, but the generic
 // "recipientUserId === caller, unless supervisor" rule is implemented as described rather than
 // hard-coded to "supervisor-only", in case a future notification type ever does address a
@@ -38,10 +38,9 @@ export interface NotificationsRouterDependencies {
 
 interface NotificationResponse {
   id: string;
-  type: 'missed_visit' | 'cognitive_risk';
+  type: 'missed_visit' | 'checkin_override' | 'no_cover_found';
   visitScheduleId: string | null;
-  audioRecordId: string | null;
-  // null: a shared missed-visit alert, addressed to every supervisor (0016).
+  // null: a shared alert, addressed to every supervisor.
   recipientUserId: string | null;
   channel: string | null;
   sentAt: string | null;
@@ -52,9 +51,8 @@ interface NotificationResponse {
 function toResponse(row: typeof schema.notificationLog.$inferSelect): NotificationResponse {
   return {
     id: row.id,
-    type: row.type as 'missed_visit' | 'cognitive_risk',
+    type: row.type as 'missed_visit' | 'checkin_override' | 'no_cover_found',
     visitScheduleId: row.visitScheduleId,
-    audioRecordId: row.audioRecordId,
     recipientUserId: row.recipientUserId,
     channel: row.channel,
     sentAt: row.sentAt ? row.sentAt.toISOString() : null,
@@ -64,7 +62,7 @@ function toResponse(row: typeof schema.notificationLog.$inferSelect): Notificati
 }
 
 const listNotificationsQuerySchema = z.object({
-  type: z.enum(['missed_visit', 'cognitive_risk']).optional(),
+  type: z.enum(['missed_visit', 'checkin_override', 'no_cover_found']).optional(),
   // Not z.coerce.boolean() - Boolean("false") is true in JS, so that would silently treat
   // ?acknowledged=false the same as ?acknowledged=true. An explicit enum + transform avoids it.
   acknowledged: z

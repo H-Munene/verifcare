@@ -1,7 +1,7 @@
 // Short-lived check-in session tokens (HEZ-33 onward), a materially different mechanism from the
 // Cognito ID tokens auth/middleware.ts verifies - these scope only the remainder of one check-in
-// flow (geofence pass -> caregiver liveness -> dependant liveness) for one visit_schedule, per
-// openapi.yaml's `checkin/*` endpoints. Stored only as a SHA-256 hash
+// flow (geofence pass -> code scan) for one visit_schedule, per openapi.yaml's `checkin/*`
+// endpoints. The family member's check-in codes (routes/checkinCode.ts) use the same generator. Stored only as a SHA-256 hash
 // (verification_events.session_token_hash, per that column's own file-header note) - never the raw
 // token - so a leaked database row or backup can never be replayed as a live token, the same reason
 // passwords are never stored in plaintext, even though this isn't a password.

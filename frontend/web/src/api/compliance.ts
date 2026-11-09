@@ -52,7 +52,7 @@ export interface VisitSummary {
   totals: VisitSummaryCounts;
 }
 
-export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check';
+export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override';
 
 export const RESOLUTION_OUTCOMES = [
   'caregiver_absent',
@@ -127,7 +127,7 @@ export interface AlertResponse {
   }[];
 }
 
-export type ConsentType = 'biometric_verification' | 'audio_cognitive_monitoring';
+export type ConsentType = 'location_verification' | 'visit_audio';
 
 export interface ConsentState {
   status: 'active' | 'revoked' | 'none';
@@ -184,10 +184,52 @@ export interface AuditLogFilters {
   entityId?: string;
 }
 
-export type ExportReport = 'visits' | 'visit-summary' | 'consents' | 'terms' | 'audit-log';
+export interface CaregiverPerformanceRow {
+  caregiverId: string;
+  caregiverName: string;
+  assigned: number;
+  completed: number;
+  missed: number;
+  excused: number;
+  completionRate: number | null;
+  checkedIn: number;
+  onTimeRate: number | null;
+  averageCheckinDelayMinutes: number | null;
+  averageVisitMinutes: number | null;
+  averagePlannedMinutes: number | null;
+  requiredTasksDoneRate: number | null;
+  qrVerifiedRate: number | null;
+  supervisorOverrides: number;
+  failedCheckins: number;
+  recordingsProvided: number;
+  recordingsSkipped: Record<
+    'dependant_declined' | 'dependant_unwell_or_asleep' | 'technical_problem' | 'other',
+    number
+  >;
+  offersReceived: number;
+  offersAccepted: number;
+  offersDeclined: number;
+  offersExpired: number;
+  averageOfferResponseMinutes: number | null;
+  visitsCovered: number;
+  weeks: {
+    weekStart: string;
+    completed: number;
+    missed: number;
+    onTime: number;
+    checkedIn: number;
+  }[];
+}
+
+export type ExportReport =
+  'visits' | 'visit-summary' | 'caregiver-performance' | 'consents' | 'terms' | 'audit-log';
 
 export function createComplianceApi(client: ApiClient) {
   return {
+    getCaregiverPerformance: (period: Period) =>
+      client.get<{ period: Period; items: CaregiverPerformanceRow[] }>(
+        `/compliance/caregiver-performance${queryString(period)}`,
+      ),
     getVisitSummary: (params: Period & { groupBy: SummaryGroupBy; sort: SummarySort }) =>
       client.get<VisitSummary>(`/compliance/visits${queryString(params)}`),
     listExceptions: (
