@@ -5,8 +5,7 @@ import './ConfirmDialog.css';
 import { useDialogLayer } from './useDialogLayer';
 
 // "Are you sure?" before an action that's hard to take back (2026-09-27): changing a dependant's
-// primary contact, approving or rejecting a flagged photo, replacing a check-in photo. An
-// alertdialog, so screen readers read the question out as soon as it opens.
+// primary contact, cancelling a visit. An alertdialog, so screen readers read the question out as soon as it opens.
 //
 // Focus starts on Cancel for a destructive action and on the confirm button otherwise - the WAI-
 // ARIA practice of focusing the least harmful choice, so a stray Enter can't do the damage.

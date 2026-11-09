@@ -1,5 +1,5 @@
 // Audit log: who did what to which record, and when - every change, every compliance export, and
-// views of check-in details and biometric photos - newest first. The trail is append-only.
+// views of check-in details and listens to visit recordings - newest first. The trail is append-only.
 
 import {
   Calendar03Icon,

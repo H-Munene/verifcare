@@ -1,10 +1,10 @@
-// Consent register: every active caregiver and dependant's photo-verification and audio-monitoring
-// consent - who granted it, who revoked it - and visits still booked for someone whose photo
-// consent was revoked after booking, since those visits can't be verified.
+// Consent register: every active caregiver and dependant's location and visit-audio consent - who
+// granted it, who revoked it - and visits still booked for someone whose location consent was
+// revoked after booking, since those visits can't be verified.
 
 import {
   Alert02Icon,
-  Camera01Icon,
+  Location01Icon,
   CancelCircleIcon,
   CheckmarkCircle02Icon,
   FilterIcon,
@@ -112,8 +112,8 @@ export function ConsentReport() {
               <tr>
                 <Th icon={UserIcon}>Name</Th>
                 <Th>Role</Th>
-                <Th icon={Camera01Icon}>Photo verification</Th>
-                <Th icon={Mic01Icon}>Audio monitoring</Th>
+                <Th icon={Location01Icon}>Location checks</Th>
+                <Th icon={Mic01Icon}>Visit audio</Th>
                 <Th icon={Alert02Icon} className="compliance__num">
                   Visits at risk
                 </Th>
@@ -132,16 +132,16 @@ export function ConsentReport() {
                   </td>
                   <td>{row.subjectType === 'caregiver' ? 'Caregiver' : 'Dependant'}</td>
                   <td>
-                    <Consent state={row.consents.biometric_verification} />
+                    <Consent state={row.consents.location_verification} />
                   </td>
                   <td>
-                    <Consent state={row.consents.audio_cognitive_monitoring} />
+                    <Consent state={row.consents.visit_audio} />
                   </td>
                   <td className="compliance__num">
                     <Flag
                       count={row.upcomingVisitsWithoutConsent}
                       icon={Alert02Icon}
-                      label="upcoming visits without photo consent"
+                      label="upcoming visits without location consent"
                     />
                   </td>
                 </tr>

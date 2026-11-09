@@ -1,31 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
-import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
 import { VisitHistoryList } from '../components/VisitHistoryList';
 import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
-import { Tabs } from '../design-system/Tabs';
 import './CaregiverDetailPage.css';
 import { DetailSkeleton } from '../design-system/Skeleton';
 import { Calendar03Icon, Call02Icon, IdIcon } from '@hugeicons/core-free-icons';
 import { MetaList } from '../design-system/MetaList';
 
-type DetailTab = 'enrollment' | 'visits';
-
-const TABS = [
-  { id: 'enrollment' as const, label: 'Enrollment' },
-  { id: 'visits' as const, label: 'Visit History' },
-];
-
-// Restructured into tabs (2026-09-23, user request, matching temp_images/tabs_ui.PNG) - the
-// identity header (name/status/meta/edit/activate) stays outside the tabs since it applies to the
-// whole page. Visit History is new here: this page had none at all before (matches the wireframe
-// and HEZ-54's own stated scope at the time, since there was no real visit data to show), now
-// backed by the same VisitHistoryList DependantDetailPage's own identical tab uses.
+// The identity header (name/status/meta/edit/activate) above the caregiver's visit history.
 /** A calendar date (YYYY-MM-DD) as e.g. "22 Sep 2026"; noon UTC keeps the day in every zone. */
 function readableDate(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
@@ -41,7 +27,6 @@ export function CaregiverDetailPage() {
   const { caregivers } = useApi();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<DetailTab>('enrollment');
 
   const caregiverQuery = useQuery({
     queryKey: ['caregiver', caregiverId],
@@ -53,8 +38,6 @@ export function CaregiverDetailPage() {
     queryFn: () => caregivers.getCaregiverStats(caregiverId!),
   });
 
-  // The backend runs biometric-enrollment offboarding cleanup on active:false itself - nothing
-  // extra needed here beyond calling PATCH and refreshing.
   const setActiveMutation = useMutation({
     mutationFn: (active: boolean) => caregivers.updateCaregiver(caregiverId!, { active }),
     onSuccess: () => {
@@ -111,17 +94,8 @@ export function CaregiverDetailPage() {
         perspective="caregiver"
       />
 
-      <Tabs tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as DetailTab)} />
-
       <div className="caregiver-detail__tab-panel">
-        {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection
-            subjectType="caregiver"
-            subjectId={caregiver.userId}
-            subjectName={caregiver.fullName}
-          />
-        ) : null}
-        {activeTab === 'visits' ? <VisitHistoryList caregiverId={caregiver.userId} /> : null}
+        <VisitHistoryList caregiverId={caregiver.userId} />
       </div>
 
       {setActiveMutation.error ? (

@@ -1,5 +1,5 @@
-// Exceptions: the month's missed visits, visits never checked out, and visits with a failed check,
-// each with how it was resolved. A row opens the visit's side panel, where it is resolved.
+// Exceptions: the month's missed visits, visits never checked out, visits with a failed check, and
+// visits a supervisor started because no family member could show a code, each with how it was resolved. A row opens the visit's side panel, where it is resolved.
 
 import {
   Alert02Icon,
@@ -22,7 +22,12 @@ import { VisitPanel } from '../VisitPanel';
 import { dateTime, EXCEPTION_KIND_LABELS, failedCheckLabel } from './format';
 import { StateMark } from './Marks';
 
-const KINDS: readonly ExceptionKind[] = ['missed', 'missing_checkout', 'failed_check'];
+const KINDS: readonly ExceptionKind[] = [
+  'missed',
+  'missing_checkout',
+  'failed_check',
+  'supervisor_override',
+];
 
 export function ExceptionsReport({ period }: { period: Period }) {
   const { compliance } = useApi();

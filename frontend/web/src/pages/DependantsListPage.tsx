@@ -1,15 +1,14 @@
 import {
   Calendar03Icon,
-  Camera01Icon,
   CheckmarkBadge01Icon,
   UserIcon,
   UserSquareIcon,
 } from '@hugeicons/core-free-icons';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import type { CheckinPhotoStatus, DependantStatus, ListDependantsParams } from '../api/dependants';
+import type { DependantStatus, ListDependantsParams } from '../api/dependants';
 import { useApi } from '../api/useApi';
-import { Badge, type BadgeTone } from '../design-system/Badge';
+import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
 import { FilterBar, FilterMenu } from '../design-system/FilterMenu';
 import { sortState } from '../design-system/sortState';
@@ -26,14 +25,6 @@ const STATUS_OPTIONS = [
   { value: 'deactivated', label: 'Deactivated' },
 ];
 
-const PHOTO_META: Record<CheckinPhotoStatus, { label: string; tone: BadgeTone }> = {
-  ready: { label: 'Has photo', tone: 'success' },
-  awaiting_review: { label: 'Awaiting review', tone: 'neutral' },
-  missing: { label: 'No photo', tone: 'danger' },
-};
-
-const PHOTO_OPTIONS = Object.entries(PHOTO_META).map(([value, { label }]) => ({ value, label }));
-
 const SORTS: readonly DependantSort[] = ['name', '-name', 'dob', '-dob'];
 
 // Filters and sort live in the URL (2026-09-26, the new table filters), so a reload or a shared
@@ -43,23 +34,21 @@ export function DependantsListPage() {
   const navigate = useNavigate();
   const params = useListParams();
   const status = params.get('status') as DependantStatus | '';
-  const photo = params.get('photo') as CheckinPhotoStatus | '';
   const sort = params.oneOf('sort', SORTS, 'name');
-  const pages = useCursorPages(`${status}|${photo}|${sort}`);
+  const pages = useCursorPages(`${status}|${sort}`);
   const { directionOf, toggled } = sortState<'name' | 'dob'>(sort);
 
   const query = useQuery({
-    queryKey: ['dependants', { status, photo, sort, cursor: pages.cursor }],
+    queryKey: ['dependants', { status, sort, cursor: pages.cursor }],
     queryFn: () =>
       dependants.listDependants({
         status: status || undefined,
-        photo: photo || undefined,
         sort,
         cursor: pages.cursor,
         limit: 20,
       }),
   });
-  const filtered = Boolean(status || photo);
+  const filtered = Boolean(status);
 
   return (
     <div>
@@ -76,7 +65,7 @@ export function DependantsListPage() {
         </div>
       </div>
 
-      <FilterBar onClear={filtered ? () => params.clear(['status', 'photo']) : undefined}>
+      <FilterBar onClear={filtered ? () => params.clear(['status']) : undefined}>
         <FilterMenu
           label="Status"
           icon={CheckmarkBadge01Icon}
@@ -84,14 +73,6 @@ export function DependantsListPage() {
           allLabel="All statuses"
           options={STATUS_OPTIONS}
           onChange={(value) => params.set('status', value)}
-        />
-        <FilterMenu
-          label="Photo"
-          icon={Camera01Icon}
-          value={photo}
-          allLabel="Any photo status"
-          options={PHOTO_OPTIONS}
-          onChange={(value) => params.set('photo', value)}
         />
       </FilterBar>
 
@@ -119,7 +100,6 @@ export function DependantsListPage() {
                     Date of birth
                   </SortableTh>
                   <Th icon={UserSquareIcon}>Gender</Th>
-                  <Th icon={Camera01Icon}>Photo</Th>
                   <Th icon={CheckmarkBadge01Icon}>Status</Th>
                 </tr>
               </thead>
@@ -144,11 +124,6 @@ export function DependantsListPage() {
                     <td>{dependant.dob}</td>
                     <td>{dependant.gender ?? '-'}</td>
                     <td>
-                      <Badge tone={PHOTO_META[dependant.checkinPhotoStatus].tone}>
-                        {PHOTO_META[dependant.checkinPhotoStatus].label}
-                      </Badge>
-                    </td>
-                    <td>
                       <Badge tone={dependant.status === 'active' ? 'success' : 'neutral'}>
                         {dependant.status}
                       </Badge>
@@ -157,7 +132,7 @@ export function DependantsListPage() {
                 ))}
                 {query.data.items.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="ds-table__empty">
+                    <td colSpan={4} className="ds-table__empty">
                       {filtered
                         ? 'No dependants match these filters.'
                         : 'No dependants registered yet.'}

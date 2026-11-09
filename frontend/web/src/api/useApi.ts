@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createBiometricEnrollmentsApi } from './biometricEnrollments';
 import { createCaregiversApi } from './caregivers';
 import { createApiClient } from './client';
 import { createComplianceApi } from './compliance';
@@ -17,7 +16,6 @@ export function useApi() {
   const dependants = useMemo(() => createDependantsApi(client), [client]);
   const caregivers = useMemo(() => createCaregiversApi(client), [client]);
   const users = useMemo(() => createUsersApi(client), [client]);
-  const biometricEnrollments = useMemo(() => createBiometricEnrollmentsApi(client), [client]);
   const visitSchedules = useMemo(() => createVisitSchedulesApi(client), [client]);
   const dashboard = useMemo(() => createDashboardApi(client), [client]);
   const compliance = useMemo(() => createComplianceApi(client), [client]);
@@ -25,7 +23,6 @@ export function useApi() {
     dependants,
     caregivers,
     users,
-    biometricEnrollments,
     visitSchedules,
     dashboard,
     compliance,

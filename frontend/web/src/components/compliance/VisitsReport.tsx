@@ -1,5 +1,5 @@
 // Visit verification: the month's visits per caregiver or dependant - were they delivered, on
-// time, and fully verified (inside the home at check-in and checkout, both faces matched).
+// time, and fully verified (family code scanned at check-in, inside the home at check-out).
 
 import {
   Alert02Icon,
