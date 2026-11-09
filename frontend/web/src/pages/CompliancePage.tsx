@@ -16,6 +16,7 @@ import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
 import { AlertsReport } from '../components/compliance/AlertsReport';
 import { AuditLogReport } from '../components/compliance/AuditLogReport';
+import { CaregiverPerformanceReport } from '../components/compliance/CaregiverPerformanceReport';
 import { ConsentReport } from '../components/compliance/ConsentReport';
 import { ExceptionsReport } from '../components/compliance/ExceptionsReport';
 import {
@@ -35,6 +36,7 @@ import './CompliancePage.css';
 
 const TABS = [
   { id: 'visits', label: 'Visit verification' },
+  { id: 'performance', label: 'Caregiver performance' },
   { id: 'exceptions', label: 'Exceptions' },
   { id: 'alerts', label: 'Alert response' },
   { id: 'consent', label: 'Consent' },
@@ -44,13 +46,14 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 // Consent and terms are the current state, not a period, so they have no month.
-const PERIOD_TABS: readonly TabId[] = ['visits', 'exceptions', 'alerts', 'audit'];
+const PERIOD_TABS: readonly TabId[] = ['visits', 'performance', 'exceptions', 'alerts', 'audit'];
 
 const EXPORTS: Record<TabId, { report: ExportReport; label: string }[]> = {
   visits: [
     { report: 'visit-summary', label: 'Export summary' },
     { report: 'visits', label: 'Export all visits' },
   ],
+  performance: [{ report: 'caregiver-performance', label: 'Export report' }],
   // The all-visits export carries each exception and its resolution.
   exceptions: [{ report: 'visits', label: 'Export all visits' }],
   alerts: [],
@@ -190,6 +193,7 @@ export function CompliancePage() {
         className="compliance__panel"
       >
         {tab === 'visits' ? <VisitsReport period={period} /> : null}
+        {tab === 'performance' ? <CaregiverPerformanceReport period={period} /> : null}
         {tab === 'exceptions' ? <ExceptionsReport period={period} /> : null}
         {tab === 'alerts' ? <AlertsReport period={period} /> : null}
         {tab === 'consent' ? <ConsentReport /> : null}
