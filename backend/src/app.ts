@@ -15,11 +15,13 @@ import { createComplianceRouter } from './routes/compliance.js';
 import { createDashboardRouter } from './routes/dashboard.js';
 import { createDependantsRouter } from './routes/dependants.js';
 import { createNotificationsRouter } from './routes/notifications.js';
+import { createRecoveryOffersRouter } from './routes/recoveryOffers.js';
 import { createTermsRouter } from './routes/terms.js';
 import { createFamilyLinkRequestsRouter } from './routes/familyLinkRequests.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
 import { createVisitAudioRouter } from './routes/visitAudio.js';
+import { createVisitPlansRouter } from './routes/visitPlans.js';
 import { createVisitResolutionsRouter } from './routes/visitResolutions.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
 
@@ -158,6 +160,8 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       }),
     );
     app.use('/checkin-overrides', createCheckinOverridesRouter({ requireAuth }));
+    app.use('/visit-plans', createVisitPlansRouter({ requireAuth }));
+    app.use('/recovery-offers', createRecoveryOffersRouter({ requireAuth }));
     // Visit task checklist (docs/visit-task-checklist-plan.md) - mounted at the same
     // '/visit-schedules' prefix as a separate router, same reasoning as checkin.ts above.
     app.use('/visit-schedules', createVisitTasksRouter({ requireAuth }));

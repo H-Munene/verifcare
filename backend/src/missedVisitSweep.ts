@@ -4,6 +4,7 @@ import { recordAudit } from './audit.js';
 import type { Db } from './db/client.js';
 import { getLambdaDb } from './db/lambdaDb.js';
 import * as schema from './db/schema.js';
+import { runVisitRecovery } from './recovery.js';
 
 // Real logic (HEZ-23 follow-up) - a visit still 'scheduled' (never checked in) or 'in_progress'
 // (checked in but never checked out) once its own scheduledEnd has passed is a missed visit,
@@ -73,5 +74,7 @@ export const handler: ScheduledHandler = async (event) => {
   console.log('missed-visit-sweep invoked', { time: event.time });
   const db = await getLambdaDb();
   const { missedVisitIds } = await sweepMissedVisits(db);
-  console.log('missed-visit-sweep completed', { missedCount: missedVisitIds.length });
+  // After the sweep, so a visit it has just marked missed has its recovery case closed.
+  const recovery = await runVisitRecovery(db);
+  console.log('missed-visit-sweep completed', { missedCount: missedVisitIds.length, ...recovery });
 };

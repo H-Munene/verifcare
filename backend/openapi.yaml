@@ -48,6 +48,10 @@ tags:
     description: Scheduling, rescheduling, and querying visits, including the live-visits and visit-history views.
   - name: Check-in
     description: The geofence, code-scan and supervisor-override steps of the check-in verification flow.
+  - name: Visit Plans
+    description: Clustering dependants and ordering each caregiver's day.
+  - name: Visit Recovery
+    description: Offering a late visit to the nearest available caregiver.
   - name: Audio
     description: The visit's 30-second recording, which the dependant's family can listen to.
   - name: Consent
@@ -1139,6 +1143,222 @@ paths:
           $ref: '#/components/responses/NotFound'
         '410':
           $ref: '#/components/responses/Problem'
+  /visit-plans:
+    get:
+      tags: [Visit Plans]
+      summary: Plans for a day (supervisors only)
+      operationId: listVisitPlans
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The day's plans.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VisitPlan'
+    post:
+      tags: [Visit Plans]
+      summary: Draft a day's plan (supervisors only)
+      description: |
+        Clusters the dependants into one group per available caregiver, gives each group to the
+        caregiver based closest to it, orders the stops and works out visit times. Creates no
+        visits until published. Anyone who can't be planned is listed with the reason.
+      operationId: createVisitPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, shiftStart, shiftEnd, visitMinutes]
+              properties:
+                date:
+                  type: string
+                  format: date
+                shiftStart:
+                  type: string
+                  description: HH:MM, Nairobi time.
+                shiftEnd:
+                  type: string
+                  description: HH:MM, Nairobi time.
+                visitMinutes:
+                  type: integer
+                  minimum: 15
+                  maximum: 240
+                dependantIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: Defaults to every active dependant.
+                caregiverIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: Defaults to every active caregiver.
+      responses:
+        '201':
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitPlan'
+        '400':
+          $ref: '#/components/responses/Problem'
+  /visit-plans/{planId}:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Visit Plans]
+      summary: One plan (supervisors only)
+      operationId: getVisitPlan
+      responses:
+        '200':
+          description: The plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitPlan'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Visit Plans]
+      summary: Rearrange a draft (supervisors only)
+      description: Send each caregiver's stops in order. Times are recalculated, and anyone left out or no longer fitting becomes unplaced.
+      operationId: updateVisitPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clusters]
+              properties:
+                clusters:
+                  type: array
+                  items:
+                    type: object
+                    required: [caregiverId, dependantIds]
+                    properties:
+                      caregiverId: { type: string, format: uuid }
+                      dependantIds:
+                        type: array
+                        items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The updated draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitPlan'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /visit-plans/{planId}/publish:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Visit Plans]
+      summary: Turn a draft into real visits (supervisors only)
+      operationId: publishVisitPlan
+      responses:
+        '200':
+          description: Published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitPlan'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /recovery-offers/mine:
+    get:
+      tags: [Visit Recovery]
+      summary: The caller's open offers to cover a late visit
+      description: Shows the ward and times only. The dependant's name and address follow on accepting.
+      operationId: listMyRecoveryOffers
+      responses:
+        '200':
+          description: Open offers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, proposedStart, proposedEnd, distanceMeters, expiresAt]
+                      properties:
+                        id: { type: string, format: uuid }
+                        proposedStart: { type: string, format: date-time }
+                        proposedEnd: { type: string, format: date-time }
+                        distanceMeters: { type: integer }
+                        expiresAt: { type: string, format: date-time }
+                        ward: { type: [string, 'null'] }
+  /recovery-offers/{offerId}/accept:
+    parameters:
+      - name: offerId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Visit Recovery]
+      summary: Take over the visit
+      description: The original visit becomes `reassigned` and a replacement is created for the caller.
+      operationId: acceptRecoveryOffer
+      responses:
+        '200':
+          description: The replacement visit.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [visitScheduleId, scheduledStart, scheduledEnd]
+                properties:
+                  visitScheduleId: { type: string, format: uuid }
+                  scheduledStart: { type: string, format: date-time }
+                  scheduledEnd: { type: string, format: date-time }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /recovery-offers/{offerId}/decline:
+    parameters:
+      - name: offerId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Visit Recovery]
+      summary: Decline, passing the offer to the next nearest caregiver
+      operationId: declineRecoveryOffer
+      responses:
+        '204':
+          description: Declined.
+        '404':
+          $ref: '#/components/responses/NotFound'
   /visit-schedules/{visitScheduleId}/checkout:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
@@ -2415,6 +2635,24 @@ components:
                       scheduledStart: { type: string, format: date-time }
                       dependantName: { type: string }
                       caregiverName: { type: string }
+            visitsNeedingCover:
+              type: object
+              description: Late visits still looking for cover, or where nobody could be found.
+              properties:
+                total: { type: integer }
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      caseId: { type: string, format: uuid }
+                      status: { type: string, enum: [open, exhausted] }
+                      visitScheduleId: { type: string, format: uuid }
+                      scheduledStart: { type: string, format: date-time }
+                      dependantName: { type: string }
+                      caregiverName: { type: string }
+                      offeredToName: { type: [string, 'null'] }
+                      notificationId: { type: [string, 'null'], format: uuid }
             pendingCheckinOverrides:
               type: object
               description: Caregivers at a home waiting for a supervisor to start the visit; `items` holds up to 100, oldest first.
@@ -2557,7 +2795,7 @@ components:
       enum: [caregiver, dependant]
     VisitStatus:
       type: string
-      enum: [scheduled, in_progress, completed, missed, cancelled, investigated]
+      enum: [scheduled, in_progress, completed, missed, cancelled, investigated, reassigned]
     VerificationAttemptType:
       type: string
       enum: [geofence, family_location, qr_scan]
@@ -2566,7 +2804,7 @@ components:
       enum: [location_verification, visit_audio]
     NotificationType:
       type: string
-      enum: [missed_visit, checkin_override]
+      enum: [missed_visit, checkin_override, no_cover_found]
 
     User:
       type: object
@@ -2639,6 +2877,15 @@ components:
       type: object
       required: [userId, active, createdAt, updatedAt]
       properties:
+        baseLat:
+          type: [number, 'null']
+          format: double
+          description: Where a planned route starts. Given together with baseLng.
+        baseLng:
+          type: [number, 'null']
+          format: double
+        baseAreaText:
+          type: [string, 'null']
         userId:
           type: string
           format: uuid
@@ -2693,6 +2940,15 @@ components:
         pre-existing Cognito account can never be assumed.
       required: [fullName, email, phoneNumber, idType, idNumber, dob, gender, occupation]
       properties:
+        baseLat:
+          type: number
+          format: double
+          description: Where a planned route starts. Given together with baseLng.
+        baseLng:
+          type: number
+          format: double
+        baseAreaText:
+          type: string
         fullName:
           type: string
         email:
@@ -2714,6 +2970,15 @@ components:
     UpdateCaregiverRequest:
       type: object
       properties:
+        baseLat:
+          type: number
+          format: double
+          description: Where a planned route starts. Given together with baseLng.
+        baseLng:
+          type: number
+          format: double
+        baseAreaText:
+          type: string
         fullName:
           type: string
         email:
@@ -3174,6 +3439,13 @@ components:
           format: date-time
         status:
           $ref: '#/components/schemas/VisitStatus'
+        routeSequence:
+          type: [integer, 'null']
+          description: This visit's place in its planned route, when it came from a published plan.
+        recoveredFromVisitId:
+          type: [string, 'null']
+          format: uuid
+          description: The visit this one replaced, when another caregiver took it over.
         createdBy:
           type: string
           format: uuid
@@ -3465,6 +3737,66 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
+    VisitPlan:
+      type: object
+      required: [id, date, shiftStart, shiftEnd, visitMinutes, status, clusters, unplaced, excludedCaregivers]
+      properties:
+        id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        shiftStart: { type: string }
+        shiftEnd: { type: string }
+        visitMinutes: { type: integer }
+        status: { type: string, enum: [draft, published] }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        clusters:
+          type: array
+          items:
+            type: object
+            required: [id, caregiverId, caregiverName, base, totalDistanceMeters, totalTravelMinutes, stops]
+            properties:
+              id: { type: string, format: uuid }
+              caregiverId: { type: string, format: uuid }
+              caregiverName: { type: string }
+              base:
+                type: object
+                properties:
+                  lat: { type: [number, 'null'] }
+                  lng: { type: [number, 'null'] }
+              totalDistanceMeters: { type: integer }
+              totalTravelMinutes: { type: integer }
+              stops:
+                type: array
+                items:
+                  type: object
+                  required: [dependantId, dependantName, scheduledStart, scheduledEnd, travelMinutes, distanceMeters]
+                  properties:
+                    dependantId: { type: string, format: uuid }
+                    dependantName: { type: string }
+                    lat: { type: [number, 'null'] }
+                    lng: { type: [number, 'null'] }
+                    ward: { type: [string, 'null'] }
+                    scheduledStart: { type: string, format: date-time }
+                    scheduledEnd: { type: string, format: date-time }
+                    travelMinutes: { type: integer }
+                    distanceMeters: { type: integer }
+        unplaced:
+          type: array
+          items:
+            type: object
+            required: [dependantId, dependantName, reason]
+            properties:
+              dependantId: { type: string, format: uuid }
+              dependantName: { type: string }
+              reason: { type: string, enum: [already_scheduled, no_consent, shift_full] }
+        excludedCaregivers:
+          type: array
+          items:
+            type: object
+            required: [caregiverId, caregiverName, reason]
+            properties:
+              caregiverId: { type: string, format: uuid }
+              caregiverName: { type: string }
+              reason: { type: string, enum: [already_scheduled, no_consent, no_home_base] }
     Period:
       type: object
       required: [from, to]

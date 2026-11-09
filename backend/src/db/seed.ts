@@ -41,7 +41,11 @@ const ALL_TABLES = [
   'dependants',
   'dependant_family_members',
   'dependant_care_tasks',
+  'visit_plans',
+  'visit_plan_clusters',
   'visit_schedules',
+  'visit_recovery_cases',
+  'visit_recovery_offers',
   'visit_task_completions',
   'verification_events',
   'verification_attempts',
@@ -101,7 +105,15 @@ async function main() {
   for (const [i, user] of caregiverUsers.entries()) {
     const [caregiver] = await db
       .insert(schema.caregivers)
-      .values({ userId: user.id, employeeNumber: `EMP-00${i + 1}`, hireDate: '2024-01-15' })
+      .values({
+        userId: user.id,
+        employeeNumber: `EMP-00${i + 1}`,
+        hireDate: '2024-01-15',
+        // Spread across Nairobi, so a seeded day plan has something to work with.
+        baseLat: -1.27 - i * 0.02,
+        baseLng: 36.78 + i * 0.04,
+        baseAreaText: ['Westlands', 'Kilimani', 'Embakasi'][i],
+      })
       .returning();
     caregivers.push(caregiver!);
   }

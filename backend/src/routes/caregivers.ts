@@ -61,6 +61,9 @@ interface CaregiverResponse {
   // to see or later correct one via PATCH.
   employeeNumber: string | null;
   hireDate: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+  baseAreaText: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -72,30 +75,48 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // confirmed with the user) - employeeNumber/hireDate are deliberately absent here (DB-generated,
 // see schema.ts), unlike updateCaregiverRequestSchema below where a supervisor may still want to
 // correct either by hand later.
-const createCaregiverRequestSchema = z.object({
-  fullName: z.string().min(1),
-  email: z.string().email(),
-  phoneNumber: z.string().min(1),
-  idType: z.enum(['national_id', 'passport']),
-  idNumber: z.string().min(1),
-  dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
-  gender: z.enum(['male', 'female']),
-  occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']),
-});
+// Where a planned route starts. Optional so a caregiver can exist before it's known, but a caregiver
+// without one is left out of day plans, and the plan says so.
+const homeBaseFields = {
+  baseLat: z.number().min(-90).max(90).optional(),
+  baseLng: z.number().min(-180).max(180).optional(),
+  baseAreaText: z.string().trim().min(1).max(200).optional(),
+};
 
-const updateCaregiverRequestSchema = z.object({
-  fullName: z.string().min(1).optional(),
-  email: z.string().email().optional(),
-  phoneNumber: z.string().min(1).optional(),
-  idType: z.enum(['national_id', 'passport']).optional(),
-  idNumber: z.string().min(1).optional(),
-  dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD').optional(),
-  gender: z.enum(['male', 'female']).optional(),
-  occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']).optional(),
-  employeeNumber: z.string().min(1).optional(),
-  hireDate: z.string().regex(DATE_ONLY, 'hireDate must be YYYY-MM-DD').optional(),
-  active: z.boolean().optional(),
-});
+const caregiverHomeBase = (body: { baseLat?: number; baseLng?: number }) =>
+  (body.baseLat === undefined) === (body.baseLng === undefined);
+const HOME_BASE_MESSAGE = 'baseLat and baseLng must be given together.';
+
+const createCaregiverRequestSchema = z
+  .object({
+    fullName: z.string().min(1),
+    email: z.string().email(),
+    phoneNumber: z.string().min(1),
+    idType: z.enum(['national_id', 'passport']),
+    idNumber: z.string().min(1),
+    dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
+    gender: z.enum(['male', 'female']),
+    occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']),
+    ...homeBaseFields,
+  })
+  .refine(caregiverHomeBase, { message: HOME_BASE_MESSAGE, path: ['baseLng'] });
+
+const updateCaregiverRequestSchema = z
+  .object({
+    fullName: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phoneNumber: z.string().min(1).optional(),
+    idType: z.enum(['national_id', 'passport']).optional(),
+    idNumber: z.string().min(1).optional(),
+    dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD').optional(),
+    gender: z.enum(['male', 'female']).optional(),
+    occupation: z.enum(['nurse', 'community_health_worker', 'caregiver']).optional(),
+    employeeNumber: z.string().min(1).optional(),
+    hireDate: z.string().regex(DATE_ONLY, 'hireDate must be YYYY-MM-DD').optional(),
+    active: z.boolean().optional(),
+    ...homeBaseFields,
+  })
+  .refine(caregiverHomeBase, { message: HOME_BASE_MESSAGE, path: ['baseLng'] });
 
 // Express 5's params type allows string | string[], so req.params.caregiverId isn't a plain
 // string on its own - validated the same way any other input is, via parseOrSendProblem.
@@ -131,6 +152,9 @@ function caregiverSelection() {
     occupation: schema.caregivers.occupation,
     employeeNumber: schema.caregivers.employeeNumber,
     hireDate: schema.caregivers.hireDate,
+    baseLat: schema.caregivers.baseLat,
+    baseLng: schema.caregivers.baseLng,
+    baseAreaText: schema.caregivers.baseAreaText,
     active: schema.caregivers.active,
     createdAt: schema.caregivers.createdAt,
     updatedAt: schema.caregivers.updatedAt,
@@ -149,6 +173,9 @@ function toCaregiverResponse(row: {
   occupation: 'nurse' | 'community_health_worker' | 'caregiver' | null;
   employeeNumber: string | null;
   hireDate: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+  baseAreaText: string | null;
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -165,6 +192,9 @@ function toCaregiverResponse(row: {
     occupation: row.occupation,
     employeeNumber: row.employeeNumber,
     hireDate: row.hireDate,
+    baseLat: row.baseLat,
+    baseLng: row.baseLng,
+    baseAreaText: row.baseAreaText,
     active: row.active,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -250,6 +280,9 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
             dob: body.dob,
             gender: body.gender,
             occupation: body.occupation,
+            baseLat: body.baseLat,
+            baseLng: body.baseLng,
+            baseAreaText: body.baseAreaText,
           })
           .returning();
         if (!caregiverRow) {
@@ -282,6 +315,9 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           occupation: result.caregiverRow.occupation,
           employeeNumber: result.caregiverRow.employeeNumber,
           hireDate: result.caregiverRow.hireDate,
+          baseLat: result.caregiverRow.baseLat,
+          baseLng: result.caregiverRow.baseLng,
+          baseAreaText: result.caregiverRow.baseAreaText,
           active: result.caregiverRow.active,
           createdAt: result.caregiverRow.createdAt,
           updatedAt: result.caregiverRow.updatedAt,
@@ -532,6 +568,9 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           occupation: result.caregiverRow.occupation,
           employeeNumber: result.caregiverRow.employeeNumber,
           hireDate: result.caregiverRow.hireDate,
+          baseLat: result.caregiverRow.baseLat,
+          baseLng: result.caregiverRow.baseLng,
+          baseAreaText: result.caregiverRow.baseAreaText,
           active: result.caregiverRow.active,
           createdAt: result.caregiverRow.createdAt,
           updatedAt: result.caregiverRow.updatedAt,
