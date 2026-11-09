@@ -312,3 +312,56 @@ V3_N_COMPARISONS = 2  # Bonferroni family: v3 vs C1, v3 vs C2
 V3_C3_MARGIN = 0.05  # C3 AUC >= main AUC - this: the signal most likely comes from the recording
 V3_C4_ABS_R = 0.3  # score-vs-proxy or score-vs-duration |r| above this is reported next to the result
 V3_ROBUSTNESS_CONDITIONS = [("bandpass", None, None), ("bandpass+pink@10dB", "pink", 10)]
+
+# Speaker verification (SPEAKER_VERIFICATION_PLAN.md), 2026-11-09. Separate from the cognitive model:
+# nothing above reads these, and these change nothing above.
+SV_RESULTS = RESULTS_DIR / "speaker_verification"
+SV_DEV_RESULTS = SV_RESULTS / "dev_librispeech"
+# Git-ignored with the rest of data/. Holds voiceprints, so delete it once results are final.
+SV_DATA_DIR = DATA_DIR / "speaker_verification"
+LIBRISPEECH_DIR = DATA_DIR / "librispeech" / "LibriSpeech"
+LIBRISPEECH_SUBSETS = ("dev-clean", "test-clean", "train-clean-100")
+SV_TEST_MARKER = SV_RESULTS / "sv_test_set_used.json"
+# Development datasets never judge a target, so they can't use up the once-only test set.
+SV_DEV_DATASETS = {"librispeech"}
+# Apache-2.0, trained on VoxCeleb, never fine-tuned. Pinned so an upstream change can't alter scores.
+SV_MODEL_NAME = "speechbrain/spkrec-ecapa-voxceleb"
+SV_MODEL_REVISION = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
+SV_SAMPLE_RATE = TARGET_SAMPLE_RATE
+SV_TORCH_THREADS = EMBEDDING_TORCH_THREADS
+# Silero VAD's default speech probability threshold, fixed and never tuned against results.
+SV_VAD_THRESHOLD = 0.5
+SV_WINDOW_SECONDS = 1.5
+SV_HOP_SECONDS = 0.75
+SV_MIN_WINDOW_SPEECH_SHARE = 0.5  # windows that are mostly silence say nothing about who is speaking
+SV_ENROL_SECONDS = 30.0
+SV_ENROL_VARIANT_SECONDS = (10.0, 20.0, 30.0)
+SV_TEST_SECONDS = (3.0, 5.0, 10.0, 30.0)
+SV_TRIAL_TEST_POOL_SECONDS = 45.0  # speech kept per test recording
+SV_VISIT_SECONDS = 30.0  # the caregiver app's recording cap
+SV_VISIT_SPEECH_SHARE = 0.85  # the rest is gaps between turns
+SV_TURN_SECONDS = (2.0, 6.0)
+SV_GAP_SECONDS = (0.2, 0.6)
+SV_LEVEL_DB = 3.0  # each speaker's random level offset, standing in for distance from the phone
+SV_DEPENDANT_SHARE = 0.4  # share of the speech in a two-person visit, primary setting
+SV_CALIBRATION_SHARE = 0.5  # of speakers
+# Development run only: about 4.5 s per recording on this CPU makes all pairs take hours, and this
+# run proves the code rather than judging a target. A real evaluation uses every pair.
+SV_DEV_MAX_PAIRS = 40
+# Primary setting and variations, fixed in results/speaker_verification/00_framing.md before any run.
+# (name, noise_type, snr_db, dependant_share, enrol_seconds, overlap_seconds)
+SV_PRIMARY_CONDITION = ("primary", "pink", 20.0, SV_DEPENDANT_SHARE, 30.0, 0.0)
+SV_VARIANT_CONDITIONS = [
+    ("clean", None, None, SV_DEPENDANT_SHARE, 30.0, 0.0),
+    ("enrol_10s", "pink", 20.0, SV_DEPENDANT_SHARE, 10.0, 0.0),
+    ("dependant_20pct", "pink", 20.0, 0.2, 30.0, 0.0),
+    ("dependant_60pct", "pink", 20.0, 0.6, 30.0, 0.0),
+    ("overlap", "pink", 20.0, SV_DEPENDANT_SHARE, 30.0, 0.3),
+]
+SV_TARGET_FALSE_ACCEPT = 0.10  # set by the developer 2026-11-09 with the supervisor's agreement (was 0.01)
+SV_TARGET_FALSE_REJECT = 0.05  # proposed at Gate 1
+SV_DCF_P_TARGET = 0.01
+SV_BOOTSTRAP_RESAMPLES = 1000
+SV_LABEL_MARGIN = 0.05  # a window this close between the two enrolled voices is labelled unknown
+SV_THRESHOLD_GRID = tuple(round(0.10 + 0.025 * i, 3) for i in range(25))  # cosine 0.10 to 0.70
+SV_SECONDS_GRID = (0.75, 1.5, 3.0, 5.0, 8.0)  # candidates for the X and Y rules
