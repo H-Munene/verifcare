@@ -94,8 +94,10 @@ interface OverviewBody {
       total: number;
       items: { id: string; dependantName: string; caregiverName: string }[];
     };
-    flaggedPhotos: number;
-    dependantsWithoutPhoto: { total: number; items: { fullName: string }[] };
+    pendingCheckinOverrides: {
+      total: number;
+      items: { dependantName: string; caregiverName: string; reason: string }[];
+    };
   };
 }
 
@@ -129,7 +131,7 @@ describe.skipIf(!hasTestDb)('GET /dashboard/overview (real Postgres)', () => {
       ])
       .returning();
     await db.insert(schema.caregivers).values({ userId: caregiverUser!.id });
-    const [withPhoto, withoutPhoto] = await db
+    const [first, second] = await db
       .insert(schema.dependants)
       .values(
         ['Joseph Otieno', 'Wanjiku Kamau'].map((fullName, i) => ({
@@ -142,26 +144,6 @@ describe.skipIf(!hasTestDb)('GET /dashboard/overview (real Postgres)', () => {
         })),
       )
       .returning();
-    await db.insert(schema.biometricEnrollments).values({
-      subjectType: 'dependant',
-      dependantId: withPhoto!.id,
-      s3Key: 'test/photo.jpg',
-      imageOrder: 1,
-      status: 'active',
-      enrolledBy: supervisor!.id,
-    });
-    await db.insert(schema.biometricEnrollments).values({
-      subjectType: 'caregiver',
-      caregiverId: caregiverUser!.id,
-      s3Key: 'test/flagged.jpg',
-      imageOrder: 1,
-      status: 'flagged',
-      matchedSubjectType: 'caregiver',
-      matchedSubjectId: caregiverUser!.id,
-      matchedSimilarity: 99,
-      enrolledBy: supervisor!.id,
-    });
-
     async function visit(
       name: string,
       start: string,
@@ -172,7 +154,7 @@ describe.skipIf(!hasTestDb)('GET /dashboard/overview (real Postgres)', () => {
         .insert(schema.visitSchedules)
         .values({
           caregiverId: caregiverUser!.id,
-          dependantId: withPhoto!.id,
+          dependantId: first!.id,
           scheduledStart: new Date(start),
           scheduledEnd: new Date(end),
           status: options.status ?? 'scheduled',
@@ -227,7 +209,25 @@ describe.skipIf(!hasTestDb)('GET /dashboard/overview (real Postgres)', () => {
         acknowledgedBy: supervisor!.id,
       },
     ]);
-    ids.withoutPhoto = withoutPhoto!.id;
+
+    // A caregiver waiting at a home with no family member. Dated outside the Overview's periods so
+    // it adds nothing to the counts the other tests assert on.
+    const [overrideVisit] = await db
+      .insert(schema.visitSchedules)
+      .values({
+        caregiverId: caregiverUser!.id,
+        dependantId: second!.id,
+        scheduledStart: new Date('2026-08-01T09:00:00+03:00'),
+        scheduledEnd: new Date('2026-08-01T10:00:00+03:00'),
+        createdBy: supervisor!.id,
+      })
+      .returning();
+    await db.insert(schema.checkinOverrideRequests).values({
+      visitScheduleId: overrideVisit!.id,
+      requestedBy: caregiverUser!.id,
+      reason: 'no_family_member_present',
+      distanceFromGeofenceMeters: 8,
+    });
   });
 
   afterAll(async () => {
@@ -299,10 +299,15 @@ describe.skipIf(!hasTestDb)('GET /dashboard/overview (real Postgres)', () => {
     expect(attention.missedVisitAlerts.items).toEqual([
       expect.objectContaining({ dependantName: 'Joseph Otieno', caregiverName: 'Amina Wanjiru' }),
     ]);
-    expect(attention.flaggedPhotos).toBe(1);
-    expect(attention.dependantsWithoutPhoto).toEqual({
+    expect(attention.pendingCheckinOverrides).toMatchObject({
       total: 1,
-      items: [{ id: ids.withoutPhoto, fullName: 'Wanjiku Kamau' }],
+      items: [
+        {
+          dependantName: 'Wanjiku Kamau',
+          caregiverName: 'Amina Wanjiru',
+          reason: 'no_family_member_present',
+        },
+      ],
     });
   });
 

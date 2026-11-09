@@ -4,8 +4,7 @@ import * as schema from './schema.js';
 
 // Where every "has consent" and "record consent" rule lives (2026-09-27), so the consent screen's
 // grant (routes/terms.ts), dependant registration (routes/dependants.ts) and the scheduling guard
-// (routes/visitSchedules.ts) can never disagree about what counts - the same role
-// db/checkinPhotos.ts plays for "has a photo".
+// (routes/visitSchedules.ts) can never disagree about what counts.
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -18,10 +17,7 @@ export interface ConsentSubject {
 }
 
 // Both consents the apps' consent screen asks for, so accepting the terms records both.
-export const TERMS_CONSENT_TYPES: readonly ConsentType[] = [
-  'biometric_verification',
-  'audio_cognitive_monitoring',
-];
+export const TERMS_CONSENT_TYPES: readonly ConsentType[] = ['location_verification', 'visit_audio'];
 
 // A record counts until it's revoked (routes/consentRecords.ts's revoke sets revoked_at; rows are
 // never deleted, so the history of who granted and withdrew what stays intact).
@@ -127,7 +123,7 @@ export async function hasGivenTermsConsents(db: Db | Tx, userId: string): Promis
     .where(
       and(
         eq(schema.termsAcceptances.userId, userId),
-        eq(schema.termsAcceptances.biometricConsent, true),
+        eq(schema.termsAcceptances.locationConsent, true),
         eq(schema.termsAcceptances.audioConsent, true),
       ),
     )

@@ -17,7 +17,7 @@ info:
       - List endpoints are cursor-paginated (`cursor` + `limit` query params, `nextCursor` in the
         response) - stable under concurrent inserts, which matters for `visit_schedules` and
         `notification_log`.
-      - Biometric images and visit audio are uploaded directly to S3 via a presigned URL this API
+      - Visit audio is uploaded directly to S3 via a presigned URL this API
         issues, not proxied through the API - see the `*/upload-url` endpoints.
       - Field names in request/response bodies are camelCase, mapping 1:1 to the snake_case columns
         in docs/schema.sql / backend/src/db/schema.ts (e.g. `phoneNumber` <-> `phone_number`).
@@ -44,18 +44,16 @@ tags:
     description: The caregiver-specific extension of a user.
   - name: Dependants
     description: Dependants and their linked family members.
-  - name: Biometric Enrollments
-    description: Reference images used by CompareFaces during check-in liveness verification.
   - name: Visit Schedules
     description: Scheduling, rescheduling, and querying visits, including the live-visits and visit-history views.
   - name: Check-in
-    description: The geofence, caregiver-liveness, and dependant-liveness steps of the check-in verification flow.
+    description: The geofence, code-scan and supervisor-override steps of the check-in verification flow.
   - name: Audio
-    description: Uploading a visit's recorded audio and triggering acoustic cognitive-risk scoring.
+    description: The visit's 30-second recording, which the dependant's family can listen to.
   - name: Consent
-    description: Recording and revoking consent for biometric verification and audio cognitive monitoring.
+    description: Recording and revoking consent for location checks and visit audio.
   - name: Notifications
-    description: Missed-visit and cognitive-risk alerts, and their acknowledgement.
+    description: Missed-visit and check-in-override alerts, and their acknowledgement.
 
 paths:
   /users:
@@ -314,8 +312,8 @@ paths:
         atomic-first-family-member-at-registration requirement.
 
         If the primary family member has given both consents on the family app's consent screen
-        (`POST /terms/current/accept`), the same transaction records `biometric_verification` and
-        `audio_cognitive_monitoring` consent for the new dependant, granted by them.
+        (`POST /terms/current/accept`), the same transaction records `location_verification` and
+        `visit_audio` consent for the new dependant, granted by them.
       operationId: createDependant
       requestBody:
         required: true
@@ -342,12 +340,6 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/DependantStatus'
-        - name: photo
-          in: query
-          description: Only dependants whose check-in photo stands this way, as reported in each one's `checkinPhotoStatus`.
-          schema:
-            type: string
-            enum: [ready, awaiting_review, missing]
         - name: sort
           in: query
           description: Order by `name` or `dob`; a leading `-` sorts descending. Without it, the list is in id order. A cursor only works with the sort it came from.
@@ -388,7 +380,7 @@ paths:
       tags: [Dependants]
       summary: Update a dependant
       description: |
-        Covers geofence adjustments, cognitive monitoring toggle, and offboarding via `status`.
+        Covers geofence adjustments and offboarding via `status`.
         A supervisor may change any field. The dependant's primary-contact family member may change
         every field except `status` and `geofenceRadiusMeters` (403): the radius is what caregiver
         check-in is verified against, so widening it stays a supervisor decision.
@@ -580,159 +572,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CareTask'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments/upload-url:
-    post:
-      tags: [Biometric Enrollments]
-      summary: Get a presigned URL to upload one biometric reference image
-      operationId: createBiometricUploadUrl
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateUploadUrlRequest'
-      responses:
-        '201':
-          description: A presigned PUT URL, short-lived.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PresignedUpload'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments:
-    post:
-      tags: [Biometric Enrollments]
-      summary: Confirm an uploaded biometric image and record it
-      description: |
-        Called after the client has PUT the image to the presigned URL from
-        `/biometric-enrollments/upload-url`. A photo that activates supersedes every other active
-        row for the subject, whatever its `imageOrder` (one photo per person); a photo flagged as a
-        likely duplicate supersedes nothing until a supervisor approves it, so the current photo
-        stays in use meanwhile.
-      operationId: createBiometricEnrollment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateBiometricEnrollmentRequest'
-      responses:
-        '201':
-          description: Enrollment recorded.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BiometricEnrollment'
-        default:
-          $ref: '#/components/responses/Problem'
-    get:
-      tags: [Biometric Enrollments]
-      summary: List biometric enrollments for a subject
-      operationId: listBiometricEnrollments
-      parameters:
-        - name: subjectType
-          in: query
-          required: true
-          schema:
-            $ref: '#/components/schemas/SubjectType'
-        - name: subjectId
-          in: query
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The subject's enrollments, highest-quality active image first.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/BiometricEnrollment'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments/flagged:
-    get:
-      tags: [Biometric Enrollments]
-      summary: List enrollments flagged as a possible duplicate of a different subject (HEZ-85)
-      description: |
-        Supervisor-only. A row lands here when confirming it found this face already enrolled
-        under a *different* subject above the duplicate-detection threshold - not hard-rejected
-        (see `matchedSubjectType`/`matchedSubjectId`/`matchedSimilarity` on each row for the
-        context a supervisor needs to approve or reject it via the two endpoints below.
-      operationId: listFlaggedBiometricEnrollments
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Flagged enrollments across every subject, oldest first.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FlaggedBiometricEnrollmentPage'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments/{id}/approve:
-    post:
-      tags: [Biometric Enrollments]
-      summary: Approve a flagged enrollment as legitimate (HEZ-85)
-      description: |
-        Supervisor-only. Indexes the face into the enrollment-uniqueness collection (deferred
-        until now, since it wasn't indexed while flagged) and promotes the row to `active`,
-        superseding every other active row for the subject (one photo per person).
-      operationId: approveBiometricEnrollment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The now-active enrollment.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BiometricEnrollment'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /biometric-enrollments/{id}/reject:
-    post:
-      tags: [Biometric Enrollments]
-      summary: Reject a flagged enrollment as a genuine duplicate (HEZ-85)
-      description: |
-        Supervisor-only. Marks the row `deleted` - it was never indexed while flagged, so nothing
-        needs to be removed from the enrollment-uniqueness collection.
-      operationId: rejectBiometricEnrollment
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The now-deleted enrollment.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BiometricEnrollment'
         '404':
           $ref: '#/components/responses/NotFound'
         default:
@@ -977,104 +816,51 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness/upload-url:
+  /visit-schedules/{visitScheduleId}/checkin/qr:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Get a presigned URL to upload the caregiver's check-in photo
-      description: Called once, before POST .../caregiver-liveness. Uploads go to a separate, short-retention bucket from biometric-enrollments - see architecture.md's storage notes.
-      operationId: createCaregiverLivenessFrameUploadUrl
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
-      responses:
-        '201':
-          description: A presigned PUT URL, short-lived.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PresignedUpload'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/checkin/caregiver-liveness:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-    post:
-      tags: [Check-in]
-      summary: Submit the caregiver's check-in photo
+      summary: Issue the check-in code shown on a family member's phone
       description: |
-        A single photo, not a liveness/anti-spoofing check - the user explicitly decided to drop
-        multi-frame challenge-response liveness detection in favor of one photo, for caregiver
-        mobile app build simplicity (a deliberate, informed tradeoff - see architecture.md's "Key
-        design decisions"). `DetectFaces` confirms exactly one face is present, then `CompareFaces`
-        runs against the caregiver's enrolled reference images. Writes a `verification_attempts`
-        row (`attempt_type: caregiver_liveness`) and, on success, updates
-        `verification_events.caregiver_liveness_passed` / `caregiver_match_confidence`. The photo
-        is deleted from storage right after processing, pass or fail - it is never needed again
-        either way.
-      operationId: submitCaregiverLiveness
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
+        Family members linked to the visit's dependant only. The phone's own position must pass the
+        same mock-location, accuracy and radius checks as the caregiver's, so a code can't be
+        forwarded from elsewhere. The code is random, single-use, bound to this visit and valid for
+        about a minute; the app asks for a new one while the screen is open. Only its hash is
+        stored, and of the family phone's position only the distance from the home is kept.
+      operationId: issueCheckinCode
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LivenessSubmission'
-      responses:
-        '200':
-          description: Result.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LivenessResult'
-        default:
-          $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness/upload-url:
-    parameters:
-      - $ref: '#/components/parameters/VisitScheduleId'
-    post:
-      tags: [Check-in]
-      summary: Get a presigned URL to upload the dependant's check-in photo
-      description: Same flow as the caregiver step's upload-url endpoint.
-      operationId: createDependantLivenessFrameUploadUrl
-      security:
-        - bearerAuth: []
-          checkinSessionToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LivenessFrameUploadUrlRequest'
+              $ref: '#/components/schemas/GeofenceCheckinRequest'
       responses:
         '201':
-          description: A presigned PUT URL, short-lived.
+          description: The code to display.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PresignedUpload'
-        default:
+                $ref: '#/components/schemas/CheckinCode'
+        '403':
           $ref: '#/components/responses/Problem'
-
-  /visit-schedules/{visitScheduleId}/checkin/dependant-liveness:
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /visit-schedules/{visitScheduleId}/checkin/qr-scan:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Check-in]
-      summary: Submit the dependant's check-in photo
-      description: 'Same flow as the caregiver step (see its own description for the single-photo-not-liveness reasoning). Only reachable once the caregiver step has passed, within the configurable bounded co-presence time window. Writes `attempt_type: dependant_liveness` and updates `dependant_liveness_passed` / `dependant_match_confidence`. Passing both steps sets `verification_events.checkin_at` and `visit_schedules.status = in_progress`.'
-      operationId: submitDependantLiveness
+      summary: Scan a family member's code to start the visit
+      description: |
+        The assigned caregiver only, holding the session token from the geofence step. Consuming
+        the code and starting the visit happen in one transaction, so a code works exactly once.
+        A refused scan is a 422 whose `failureReason` is `invalid_qr`, `expired_qr` or `used_qr`.
+      operationId: scanCheckinCode
       security:
         - bearerAuth: []
           checkinSessionToken: []
@@ -1083,65 +869,276 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LivenessSubmission'
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  maxLength: 200
       responses:
         '200':
-          description: Result. On pass, check-in is complete.
+          description: The visit has started.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LivenessResult'
-        default:
+                type: object
+                required: [status, checkinAt]
+                properties:
+                  status:
+                    type: string
+                    enum: [in_progress]
+                  checkinAt:
+                    type: string
+                    format: date-time
+        '401':
           $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /visit-schedules/{visitScheduleId}/checkin/override:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-in]
+      summary: Ask a supervisor to start the visit when no family member can show a code
+      description: |
+        The assigned caregiver only, holding the session token from the geofence step. One open
+        request per visit. A visit started this way never counts as fully verified and is reported
+        as an exception.
+      operationId: requestCheckinOverride
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  $ref: '#/components/schemas/CheckinOverrideReason'
+                note:
+                  type: string
+                  maxLength: 500
+                  description: Required when `reason` is `other`.
+      responses:
+        '201':
+          description: The request is waiting for a supervisor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckinOverride'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Check-in]
+      summary: The latest override request for this visit, for the caregiver app to poll
+      operationId: getCheckinOverride
+      responses:
+        '200':
+          description: The latest request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckinOverride'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /checkin-overrides:
+    get:
+      tags: [Check-in]
+      summary: List check-in override requests (supervisors only)
+      operationId: listCheckinOverrides
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CheckinOverrideStatus'
+      responses:
+        '200':
+          description: Requests in that status, oldest first; `pending` by default.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CheckinOverrideListItem'
+  /checkin-overrides/{overrideId}/approve:
+    parameters:
+      - name: overrideId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Check-in]
+      summary: Approve an override and start the visit (supervisors only)
+      operationId: approveCheckinOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckinOverrideDecision'
+      responses:
+        '200':
+          description: Approved.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /checkin-overrides/{overrideId}/deny:
+    parameters:
+      - name: overrideId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Check-in]
+      summary: Deny an override (supervisors only)
+      operationId: denyCheckinOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckinOverrideDecision'
+      responses:
+        '200':
+          description: Denied.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
+  /visit-schedules/{visitScheduleId}/audio/requirement:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    get:
+      tags: [Audio]
+      summary: Whether this visit needs a recording, and whether it has one
+      description: The assigned caregiver only. `required` follows the dependant's visit-audio consent.
+      operationId: getAudioRequirement
+      responses:
+        '200':
+          description: The requirement.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [required, recorded]
+                properties:
+                  required:
+                    type: boolean
+                  recorded:
+                    type: boolean
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /visit-schedules/{visitScheduleId}/audio/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Audio]
-      summary: Get a presigned URL to upload the visit's recorded audio
+      summary: Get a presigned URL to upload the visit's recording
+      description: The assigned caregiver, during the visit, with the dependant's consent. Upload as `audio/mp4`.
       operationId: createAudioUploadUrl
       responses:
         '201':
-          description: A presigned PUT URL, short-lived.
+          description: The presigned upload.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PresignedUpload'
-        default:
+        '403':
           $ref: '#/components/responses/Problem'
-
+        '409':
+          $ref: '#/components/responses/Conflict'
   /visit-schedules/{visitScheduleId}/audio:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
       tags: [Audio]
-      summary: Confirm uploaded audio and trigger cognitive-risk scoring
-      description: |
-        Called after the client has PUT the recording to the presigned URL. Creates the
-        `audio_records` row, then directly invokes the internal `acoustic-model` Lambda function
-        (AWS SDK `Invoke`, synchronous - see `acoustic-model/openapi.yaml` for that internal
-        contract) and writes the returned `risk_score`/`model_version` back onto the row. Only
-        runs when the dependant has `cognitive_monitoring_enabled: true` and consent
-        (`consent_type: audio_cognitive_monitoring`) is on file - both checked before the
-        acoustic-model call is made.
+      summary: Confirm the uploaded recording
+      description: One recording per visit; confirming again replaces it, so a retry is safe. No model processes it.
       operationId: createAudioRecord
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateAudioRecordRequest'
+              type: object
+              required: [s3Key, durationSeconds]
+              properties:
+                s3Key:
+                  type: string
+                durationSeconds:
+                  type: integer
+                  minimum: 5
+                  maximum: 31
       responses:
         '201':
-          description: Audio recorded and scored.
+          description: Recorded.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+    get:
+      tags: [Audio]
+      summary: Get a short-lived URL to play the recording
+      description: |
+        Family members linked to the visit's dependant only; supervisors and caregivers get a 403.
+        Every URL issued is audit-logged as `visit_audio.listen`. Recordings are deleted after 90
+        days, after which this returns 410.
+      operationId: getAudioPlayback
+      responses:
+        '200':
+          description: A URL valid for five minutes.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AudioRecord'
-        default:
+                type: object
+                required: [url, expiresAt, durationSeconds, uploadedAt]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                  expiresAt:
+                    type: string
+                    format: date-time
+                  durationSeconds:
+                    type: integer
+                  uploadedAt:
+                    type: string
+                    format: date-time
+        '403':
           $ref: '#/components/responses/Problem'
-
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/Problem'
   /visit-schedules/{visitScheduleId}/checkout:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
@@ -1158,6 +1155,9 @@ paths:
         GPS fix with the same distance calculation as check-in; the fix and its distance are stored
         on `verification_events` (`checkoutGpsLat`, `checkoutGpsLng`,
         `checkoutDistanceFromGeofenceMeters`).
+
+        If the dependant has consented to visit audio, checkout needs a confirmed recording or an
+        `audioSkipReason`; without either it is a 409 with `failureReason: audio_required`.
       operationId: checkoutVisit
       requestBody:
         required: true
@@ -1167,6 +1167,12 @@ paths:
               type: object
               required: [gpsLat, gpsLng]
               properties:
+                audioSkipReason:
+                  $ref: '#/components/schemas/AudioSkipReason'
+                audioSkipNote:
+                  type: string
+                  maxLength: 500
+                  description: Required when `audioSkipReason` is `other`.
                 gpsLat:
                   type: number
                   format: double
@@ -1452,7 +1458,7 @@ paths:
       description: |
         Every visit that started in the period (Nairobi days), counted per person with the
         Overview's own outcome rules, plus the period's totals. A visit is `fullyVerified` when it
-        was checked in inside the geofence, both faces matched, and it was checked out inside the
+        was checked in by scanning a family member's code, and it was checked out inside the
         home radius (visits checked out before checkout location was recorded can't show the last
         part, so they don't count). A check-in more than 15 minutes after the scheduled start is
         `late` (a report figure only; late check-ins aren't blocked).
@@ -1518,7 +1524,8 @@ paths:
       description: |
         Visits in the period a supervisor should account for, newest first: `missed` (no check-in
         by the end, or marked missed/investigated), `missing_checkout` (checked in, end passed, no
-        checkout), and `failed_check` (at least one failed geofence or face attempt). Cancelled
+        checkout), `failed_check` (at least one failed check-in attempt), and `supervisor_override` (started
+        by a supervisor because no family member could show a code). Cancelled
         visits are never exceptions. Each carries its latest resolution, if any.
       operationId: listComplianceExceptions
       parameters:
@@ -1592,8 +1599,8 @@ paths:
       summary: The consent register - every active caregiver and dependant's consents
       description: |
         Each consent type's current state per person (`active`, `revoked` or `none`), who granted
-        and who revoked it, and how many upcoming visits are booked for someone without photo
-        verification consent (possible only when consent was revoked after booking).
+        and who revoked it, and how many upcoming visits are booked for someone without location
+        consent (possible only when consent was revoked after booking).
       operationId: getComplianceConsentRegister
       parameters:
         - name: subjectType
@@ -1662,7 +1669,7 @@ paths:
       summary: The audit trail, newest first
       description: |
         Who did what to which record, and when: every change, every compliance export, and views
-        of check-in verification details and biometric photos. The trail is append-only. `actorUserId`
+        of check-in verification details and each listen to a visit recording. The trail is append-only. `actorUserId`
         is null for the system (a scheduled job).
       operationId: listAuditLog
       parameters:
@@ -2053,8 +2060,8 @@ paths:
         required consents. Idempotent: accepting again keeps the original acceptance time
         (acceptances are append-only).
 
-        Also records the matching consent records (`biometric_verification` and
-        `audio_cognitive_monitoring`), skipping any already active: for a caregiver, for
+        Also records the matching consent records (`location_verification` and
+        `visit_audio`), skipping any already active: for a caregiver, for
         themselves; for a family member, for each active dependant they are the primary contact
         of. Dependants a consenting family member registers later get the same consent at
         registration.
@@ -2065,15 +2072,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [version, biometricConsent, audioConsent]
+              required: [version, locationConsent, audioConsent]
               properties:
                 version:
                   type: string
                   description: The version the user was shown; must be the current one.
-                biometricConsent:
+                locationConsent:
                   type: boolean
                   enum: [true]
-                  description: Consent to photos being used to verify identity at each visit. Must be true.
+                  description: Consent to location being checked at each visit. Must be true.
                 audioConsent:
                   type: boolean
                   enum: [true]
@@ -2176,7 +2183,7 @@ components:
       description: |
         The short-lived session token returned by `POST .../checkin/geofence`, required in
         addition to (not instead of) the normal `bearerAuth` Cognito token on every remaining
-        check-in step (photo upload, submit - caregiver and dependant). Proves this specific
+        check-in step (code scan, supervisor override). Proves this specific
         visit's geofence step was passed recently, not just that the caller is a valid caregiver in
         general - defense in depth, confirmed with the user as the more robust of two designs over
         a session-token-only approach (HEZ-34). A previous draft of this file used
@@ -2261,9 +2268,8 @@ components:
     Unschedulable:
       description: |
         The visit can't be scheduled, or moved to a new time, and `detail` says who is missing
-        what. Either the caregiver or the dependant (or both) has no active photo, so check-in
-        couldn't verify them (a photo still awaiting a supervisor's review doesn't count); or one
-        of them has no active (unrevoked) `biometric_verification` consent record, given by
+        what. The caregiver or the dependant (or both) has no active (unrevoked)
+        `location_verification` consent record, given by
         accepting the terms in the mobile app. Status-only updates (e.g. cancelling) are never
         blocked by this.
       content:
@@ -2409,12 +2415,9 @@ components:
                       scheduledStart: { type: string, format: date-time }
                       dependantName: { type: string }
                       caregiverName: { type: string }
-            flaggedPhotos:
-              type: integer
-              description: Photos flagged as possible duplicates, waiting for review.
-            dependantsWithoutPhoto:
+            pendingCheckinOverrides:
               type: object
-              description: Active dependants with no usable photo, who can't be scheduled; `items` holds up to 100, by name.
+              description: Caregivers at a home waiting for a supervisor to start the visit; `items` holds up to 100, oldest first.
               properties:
                 total: { type: integer }
                 items:
@@ -2423,7 +2426,13 @@ components:
                     type: object
                     properties:
                       id: { type: string, format: uuid }
-                      fullName: { type: string }
+                      visitScheduleId: { type: string, format: uuid }
+                      reason:
+                        $ref: '#/components/schemas/CheckinOverrideReason'
+                      note: { type: [string, 'null'] }
+                      requestedAt: { type: string, format: date-time }
+                      dependantName: { type: string }
+                      caregiverName: { type: string }
     FamilyLinkRequests:
       type: object
       required: [incoming, outgoing]
@@ -2546,21 +2555,18 @@ components:
     SubjectType:
       type: string
       enum: [caregiver, dependant]
-    BiometricEnrollmentStatus:
-      type: string
-      enum: [active, superseded, deleted, flagged]
     VisitStatus:
       type: string
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated]
     VerificationAttemptType:
       type: string
-      enum: [geofence, caregiver_liveness, dependant_liveness]
+      enum: [geofence, family_location, qr_scan]
     ConsentType:
       type: string
-      enum: [biometric_verification, audio_cognitive_monitoring]
+      enum: [location_verification, visit_audio]
     NotificationType:
       type: string
-      enum: [missed_visit, cognitive_risk]
+      enum: [missed_visit, checkin_override]
 
     User:
       type: object
@@ -2753,12 +2759,10 @@ components:
         - geofenceLat
         - geofenceLng
         - geofenceRadiusMeters
-        - cognitiveMonitoringEnabled
         - status
         - registeredBy
         - createdAt
         - updatedAt
-        - checkinPhotoStatus
       properties:
         id:
           type: string
@@ -2793,8 +2797,6 @@ components:
         geofenceRadiusMeters:
           type: integer
           minimum: 1
-        cognitiveMonitoringEnabled:
-          type: boolean
         status:
           $ref: '#/components/schemas/DependantStatus'
         registeredBy:
@@ -2806,15 +2808,6 @@ components:
         updatedAt:
           type: string
           format: date-time
-        checkinPhotoStatus:
-          type: string
-          enum: [ready, awaiting_review, missing]
-          description: |
-            Where this dependant's check-in photo stands. `ready`: an active photo check-in can
-            verify against. `awaiting_review`: only a photo flagged for a supervisor's review, which
-            check-in can't use yet. `missing`: none. A visit can only be scheduled once it's
-            `ready`. Always `missing` straight after registration, since the photo is added
-            afterwards.
     CreateDependantRequest:
       type: object
       required:
@@ -2857,9 +2850,6 @@ components:
         geofenceRadiusMeters:
           type: integer
           minimum: 1
-        cognitiveMonitoringEnabled:
-          type: boolean
-          default: false
         primaryFamilyMember:
           $ref: '#/components/schemas/AddFamilyMemberRequest'
     UpdateDependantRequest:
@@ -2888,8 +2878,6 @@ components:
         geofenceRadiusMeters:
           type: integer
           minimum: 1
-        cognitiveMonitoringEnabled:
-          type: boolean
         status:
           $ref: '#/components/schemas/DependantStatus'
     DependantPage:
@@ -3135,73 +3123,6 @@ components:
         notes:
           type: string
 
-    BiometricEnrollment:
-      type: object
-      required: [id, subjectType, imageOrder, imageUrl, status, enrolledBy, enrolledAt, updatedAt]
-      properties:
-        id:
-          type: string
-          format: uuid
-        subjectType:
-          $ref: '#/components/schemas/SubjectType'
-        caregiverId:
-          type: [string, 'null']
-          format: uuid
-        dependantId:
-          type: [string, 'null']
-          format: uuid
-        imageOrder:
-          type: integer
-          minimum: 1
-          maximum: 3
-        imageUrl:
-          type: string
-          format: uri
-          description: A time-limited presigned S3 GET URL, freshly generated on every response - never a permanent link.
-        qualityScore:
-          type: [number, 'null']
-          format: float
-        status:
-          $ref: '#/components/schemas/BiometricEnrollmentStatus'
-        matchedSubjectType:
-          description: |
-            Set only when status is (or was) `flagged` (HEZ-85): the *other* subject this image's
-            face matched above the duplicate-detection threshold at confirm time.
-          oneOf:
-            - $ref: '#/components/schemas/SubjectType'
-            - type: 'null'
-        matchedSubjectId:
-          type: [string, 'null']
-          format: uuid
-        matchedSimilarity:
-          description: The Rekognition similarity score (0-100) for the match above.
-          type: [number, 'null']
-          format: float
-        enrolledBy:
-          type: string
-          format: uuid
-        enrolledAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-    CreateUploadUrlRequest:
-      type: object
-      required: [subjectType, subjectId, imageOrder, contentType]
-      properties:
-        subjectType:
-          $ref: '#/components/schemas/SubjectType'
-        subjectId:
-          type: string
-          format: uuid
-        imageOrder:
-          type: integer
-          minimum: 1
-          maximum: 3
-        contentType:
-          type: string
-          example: image/jpeg
     PresignedUpload:
       type: object
       required: [uploadUrl, s3Key, expiresAt]
@@ -3214,55 +3135,6 @@ components:
         expiresAt:
           type: string
           format: date-time
-    CreateBiometricEnrollmentRequest:
-      type: object
-      required: [subjectType, subjectId, s3Key, imageOrder]
-      properties:
-        subjectType:
-          $ref: '#/components/schemas/SubjectType'
-        subjectId:
-          type: string
-          format: uuid
-        s3Key:
-          type: string
-          description: From the matching `PresignedUpload`.
-        imageOrder:
-          type: integer
-          minimum: 1
-          maximum: 3
-    FlaggedBiometricEnrollmentPage:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/FlaggedBiometricEnrollment'
-        nextCursor:
-          type: [string, 'null']
-    FlaggedBiometricEnrollment:
-      description: |
-        A flagged enrollment with what a supervisor needs to compare the two faces before approving
-        or rejecting it: both people's names and the matched person's current photo.
-      allOf:
-        - $ref: '#/components/schemas/BiometricEnrollment'
-        - type: object
-          required: [subjectName, matchedSubjectName, matchedImageUrl]
-          properties:
-            subjectName:
-              type: [string, 'null']
-              description: Full name of the person this photo was uploaded for.
-            matchedSubjectName:
-              type: [string, 'null']
-              description: Full name of the already-enrolled person the face matched.
-            matchedImageUrl:
-              type: [string, 'null']
-              format: uri
-              description: |
-                A short-lived presigned GET URL for the matched person's active photo (the best
-                quality one, as check-in picks it), like `imageUrl`. Null when they have no active
-                photo any more, e.g. after being offboarded.
-
     VisitSchedule:
       type: object
       required:
@@ -3381,20 +3253,27 @@ components:
         checkoutDistanceFromGeofenceMeters:
           type: [number, 'null']
           format: double
-        caregiverMatchConfidence:
+        checkinMethod:
+          oneOf:
+            - $ref: '#/components/schemas/CheckinMethod'
+            - type: 'null'
+        qrFamilyMemberName:
+          type: [string, 'null']
+          description: The family member whose code was scanned.
+        familyDistanceFromGeofenceMeters:
           type: [number, 'null']
           format: double
-          minimum: 0
-          maximum: 100
-        dependantMatchConfidence:
-          type: [number, 'null']
-          format: double
-          minimum: 0
-          maximum: 100
-        caregiverLivenessPassed:
-          type: [boolean, 'null']
-        dependantLivenessPassed:
-          type: [boolean, 'null']
+        audioRecordedAt:
+          type: [string, 'null']
+          format: date-time
+        audioDurationSeconds:
+          type: [integer, 'null']
+        audioSkipReason:
+          oneOf:
+            - $ref: '#/components/schemas/AudioSkipReason'
+            - type: 'null'
+        audioSkipNote:
+          type: [string, 'null']
     VerificationAttempt:
       type: object
       required: [id, visitScheduleId, attemptType, passed, attemptedAt]
@@ -3491,67 +3370,6 @@ components:
         geofenceRadiusMeters:
           type: integer
 
-    LivenessFrameUploadUrlRequest:
-      type: object
-      required: [contentType]
-      properties:
-        contentType:
-          type: string
-          enum: [image/jpeg, image/png]
-    LivenessSubmission:
-      type: object
-      required: [s3Key]
-      description: A single check-in photo, not a multi-frame burst - see submitCaregiverLiveness's own description for why.
-      properties:
-        s3Key:
-          type: string
-    LivenessResult:
-      type: object
-      required: [passed]
-      properties:
-        passed:
-          type: boolean
-        matchConfidence:
-          type: [number, 'null']
-          format: double
-          minimum: 0
-          maximum: 100
-        failureReason:
-          type: [string, 'null']
-
-    CreateAudioRecordRequest:
-      type: object
-      required: [s3Key]
-      properties:
-        s3Key:
-          type: string
-          description: From the matching `PresignedUpload`.
-        durationSeconds:
-          type: integer
-    AudioRecord:
-      type: object
-      required: [id, verificationEventId]
-      properties:
-        id:
-          type: string
-          format: uuid
-        verificationEventId:
-          type: string
-          format: uuid
-        durationSeconds:
-          type: [integer, 'null']
-        riskScore:
-          type: [number, 'null']
-          format: double
-          minimum: 0
-          maximum: 1
-          description: Continuous [0, 1] probability score from the acoustic-model service. `null` until processed.
-        modelVersion:
-          type: [string, 'null']
-        processedAt:
-          type: [string, 'null']
-          format: date-time
-
     ConsentRecord:
       type: object
       required: [id, subjectType, consentType, grantedBy, grantedAt]
@@ -3590,6 +3408,63 @@ components:
         consentType:
           $ref: '#/components/schemas/ConsentType'
 
+    CheckinCode:
+      type: object
+      required: [token, expiresAt, caregiverDisplayName]
+      properties:
+        token:
+          type: string
+          description: The value to encode in the QR code. Opaque and holds no personal data.
+        expiresAt:
+          type: string
+          format: date-time
+        caregiverDisplayName:
+          type: string
+    CheckinOverrideReason:
+      type: string
+      enum: [no_family_member_present, family_phone_unavailable, network_problem, other]
+    CheckinOverrideStatus:
+      type: string
+      enum: [pending, approved, denied]
+    AudioSkipReason:
+      type: string
+      enum: [dependant_declined, dependant_unwell_or_asleep, technical_problem, other]
+    CheckinMethod:
+      type: string
+      enum: [qr, supervisor_override]
+    CheckinOverride:
+      type: object
+      required: [id, visitScheduleId, reason, status, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        visitScheduleId: { type: string, format: uuid }
+        reason:
+          $ref: '#/components/schemas/CheckinOverrideReason'
+        note: { type: [string, 'null'] }
+        status:
+          $ref: '#/components/schemas/CheckinOverrideStatus'
+        decisionNote: { type: [string, 'null'] }
+        requestedAt: { type: string, format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+    CheckinOverrideListItem:
+      allOf:
+        - $ref: '#/components/schemas/CheckinOverride'
+        - type: object
+          required: [scheduledStart, scheduledEnd, dependantName, caregiverName, distanceFromGeofenceMeters]
+          properties:
+            scheduledStart: { type: string, format: date-time }
+            scheduledEnd: { type: string, format: date-time }
+            dependantName: { type: string }
+            caregiverName: { type: string }
+            distanceFromGeofenceMeters: { type: number, format: double }
+    CheckinOverrideDecision:
+      type: object
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 1
+          maxLength: 1000
     Period:
       type: object
       required: [from, to]
@@ -3673,7 +3548,7 @@ components:
           $ref: '#/components/schemas/VisitSummaryCounts'
     ExceptionKind:
       type: string
-      enum: [missed, missing_checkout, failed_check]
+      enum: [missed, missing_checkout, failed_check, supervisor_override]
     VisitResolutionOutcome:
       type: string
       enum:
@@ -3876,11 +3751,11 @@ components:
           type: string
         consents:
           type: object
-          required: [biometric_verification, audio_cognitive_monitoring]
+          required: [location_verification, visit_audio]
           properties:
-            biometric_verification:
+            location_verification:
               $ref: '#/components/schemas/ConsentState'
-            audio_cognitive_monitoring:
+            visit_audio:
               $ref: '#/components/schemas/ConsentState'
         upcomingVisitsWithoutConsent:
           type: integer
@@ -3969,9 +3844,6 @@ components:
         type:
           $ref: '#/components/schemas/NotificationType'
         visitScheduleId:
-          type: [string, 'null']
-          format: uuid
-        audioRecordId:
           type: [string, 'null']
           format: uuid
         recipientUserId:

@@ -2,17 +2,14 @@ import cors from 'cors';
 import express, { type Express, type RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import type { CognitoAdmin } from './auth/cognitoAdmin.js';
-import type { CheckinFrameStorage } from './db/checkinFrameStorage.js';
-import type { CheckinPhotoValidator } from './db/checkinLiveness.js';
-import type { BiometricFaceCollection } from './db/biometricFaceCollection.js';
-import type { BiometricStorage } from './db/biometricStorage.js';
 import type { Db } from './db/client.js';
-import type { FaceMatcher } from './db/faceMatch.js';
+import type { VisitAudioStorage } from './db/visitAudioStorage.js';
 import { sendProblem } from './errors.js';
 import { logger } from './logger.js';
-import { createBiometricEnrollmentsRouter } from './routes/biometricEnrollments.js';
 import { createCaregiversRouter } from './routes/caregivers.js';
 import { createCheckinRouter } from './routes/checkin.js';
+import { createCheckinCodeRouter } from './routes/checkinCode.js';
+import { createCheckinOverridesRouter } from './routes/checkinOverrides.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
 import { createComplianceRouter } from './routes/compliance.js';
 import { createDashboardRouter } from './routes/dashboard.js';
@@ -22,6 +19,7 @@ import { createTermsRouter } from './routes/terms.js';
 import { createFamilyLinkRequestsRouter } from './routes/familyLinkRequests.js';
 import { createUsersRouter } from './routes/users.js';
 import { createVisitSchedulesRouter } from './routes/visitSchedules.js';
+import { createVisitAudioRouter } from './routes/visitAudio.js';
 import { createVisitResolutionsRouter } from './routes/visitResolutions.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
 
@@ -61,31 +59,14 @@ export interface AppDependencies {
   requireAuth?: RequestHandler;
   requireVerifiedIdentity?: RequestHandler;
   cognitoAdmin?: CognitoAdmin;
-  // HEZ-31's biometric-enrollment upload/confirm/list routes - only needs requireAuth, not
-  // requireVerifiedIdentity/cognitoAdmin (nothing in that router touches Cognito).
-  biometricStorage?: BiometricStorage;
-  // HEZ-85's enrollment-uniqueness check (Rekognition Collection search/index), threaded through
-  // the same router.
-  biometricFaceCollection?: BiometricFaceCollection;
   // HEZ-33's geofence check-in endpoint (config.ts's own configurable defaults - 20m/600s - apply
   // when omitted, so app.test.ts/most callers don't need to pass these explicitly).
   geofenceAccuracyThresholdMeters?: number;
   checkinSessionTokenTtlSeconds?: number;
-  // HEZ-34's caregiver check-in upload-url/submit endpoints - all optional together (see
-  // routes/checkin.ts's CheckinRouterDependencies comment); the numeric one defaults the same way
-  // the geofence pair above does when omitted.
-  checkinLivenessFramesBucketName?: string;
-  // Raw bucket name, not the already-constructed `biometricStorage` object above - db/faceMatch.ts
-  // needs to build {bucket, s3Key} pairs for CompareFaces' TargetImage, not presign/DetectFaces
-  // calls, so it has no use for biometricStorage's own createUploadUrl/assessFaceQuality methods.
-  biometricEnrollmentsBucketName?: string;
-  checkinLivenessMatchThresholdPercent?: number;
-  checkinPhotoValidator?: CheckinPhotoValidator;
-  checkinFaceMatcher?: FaceMatcher;
-  checkinFrameStorage?: CheckinFrameStorage;
-  // HEZ-35's dependant check-in step: how long after the caregiver step passes the dependant step
-  // must be submitted (config.ts's own default - 120s/2min - applies when omitted).
-  checkinCoPresenceWindowSeconds?: number;
+  // How long a family member's check-in code stays valid (config.ts's default applies if omitted).
+  checkinQrTokenTtlSeconds?: number;
+  // The visit's 30-second recording. Its routes exist only when this is provided.
+  visitAudioStorage?: VisitAudioStorage;
 }
 
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
@@ -140,67 +121,43 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   // HEZ-29's users/caregivers endpoints are the first real routes - the temporary /health/db and
   // /auth/whoami diagnostic routes from the two prior issues are now superseded and removed
   // (both were explicitly documented as temporary, pending exactly this).
-  const {
-    requireAuth,
-    requireVerifiedIdentity,
-    cognitoAdmin,
-    biometricStorage,
-    biometricFaceCollection,
-  } = dependencies;
+  const { requireAuth, requireVerifiedIdentity, cognitoAdmin, visitAudioStorage } = dependencies;
   if (requireAuth && requireVerifiedIdentity && cognitoAdmin) {
     app.use('/users', createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity }));
-    app.use(
-      '/caregivers',
-      createCaregiversRouter({
-        cognitoAdmin,
-        requireAuth,
-        faceCollection: biometricFaceCollection,
-      }),
-    );
-    app.use(
-      '/dependants',
-      createDependantsRouter({
-        cognitoAdmin,
-        requireAuth,
-        faceCollection: biometricFaceCollection,
-      }),
-    );
-  }
-  if (requireAuth && biometricStorage && biometricFaceCollection) {
-    app.use(
-      '/biometric-enrollments',
-      createBiometricEnrollmentsRouter({
-        requireAuth,
-        storage: biometricStorage,
-        faceCollection: biometricFaceCollection,
-      }),
-    );
+    app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
   }
   // HEZ-32's visit-scheduling endpoints - unlike the routers above, this needs only requireAuth
   // (no cognitoAdmin/requireVerifiedIdentity - nothing here touches Cognito), so it's wired
   // independently rather than nested inside the users/caregivers/dependants condition.
   if (requireAuth) {
     app.use('/visit-schedules', createVisitSchedulesRouter({ requireAuth }));
-    // HEZ-33's check-in flow - mounted at the same '/visit-schedules' prefix as a separate router
-    // (see routes/checkin.ts's header comment for why), only needs requireAuth too.
+    // Family-member and caregiver routes under the same prefix. These must come before the check-in
+    // router below, whose router-wide requireRole('caregiver') rejects every other role.
+    app.use(
+      '/visit-schedules',
+      createCheckinCodeRouter({
+        requireAuth,
+        geofenceAccuracyThresholdMeters: dependencies.geofenceAccuracyThresholdMeters ?? 20,
+        qrTokenTtlSeconds: dependencies.checkinQrTokenTtlSeconds ?? 60,
+      }),
+    );
+    if (visitAudioStorage) {
+      app.use(
+        '/visit-schedules',
+        createVisitAudioRouter({ requireAuth, storage: visitAudioStorage }),
+      );
+    }
+    // Check-in's caregiver steps - a separate router at the same prefix (see routes/checkin.ts).
     app.use(
       '/visit-schedules',
       createCheckinRouter({
         requireAuth,
         geofenceAccuracyThresholdMeters: dependencies.geofenceAccuracyThresholdMeters ?? 20,
         sessionTokenTtlSeconds: dependencies.checkinSessionTokenTtlSeconds ?? 600,
-        // HEZ-34's caregiver check-in routes - createCheckinRouter() itself only registers them
-        // once every one of these is actually present (see its own dependencies comment), so
-        // passing possibly-undefined values through here is safe.
-        livenessFramesBucketName: dependencies.checkinLivenessFramesBucketName,
-        biometricEnrollmentsBucketName: dependencies.biometricEnrollmentsBucketName,
-        livenessMatchThresholdPercent: dependencies.checkinLivenessMatchThresholdPercent ?? 80,
-        photoValidator: dependencies.checkinPhotoValidator,
-        faceMatcher: dependencies.checkinFaceMatcher,
-        frameStorage: dependencies.checkinFrameStorage,
-        coPresenceWindowSeconds: dependencies.checkinCoPresenceWindowSeconds ?? 120,
       }),
     );
+    app.use('/checkin-overrides', createCheckinOverridesRouter({ requireAuth }));
     // Visit task checklist (docs/visit-task-checklist-plan.md) - mounted at the same
     // '/visit-schedules' prefix as a separate router, same reasoning as checkin.ts above.
     app.use('/visit-schedules', createVisitTasksRouter({ requireAuth }));

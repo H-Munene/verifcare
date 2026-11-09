@@ -7,7 +7,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { eq } from 'drizzle-orm';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser } from '../auth/verifier.js';
-import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -70,10 +69,7 @@ function caregiverPageBody(response: request.Response): CaregiverPageBody {
   return response.body as CaregiverPageBody;
 }
 
-function buildTestApp(
-  cognitoAdmin: CognitoAdmin,
-  faceCollection?: BiometricFaceCollection,
-): Express {
+function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
   const app = express();
   app.use(express.json());
   app.locals.db = getDb();
@@ -88,7 +84,7 @@ function buildTestApp(
     next();
   };
 
-  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth, faceCollection }));
+  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -477,50 +473,6 @@ describe.skipIf(!hasTestDb)(
           .send({ active: false });
 
         expect(response.status).toBe(404);
-      });
-
-      it('cleans up indexed biometric enrollments when deactivated (HEZ-85)', async () => {
-        const faceCollection: BiometricFaceCollection = {
-          checkDuplicate: vi.fn(),
-          indexFace: vi.fn(),
-          deleteFaces: vi.fn().mockResolvedValue(undefined),
-        };
-        const localApp = buildTestApp(cognitoAdmin, faceCollection);
-        const created = await request(localApp)
-          .post('/caregivers')
-          .set('x-test-auth', supervisorAuth)
-          .send(
-            validCaregiverBody({
-              email: 'offboard@example.com',
-              phoneNumber: '+254700000070',
-              fullName: 'Offboard',
-            }),
-          );
-        const caregiverId = caregiverBody(created).userId;
-
-        const db = getDb();
-        await db.insert(schema.biometricEnrollments).values({
-          subjectType: 'caregiver',
-          caregiverId,
-          s3Key: `caregiver/${caregiverId}/1/photo.jpg`,
-          imageOrder: 1,
-          status: 'active',
-          rekognitionFaceId: 'face-id-1',
-          enrolledBy: caregiverId,
-        });
-
-        const response = await request(localApp)
-          .patch(`/caregivers/${caregiverId}`)
-          .set('x-test-auth', supervisorAuth)
-          .send({ active: false });
-
-        expect(response.status).toBe(200);
-        expect(faceCollection.deleteFaces).toHaveBeenCalledWith(['face-id-1']);
-        const [row] = await db
-          .select()
-          .from(schema.biometricEnrollments)
-          .where(eq(schema.biometricEnrollments.caregiverId, caregiverId));
-        expect(row?.status).toBe('deleted');
       });
     });
   },

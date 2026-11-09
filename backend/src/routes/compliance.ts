@@ -94,7 +94,7 @@ const visitsQuerySchema = periodSchema.extend({
 const EXCEPTION_SORT = '-scheduledStart';
 
 const exceptionsQuerySchema = periodSchema.extend({
-  kind: z.enum(['missed', 'missing_checkout', 'failed_check']).optional(),
+  kind: z.enum(['missed', 'missing_checkout', 'failed_check', 'supervisor_override']).optional(),
   resolved: z
     .enum(['true', 'false'])
     .optional()
@@ -465,8 +465,9 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
           'Check-in distance from home (m)',
           'Checkout distance from home (m)',
           'Home radius (m)',
-          'Caregiver face matched',
-          'Dependant face matched',
+          'Check-in method',
+          'Family phone distance from home (m)',
+          'Recording',
           'Fully verified',
           'Late check-in',
           'Failed checks',
@@ -491,8 +492,9 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
             metres(visit.distanceFromGeofenceMeters),
             metres(visit.checkoutDistanceFromGeofenceMeters),
             visit.geofenceRadiusMeters,
-            yesNo(visit.caregiverFaceMatched),
-            yesNo(visit.dependantFaceMatched),
+            visit.checkinMethod,
+            metres(visit.familyDistanceFromGeofenceMeters),
+            visit.audioRecorded ? 'recorded' : visit.audioSkipReason,
             yesNo(assessment.fullyVerified),
             yesNo(visit.checkinAt ? assessment.late : null),
             visit.failedChecks
@@ -533,22 +535,22 @@ export function createComplianceRouter(dependencies: ComplianceRouterDependencie
         headers = [
           'Subject type',
           'Name',
-          'Photo verification consent',
-          'Photo consent granted by',
-          'Photo consent granted at (Nairobi)',
-          'Photo consent revoked by',
-          'Photo consent revoked at (Nairobi)',
-          'Audio monitoring consent',
+          'Location verification consent',
+          'Location consent granted by',
+          'Location consent granted at (Nairobi)',
+          'Location consent revoked by',
+          'Location consent revoked at (Nairobi)',
+          'Visit audio consent',
           'Audio consent granted by',
           'Audio consent granted at (Nairobi)',
           'Audio consent revoked by',
           'Audio consent revoked at (Nairobi)',
-          'Upcoming visits without photo consent',
+          'Upcoming visits without location consent',
         ];
         rows = (await consentRegister(db, at)).map((row) => [
           row.subjectType,
           row.name,
-          ...(['biometric_verification', 'audio_cognitive_monitoring'] as const).flatMap((type) => {
+          ...(['location_verification', 'visit_audio'] as const).flatMap((type) => {
             const c = row.consents[type];
             return [
               c.status,

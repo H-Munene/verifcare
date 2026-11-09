@@ -30,7 +30,7 @@ interface ConsentRecordBody {
   subjectType: 'caregiver' | 'dependant';
   caregiverId: string | null;
   dependantId: string | null;
-  consentType: 'biometric_verification' | 'audio_cognitive_monitoring';
+  consentType: 'location_verification' | 'visit_audio';
   grantedBy: string;
   grantedAt: string;
   revokedAt: string | null;
@@ -155,7 +155,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'caregiver',
             subjectId: caregiver.userId,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         expect(response.status).toBe(201);
@@ -163,7 +163,7 @@ describe.skipIf(!hasTestDb)(
           subjectType: 'caregiver',
           caregiverId: caregiver.userId,
           dependantId: null,
-          consentType: 'biometric_verification',
+          consentType: 'location_verification',
           grantedBy: supervisor.id,
           revokedAt: null,
         });
@@ -187,7 +187,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'dependant',
             subjectId: dependant.id,
-            consentType: 'audio_cognitive_monitoring',
+            consentType: 'visit_audio',
           });
 
         expect(response.status).toBe(201);
@@ -195,7 +195,7 @@ describe.skipIf(!hasTestDb)(
           subjectType: 'dependant',
           caregiverId: null,
           dependantId: dependant.id,
-          consentType: 'audio_cognitive_monitoring',
+          consentType: 'visit_audio',
           grantedBy: supervisor.id,
         });
       });
@@ -212,7 +212,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'dependant',
             subjectId: dependant.id,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         expect(response.status).toBe(201);
@@ -229,7 +229,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'caregiver',
             subjectId: caregiver.userId,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         expect(response.status).toBe(403);
@@ -246,7 +246,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'dependant',
             subjectId: dependant.id,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         expect(response.status).toBe(403);
@@ -261,7 +261,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'caregiver',
             subjectId: caregiver.userId,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         expect(response.status).toBe(403);
@@ -274,7 +274,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'caregiver',
             subjectId: '01a0bfb1-61b8-7260-b9e3-2d549e1bda49',
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         expect(response.status).toBe(404);
@@ -291,7 +291,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'caregiver',
             subjectId: caregiver.userId,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         const response = await request(app)
@@ -339,7 +339,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'dependant',
             subjectId: dependant.id,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
 
         const response = await request(app)
@@ -376,7 +376,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'dependant',
             subjectId: dependant.id,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
         await createTestUser('fam-1', 'family_member', '+254700000003');
 
@@ -396,7 +396,7 @@ describe.skipIf(!hasTestDb)(
           .send({
             subjectType: 'caregiver',
             subjectId: caregiver.userId,
-            consentType: 'biometric_verification',
+            consentType: 'location_verification',
           });
         const first = await request(app)
           .post(`/consent-records/${consentBody(created).id}/revoke`)

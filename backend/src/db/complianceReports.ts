@@ -63,8 +63,10 @@ export interface VisitRecord {
   checkoutAt: Date | null;
   distanceFromGeofenceMeters: number | null;
   checkoutDistanceFromGeofenceMeters: number | null;
-  caregiverFaceMatched: boolean | null;
-  dependantFaceMatched: boolean | null;
+  checkinMethod: schema.CheckinMethod | null;
+  familyDistanceFromGeofenceMeters: number | null;
+  audioRecorded: boolean;
+  audioSkipReason: schema.AudioSkipReason | null;
   /** Failed check-in attempts, e.g. `geofence: out_of_range`, one entry per attempt. */
   failedChecks: { attemptType: string; failureReason: string | null; count: number }[];
   /** Required tasks recorded as not completed, with the reason given. */
@@ -73,13 +75,14 @@ export interface VisitRecord {
 }
 
 /** An exception is a visit a supervisor should account for. */
-export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check';
+export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override';
 
 export interface VisitAssessment {
   outcome: TrendOutcome;
   /**
-   * Every check passed: checked in inside the geofence (check-in can't complete otherwise), both
-   * faces matched, and checked out inside the radius. Visits checked out before checkout location
+   * Every check passed: checked in by scanning a family member's code (both phones were inside the
+   * geofence, or no code could have been issued or scanned), and checked out inside the radius. A
+   * supervisor override never counts. Visits checked out before checkout location
    * was recorded (migration 0015) can't show the last part, so they don't count.
    */
   fullyVerified: boolean;
@@ -102,8 +105,7 @@ export function assessVisit(visit: VisitRecord, now: Date): VisitAssessment {
   const fullyVerified =
     visit.checkinAt !== null &&
     visit.checkoutAt !== null &&
-    visit.caregiverFaceMatched === true &&
-    visit.dependantFaceMatched === true &&
+    visit.checkinMethod === 'qr' &&
     visit.checkoutDistanceFromGeofenceMeters !== null &&
     visit.checkoutDistanceFromGeofenceMeters <= visit.geofenceRadiusMeters;
 
@@ -116,6 +118,9 @@ export function assessVisit(visit: VisitRecord, now: Date): VisitAssessment {
   }
   if (visit.status !== 'cancelled' && visit.failedChecks.length > 0) {
     exceptionKinds.push('failed_check');
+  }
+  if (visit.checkinMethod === 'supervisor_override') {
+    exceptionKinds.push('supervisor_override');
   }
   return { outcome, fullyVerified, late, missingCheckout, exceptionKinds };
 }
@@ -149,8 +154,10 @@ export async function visitRecords(
       distanceFromGeofenceMeters: schema.verificationEvents.distanceFromGeofenceMeters,
       checkoutDistanceFromGeofenceMeters:
         schema.verificationEvents.checkoutDistanceFromGeofenceMeters,
-      caregiverFaceMatched: schema.verificationEvents.caregiverLivenessPassed,
-      dependantFaceMatched: schema.verificationEvents.dependantLivenessPassed,
+      checkinMethod: schema.verificationEvents.checkinMethod,
+      familyDistanceFromGeofenceMeters: schema.verificationEvents.familyDistanceFromGeofenceMeters,
+      audioSkipReason: schema.verificationEvents.audioSkipReason,
+      audioRecordId: schema.audioRecords.id,
     })
     .from(schema.visitSchedules)
     .innerJoin(schema.users, eq(schema.users.id, schema.visitSchedules.caregiverId))
@@ -158,6 +165,10 @@ export async function visitRecords(
     .leftJoin(
       schema.verificationEvents,
       eq(schema.verificationEvents.visitScheduleId, schema.visitSchedules.id),
+    )
+    .leftJoin(
+      schema.audioRecords,
+      eq(schema.audioRecords.verificationEventId, schema.visitSchedules.id),
     )
     .where(visitCondition)
     .orderBy(asc(schema.visitSchedules.scheduledStart), asc(schema.visitSchedules.id));
@@ -213,8 +224,9 @@ export async function visitRecords(
 
   const failedByVisit = groupBy(failed, (row) => row.visitScheduleId);
   const tasksByVisit = groupBy(tasksNotDone, (row) => row.visitScheduleId);
-  return rows.map((row) => ({
+  return rows.map(({ audioRecordId, ...row }) => ({
     ...row,
+    audioRecorded: audioRecordId !== null,
     failedChecks: (failedByVisit.get(row.id) ?? []).map(
       ({ attemptType, failureReason, count }) => ({
         attemptType,
@@ -491,7 +503,7 @@ export interface ConsentRegisterRow {
   name: string;
   consents: Record<ConsentType, ConsentState>;
   /**
-   * Visits still to come for someone without photo-verification consent. Scheduling is blocked
+   * Visits still to come for someone without location-verification consent. Scheduling is blocked
    * without it, so these are visits booked before a consent was revoked: they can't be verified.
    */
   upcomingVisitsWithoutConsent: number;
@@ -568,11 +580,11 @@ export async function consentRegister(db: Db, now: Date): Promise<ConsentRegiste
   }
 
   const consentsOf = (subjectId: string): Record<ConsentType, ConsentState> => ({
-    biometric_verification: latest.get(`${subjectId}:biometric_verification`) ?? NO_CONSENT,
-    audio_cognitive_monitoring: latest.get(`${subjectId}:audio_cognitive_monitoring`) ?? NO_CONSENT,
+    location_verification: latest.get(`${subjectId}:location_verification`) ?? NO_CONSENT,
+    visit_audio: latest.get(`${subjectId}:visit_audio`) ?? NO_CONSENT,
   });
-  const hasBiometric = (subjectId: string) =>
-    latest.get(`${subjectId}:biometric_verification`)?.status === 'active';
+  const hasLocationConsent = (subjectId: string) =>
+    latest.get(`${subjectId}:location_verification`)?.status === 'active';
 
   const rows: ConsentRegisterRow[] = [
     ...caregivers.map((c) => ({
@@ -580,7 +592,7 @@ export async function consentRegister(db: Db, now: Date): Promise<ConsentRegiste
       subjectId: c.id,
       name: c.name,
       consents: consentsOf(c.id),
-      upcomingVisitsWithoutConsent: hasBiometric(c.id)
+      upcomingVisitsWithoutConsent: hasLocationConsent(c.id)
         ? 0
         : upcoming.filter((v) => v.caregiverId === c.id).length,
     })),
@@ -589,7 +601,7 @@ export async function consentRegister(db: Db, now: Date): Promise<ConsentRegiste
       subjectId: d.id,
       name: d.name,
       consents: consentsOf(d.id),
-      upcomingVisitsWithoutConsent: hasBiometric(d.id)
+      upcomingVisitsWithoutConsent: hasLocationConsent(d.id)
         ? 0
         : upcoming.filter((v) => v.dependantId === d.id).length,
     })),

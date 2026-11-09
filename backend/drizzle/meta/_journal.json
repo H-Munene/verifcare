@@ -120,6 +120,13 @@
       "when": 1790503200000,
       "tag": "0016_compliance",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794218400000,
+      "tag": "0017_qr_checkin_visit_audio",
+      "breakpoints": true
     }
   ]
 }

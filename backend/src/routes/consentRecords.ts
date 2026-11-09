@@ -18,8 +18,7 @@
 // simply returns the row as-is, rather than erroring or overwriting real audit history.
 //
 // authorizeSubject() below is deliberately the same shape as
-// routes/biometricEnrollments.ts's own helper of the same name (boolean return, sends its own
-// 403/404) - not imported from there, since that one is scoped to biometric enrollment's own
+// A boolean-returning helper that sends its own 403/404, scoped to this router's own
 // upload-url/confirm flow, but the underlying ownership rule is identical.
 
 import { eq } from 'drizzle-orm';
@@ -45,7 +44,7 @@ interface ConsentRecordResponse {
   subjectType: 'caregiver' | 'dependant';
   caregiverId: string | null;
   dependantId: string | null;
-  consentType: 'biometric_verification' | 'audio_cognitive_monitoring';
+  consentType: 'location_verification' | 'visit_audio';
   grantedBy: string;
   grantedAt: string;
   revokedAt: string | null;
@@ -67,7 +66,7 @@ function toResponse(row: typeof schema.consentRecords.$inferSelect): ConsentReco
 const createConsentRecordRequestSchema = z.object({
   subjectType: z.enum(['caregiver', 'dependant']),
   subjectId: z.string().uuid(),
-  consentType: z.enum(['biometric_verification', 'audio_cognitive_monitoring']),
+  consentType: z.enum(['location_verification', 'visit_audio']),
 });
 
 const listConsentRecordsQuerySchema = z.object({
@@ -91,8 +90,7 @@ function getDb(res: Response): Db | undefined {
 }
 
 // Sends its own 403/404 and returns false on failure - same "send the response, return a falsy
-// sentinel" pattern this codebase already establishes (validation.ts, auth/middleware.ts,
-// routes/biometricEnrollments.ts's own authorizeSubject).
+// sentinel" pattern this codebase already establishes (validation.ts, auth/middleware.ts).
 async function authorizeSubject(
   db: Db,
   caller: AuthenticatedUser,

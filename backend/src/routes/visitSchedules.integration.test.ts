@@ -99,34 +99,9 @@ async function createTestUser(
   return row;
 }
 
-// Scheduling needs an active photo for both people (the scheduling guardrail), so test caregivers
-// and dependants get one unless a test is specifically about its absence.
-async function enrollPhoto(
-  subject: { caregiverId: string } | { dependantId: string },
-  enrolledBy: string,
-  status: 'active' | 'flagged' = 'active',
-): Promise<void> {
-  const db = getDb();
-  const id = 'caregiverId' in subject ? subject.caregiverId : subject.dependantId;
-  await db.insert(schema.biometricEnrollments).values({
-    ...('caregiverId' in subject
-      ? { subjectType: 'caregiver' as const, caregiverId: subject.caregiverId }
-      : { subjectType: 'dependant' as const, dependantId: subject.dependantId }),
-    s3Key: `test/${id}/${status}.jpg`,
-    imageOrder: 1,
-    status,
-    ...(status === 'flagged' && {
-      matchedSubjectType: 'caregiver' as const,
-      matchedSubjectId: id,
-      matchedSimilarity: 99,
-    }),
-    enrolledBy,
-  });
-}
-
-// Scheduling also needs an active biometric_verification consent for both people (the consent
-// guardrail), so test caregivers and dependants get one too unless a test is about its absence.
-async function grantBiometricConsent(
+// Scheduling needs an active location_verification consent for both people (the consent
+// guardrail), so test caregivers and dependants get one unless a test is about its absence.
+async function grantLocationConsent(
   subject: { caregiverId: string } | { dependantId: string },
   grantedBy: string,
 ): Promise<void> {
@@ -136,7 +111,7 @@ async function grantBiometricConsent(
       ...('caregiverId' in subject
         ? { subjectType: 'caregiver' as const, caregiverId: subject.caregiverId }
         : { subjectType: 'dependant' as const, dependantId: subject.dependantId }),
-      consentType: 'biometric_verification',
+      consentType: 'location_verification',
       grantedBy,
     });
 }
@@ -144,7 +119,7 @@ async function grantBiometricConsent(
 async function createTestCaregiver(
   sub: string,
   phoneNumber: string,
-  { withPhoto = true, withConsent = true }: { withPhoto?: boolean; withConsent?: boolean } = {},
+  { withConsent = true }: { withConsent?: boolean } = {},
 ): Promise<typeof schema.caregivers.$inferSelect> {
   const user = await createTestUser(sub, 'caregiver', phoneNumber);
   const db = getDb();
@@ -152,18 +127,15 @@ async function createTestCaregiver(
   if (!row) {
     throw new Error('Failed to insert test caregiver.');
   }
-  if (withPhoto) {
-    await enrollPhoto({ caregiverId: row.userId }, user.id);
-  }
   if (withConsent) {
-    await grantBiometricConsent({ caregiverId: row.userId }, user.id);
+    await grantLocationConsent({ caregiverId: row.userId }, user.id);
   }
   return row;
 }
 
 async function createTestDependant(
   registeredById: string,
-  { withPhoto = true, withConsent = true }: { withPhoto?: boolean; withConsent?: boolean } = {},
+  { withConsent = true }: { withConsent?: boolean } = {},
 ): Promise<typeof schema.dependants.$inferSelect> {
   const db = getDb();
   const [row] = await db
@@ -180,11 +152,8 @@ async function createTestDependant(
   if (!row) {
     throw new Error('Failed to insert test dependant.');
   }
-  if (withPhoto) {
-    await enrollPhoto({ dependantId: row.id }, registeredById);
-  }
   if (withConsent) {
-    await grantBiometricConsent({ dependantId: row.id }, registeredById);
+    await grantLocationConsent({ dependantId: row.id }, registeredById);
   }
   return row;
 }
@@ -304,37 +273,7 @@ describe.skipIf(!hasTestDb)(
         });
       });
 
-      it('refuses to schedule until both people have an active photo (422)', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002', { withPhoto: false });
-        const dependant = await createTestDependant(supervisor.id, { withPhoto: false });
-        const schedule = () =>
-          request(app)
-            .post('/visit-schedules')
-            .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-            .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
-
-        let response = await schedule();
-        expect(response.status).toBe(422);
-        expect(problemBody(response).detail).toContain(
-          'the caregiver and the dependant have a photo',
-        );
-
-        // A photo still waiting for a supervisor's review can't be matched at check-in yet.
-        await enrollPhoto({ caregiverId: caregiver.userId }, supervisor.id, 'flagged');
-        response = await schedule();
-        expect(response.status).toBe(422);
-
-        await enrollPhoto({ caregiverId: caregiver.userId }, supervisor.id);
-        response = await schedule();
-        expect(response.status).toBe(422);
-        expect(problemBody(response).detail).toContain('until the dependant has a photo');
-
-        await enrollPhoto({ dependantId: dependant.id }, supervisor.id);
-        expect((await schedule()).status).toBe(201);
-      });
-
-      it('refuses to schedule until both people have active photo-verification consent (422)', async () => {
+      it('refuses to schedule until both people have active location consent (422)', async () => {
         const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
         const caregiver = await createTestCaregiver('cg-1', '+254700000002', {
           withConsent: false,
@@ -349,22 +288,22 @@ describe.skipIf(!hasTestDb)(
         let response = await schedule();
         expect(response.status).toBe(422);
         expect(problemBody(response).detail).toContain('the caregiver and the dependant');
-        expect(problemBody(response).detail).toContain('consented to photo identity verification');
+        expect(problemBody(response).detail).toContain('consented to location checks at visits');
 
-        // Audio consent alone doesn't cover the photo check, and a revoked consent doesn't count.
+        // Audio consent alone doesn't cover location checks, and a revoked consent doesn't count.
         await getDb()
           .insert(schema.consentRecords)
           .values([
             {
               subjectType: 'caregiver',
               caregiverId: caregiver.userId,
-              consentType: 'audio_cognitive_monitoring',
+              consentType: 'visit_audio',
               grantedBy: supervisor.id,
             },
             {
               subjectType: 'caregiver',
               caregiverId: caregiver.userId,
-              consentType: 'biometric_verification',
+              consentType: 'location_verification',
               grantedBy: supervisor.id,
               revokedAt: new Date('2026-09-20T08:00:00Z'),
             },
@@ -373,13 +312,13 @@ describe.skipIf(!hasTestDb)(
         expect(response.status).toBe(422);
         expect(problemBody(response).detail).toContain('until the caregiver and the dependant');
 
-        await grantBiometricConsent({ caregiverId: caregiver.userId }, supervisor.id);
+        await grantLocationConsent({ caregiverId: caregiver.userId }, supervisor.id);
         response = await schedule();
         expect(response.status).toBe(422);
         expect(problemBody(response).detail).toContain('until the dependant');
         expect(problemBody(response).detail).not.toContain('the caregiver');
 
-        await grantBiometricConsent({ dependantId: dependant.id }, supervisor.id);
+        await grantLocationConsent({ dependantId: dependant.id }, supervisor.id);
         expect((await schedule()).status).toBe(201);
       });
 
@@ -598,31 +537,6 @@ describe.skipIf(!hasTestDb)(
           actorUserId: supervisor.id,
           metadata: { status: { from: 'scheduled', to: 'cancelled' } },
         });
-      });
-
-      it('refuses to reschedule once a photo is gone, but still lets the visit be cancelled', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const created = await request(app)
-          .post('/visit-schedules')
-          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
-        expect(created.status).toBe(201);
-        // e.g. the photos were reset to be retaken.
-        await getDb().delete(schema.biometricEnrollments);
-
-        const moved = await request(app)
-          .patch(`/visit-schedules/${visitBody(created).id}`)
-          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-          .send({ scheduledStart: '2026-10-02T09:00:00Z', scheduledEnd: '2026-10-02T10:00:00Z' });
-        expect(moved.status).toBe(422);
-
-        const cancelled = await request(app)
-          .patch(`/visit-schedules/${visitBody(created).id}`)
-          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-          .send({ status: 'cancelled' });
-        expect(cancelled.status).toBe(200);
       });
 
       it('refuses to reschedule once a consent is revoked, but still lets the visit be cancelled', async () => {
@@ -938,6 +852,90 @@ describe.skipIf(!hasTestDb)(
           .send(atHome);
 
         expect(response.status).toBe(404);
+      });
+
+      describe('the visit recording', () => {
+        async function inProgressWithAudioConsent() {
+          const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+          const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+          const dependant = await createTestDependant(supervisor.id);
+          await getDb().insert(schema.consentRecords).values({
+            subjectType: 'dependant',
+            dependantId: dependant.id,
+            consentType: 'visit_audio',
+            grantedBy: supervisor.id,
+          });
+          return createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+        }
+        const checkout = (visitId: string, extra: Record<string, unknown> = {}) =>
+          request(app)
+            .post(`/visit-schedules/${visitId}/checkout`)
+            .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+            .send({ ...atHome, ...extra });
+        const eventOf = async (visitId: string) => {
+          const [event] = await getDb()
+            .select()
+            .from(schema.verificationEvents)
+            .where(eq(schema.verificationEvents.visitScheduleId, visitId));
+          return event;
+        };
+
+        it('refuses checkout with neither a recording nor a reason (409)', async () => {
+          const visit = await inProgressWithAudioConsent();
+
+          const response = await checkout(visit.id);
+
+          expect(response.status).toBe(409);
+          expect(response.body).toMatchObject({ failureReason: 'audio_required' });
+          expect((await eventOf(visit.id))?.checkoutAt).toBeNull();
+        });
+
+        it('accepts a stated reason and keeps it for the family and the reports', async () => {
+          const visit = await inProgressWithAudioConsent();
+
+          const response = await checkout(visit.id, { audioSkipReason: 'dependant_declined' });
+
+          expect(response.status).toBe(200);
+          expect(await eventOf(visit.id)).toMatchObject({
+            audioSkipReason: 'dependant_declined',
+            audioSkipNote: null,
+          });
+        });
+
+        it("needs a note when the reason is 'other'", async () => {
+          const visit = await inProgressWithAudioConsent();
+
+          expect((await checkout(visit.id, { audioSkipReason: 'other' })).status).toBe(400);
+          expect(
+            (await checkout(visit.id, { audioSkipReason: 'other', audioSkipNote: 'Fire alarm' }))
+              .status,
+          ).toBe(200);
+        });
+
+        it('accepts a recording, and ignores a reason sent alongside one', async () => {
+          const visit = await inProgressWithAudioConsent();
+          await getDb()
+            .insert(schema.audioRecords)
+            .values({
+              verificationEventId: visit.id,
+              s3Key: `${visit.id}/clip.m4a`,
+              durationSeconds: 30,
+            });
+
+          const response = await checkout(visit.id, { audioSkipReason: 'dependant_declined' });
+
+          expect(response.status).toBe(200);
+          expect((await eventOf(visit.id))?.audioSkipReason).toBeNull();
+        });
+
+        it("doesn't ask for anything when the family hasn't consented to audio", async () => {
+          const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+          const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+          const dependant = await createTestDependant(supervisor.id);
+          const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+
+          expect((await checkout(visit.id)).status).toBe(200);
+        });
       });
 
       it('blocks checkout with a 409 naming the task when a required care task is unaddressed', async () => {

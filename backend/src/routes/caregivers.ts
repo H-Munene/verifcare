@@ -25,8 +25,6 @@ import { z } from 'zod';
 import { isCognitoUserAlreadyExistsError, type CognitoAdmin } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import { changedFields, recordAudit } from '../audit.js';
-import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
-import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
@@ -46,9 +44,6 @@ import { parseOrSendProblem } from '../validation.js';
 export interface CaregiversRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
-  // Optional so existing callers/tests that don't touch biometric enrollment at all (most of them)
-  // don't need to construct one - offboarding cleanup (HEZ-85) is simply skipped without it.
-  faceCollection?: BiometricFaceCollection;
 }
 
 interface CaregiverResponse {
@@ -191,7 +186,7 @@ function getDb(res: import('express').Response): Db | undefined {
 
 export function createCaregiversRouter(dependencies: CaregiversRouterDependencies): Router {
   const router = Router();
-  const { cognitoAdmin, requireAuth, faceCollection } = dependencies;
+  const { cognitoAdmin, requireAuth } = dependencies;
   // Every route in this router needs the same auth (see the file header comment) - applied once
   // here rather than repeated on each route.
   router.use(requireAuth, requireRole('supervisor'));
@@ -522,12 +517,6 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
       if (!result) {
         sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
         return;
-      }
-
-      // Best-effort, after the transaction above has already committed - see
-      // db/biometricOffboarding.ts's header comment for why this isn't inside it.
-      if (body.active === false && faceCollection) {
-        await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'caregiver', caregiverId);
       }
 
       res.status(200).json(

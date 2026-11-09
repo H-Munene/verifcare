@@ -30,13 +30,10 @@ import {
   index,
   integer,
   jsonb,
-  numeric,
   pgEnum,
   pgSequence,
   pgTable,
   primaryKey,
-  real,
-  smallint,
   text,
   timestamp,
   unique,
@@ -61,15 +58,16 @@ export const caregiverOccupationEnum = pgEnum('caregiver_occupation', [
   'community_health_worker',
   'caregiver',
 ]);
+// How a check-in is proved (migration 0017): the caregiver's geofence fix, the family member's phone
+// being at the home when it issues a code, and the caregiver scanning that code.
 export const verificationAttemptTypeEnum = pgEnum('verification_attempt_type', [
   'geofence',
-  'caregiver_liveness',
-  'dependant_liveness',
+  'family_location',
+  'qr_scan',
 ]);
-export const consentTypeEnum = pgEnum('consent_type', [
-  'biometric_verification',
-  'audio_cognitive_monitoring',
-]);
+// location_verification: both phones' positions are checked against the home at check-in.
+// visit_audio: a short recording is made at each visit for the dependant's family to listen to.
+export const consentTypeEnum = pgEnum('consent_type', ['location_verification', 'visit_audio']);
 // Kenyan identity document types accepted when registering a brand-new family-member user
 // (HEZ-86 revision, 2026-09-21) - confirmed with the user as exactly these two, an enum rather
 // than text+CHECK since (unlike biometric_enrollments.status) there is no near-term need to add a
@@ -202,7 +200,6 @@ export const dependants = pgTable(
     geofenceLat: doublePrecision().notNull(),
     geofenceLng: doublePrecision().notNull(),
     geofenceRadiusMeters: integer().notNull(),
-    cognitiveMonitoringEnabled: boolean().notNull().default(false),
     status: dependantStatusEnum().notNull().default('active'),
     registeredBy: uuid()
       .notNull()
@@ -286,78 +283,6 @@ export const dependantCareTasks = pgTable(
 );
 
 // ============================================================================
-// biometric_enrollments
-// ============================================================================
-
-export const biometricEnrollments = pgTable(
-  'biometric_enrollments',
-  {
-    id: uuid()
-      .primaryKey()
-      .default(sql`uuid_generate_v7()`),
-    subjectType: subjectTypeEnum().notNull(),
-    caregiverId: uuid().references(() => caregivers.userId),
-    dependantId: uuid().references(() => dependants.id),
-    s3Key: text().notNull().unique('uq_biometric_enrollments_s3_key'),
-    imageOrder: smallint().notNull(),
-    qualityScore: real(),
-    // Plain text + CHECK, not a native pgEnum - matching users.status's own established pattern in
-    // this file. A real pgEnum was tried first for HEZ-85's new 'flagged' value and reverted:
-    // Postgres forbids using a freshly-added enum value ("ALTER TYPE ... ADD VALUE") within the
-    // same transaction that added it, and drizzle-orm's migrate() always batches every not-yet-
-    // applied migration file into one single transaction (confirmed directly - not just when a
-    // fresh database applies its whole history at once, which is exactly what every fresh test-DB
-    // run and CI run does). Splitting the enum-add and its first use into separate migration files
-    // does not avoid this, since both still count as "not yet applied" together. text()+CHECK has
-    // no such restriction, since altering a CHECK constraint is just an ordinary DDL statement.
-    status: text().notNull().default('active'),
-    // The Rekognition Collection FaceId for this image (HEZ-85) - only ever set once the image is
-    // actually indexed (status 'active'/'superseded'; never set while 'flagged', since indexing is
-    // deliberately deferred until a supervisor approves it). Needed to call DeleteFaces later
-    // (offboarding cleanup) - the collection has no other way to look up which vectors belong to
-    // which enrollment row.
-    rekognitionFaceId: text(),
-    // The other subject this image matched above the duplicate-detection threshold, and the
-    // similarity score at the time - populated only when status is (or was) 'flagged', for a
-    // supervisor to review. No FK: matchedSubjectId may point at either caregivers.userId or
-    // dependants.id depending on matchedSubjectType, the same "can't FK to two tables" reasoning
-    // audit_log.entityId already uses.
-    matchedSubjectType: subjectTypeEnum(),
-    matchedSubjectId: uuid(),
-    matchedSimilarity: real(),
-    enrolledBy: uuid()
-      .notNull()
-      .references(() => users.id),
-    enrolledAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    check('chk_biometric_enrollments_image_order', sql`${table.imageOrder} BETWEEN 1 AND 3`),
-    check(
-      'chk_biometric_enrollments_subject',
-      sql`(${table.subjectType} = 'caregiver' AND ${table.caregiverId} IS NOT NULL AND ${table.dependantId} IS NULL) OR
-          (${table.subjectType} = 'dependant' AND ${table.dependantId} IS NOT NULL AND ${table.caregiverId} IS NULL)`,
-    ),
-    check(
-      'chk_biometric_enrollments_status',
-      sql`${table.status} IN ('active', 'superseded', 'deleted', 'flagged')`,
-    ),
-    check(
-      'chk_biometric_enrollments_flagged_has_match',
-      sql`${table.status} != 'flagged' OR (${table.matchedSubjectType} IS NOT NULL AND ${table.matchedSubjectId} IS NOT NULL AND ${table.matchedSimilarity} IS NOT NULL)`,
-    ),
-    index('idx_biometric_enrollments_caregiver_active').on(table.caregiverId, table.status),
-    index('idx_biometric_enrollments_dependant_active').on(table.dependantId, table.status),
-    index('idx_biometric_enrollments_enrolled_by').on(table.enrolledBy),
-    // Supports GET /biometric-enrollments/flagged (HEZ-85), a cross-subject listing with no
-    // caregiverId/dependantId filter to drive off the two composite indexes above.
-    index('idx_biometric_enrollments_flagged')
-      .on(table.id)
-      .where(sql`${table.status} = 'flagged'`),
-  ],
-);
-
-// ============================================================================
 // visit_schedules
 // ============================================================================
 
@@ -428,7 +353,7 @@ export const visitTaskCompletions = pgTable(
   (table) => [
     primaryKey({ columns: [table.visitScheduleId, table.careTaskId] }),
     // Mirrors this schema's existing style of encoding "these columns are only valid together" as
-    // a CHECK (verification_events, biometric_enrollments both already do this) - a reason only
+    // a CHECK (verification_events already does this) - a reason only
     // makes sense for a genuinely skipped task, never one marked done or explicitly N/A.
     check(
       'chk_visit_task_completions_reason',
@@ -442,6 +367,21 @@ export const visitTaskCompletions = pgTable(
 // ============================================================================
 // verification_events
 // ============================================================================
+
+// How a visit was checked in (migration 0017). 'qr' is the normal route; 'supervisor_override' is
+// the exception used when no family member was at the home, and never counts as fully verified.
+export const CHECKIN_METHODS = ['qr', 'supervisor_override'] as const;
+export type CheckinMethod = (typeof CHECKIN_METHODS)[number];
+
+// Why a caregiver checked out without a recording. A dependant is never made to speak, so the
+// recording is required only in the sense that its absence has to be explained.
+export const AUDIO_SKIP_REASONS = [
+  'dependant_declined',
+  'dependant_unwell_or_asleep',
+  'technical_problem',
+  'other',
+] as const;
+export type AudioSkipReason = (typeof AUDIO_SKIP_REASONS)[number];
 
 export const verificationEvents = pgTable(
   'verification_events',
@@ -460,10 +400,15 @@ export const verificationEvents = pgTable(
     checkoutGpsLat: doublePrecision(),
     checkoutGpsLng: doublePrecision(),
     checkoutDistanceFromGeofenceMeters: doublePrecision(),
-    caregiverMatchConfidence: numeric({ precision: 5, scale: 2 }),
-    dependantMatchConfidence: numeric({ precision: 5, scale: 2 }),
-    caregiverLivenessPassed: boolean(),
-    dependantLivenessPassed: boolean(),
+    checkinMethod: text().$type<CheckinMethod>(),
+    // The family member whose code was scanned, and how far their phone was from the home when it
+    // issued that code. The distance is kept rather than the position, since a family member's
+    // whereabouts are only needed to answer "were they at the home".
+    qrFamilyMemberUserId: uuid().references(() => users.id),
+    familyDistanceFromGeofenceMeters: doublePrecision(),
+    // Set at checkout when there is no recording for the visit.
+    audioSkipReason: text().$type<AudioSkipReason>(),
+    audioSkipNote: text(),
     // Hash of the short-lived session token, not the token itself (see schema.sql's file header).
     sessionTokenHash: text(),
     // When the current sessionTokenHash was issued (HEZ-33 originally derived this indirectly from
@@ -473,20 +418,19 @@ export const verificationEvents = pgTable(
     // cross-table query on every check-in request and decouples the auth check from
     // verification_attempts' own audit-log shape).
     sessionTokenIssuedAt: timestamp({ withTimezone: true }),
-    // No pending-challenge columns here (a HEZ-34 first draft had them, dropped in the same
-    // session): caregiver/dependant verification is a single-photo check now, not a
-    // challenge-response flow, so there is no pending challenge to track between the upload-url
-    // and submit calls - see routes/checkin.ts's header comment for the full reasoning behind the
-    // reversal.
   },
   (table) => [
     check(
-      'chk_verification_events_caregiver_match_confidence_range',
-      sql`${table.caregiverMatchConfidence} BETWEEN 0 AND 100`,
+      'chk_verification_events_checkin_method',
+      sql`${table.checkinMethod} IS NULL OR ${table.checkinMethod} IN ('qr', 'supervisor_override')`,
     ),
     check(
-      'chk_verification_events_dependant_match_confidence_range',
-      sql`${table.dependantMatchConfidence} BETWEEN 0 AND 100`,
+      'chk_verification_events_audio_skip_reason',
+      sql`${table.audioSkipReason} IS NULL OR ${table.audioSkipReason} IN ('dependant_declined', 'dependant_unwell_or_asleep', 'technical_problem', 'other')`,
+    ),
+    check(
+      'chk_verification_events_audio_skip_other_note',
+      sql`${table.audioSkipReason} IS DISTINCT FROM 'other' OR length(btrim(coalesce(${table.audioSkipNote}, ''))) > 0`,
     ),
     check(
       'chk_verification_events_checkout_after_checkin',
@@ -517,6 +461,103 @@ export const verificationAttempts = pgTable(
   (table) => [
     index('idx_verification_attempts_visit_time').on(table.visitScheduleId, table.attemptedAt),
     // `trg_verification_attempts_append_only` (rejects UPDATE/DELETE) is added by HEZ-9.
+  ],
+);
+
+// ============================================================================
+// checkin_qr_tokens (0017) - one row per code a family member's phone has shown. A code is random,
+// short-lived, single-use and bound to one visit, so a screenshot cannot be replayed later or used
+// at another home. Only the hash is stored, the same as verification_events.session_token_hash.
+// ============================================================================
+
+export const checkinQrTokens = pgTable(
+  'checkin_qr_tokens',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    visitScheduleId: uuid()
+      .notNull()
+      .references(() => visitSchedules.id),
+    familyMemberUserId: uuid()
+      .notNull()
+      .references(() => users.id),
+    tokenHash: text().notNull().unique('uq_checkin_qr_tokens_token_hash'),
+    distanceFromGeofenceMeters: doublePrecision().notNull(),
+    issuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp({ withTimezone: true }).notNull(),
+    consumedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    check('chk_checkin_qr_tokens_expiry', sql`${table.expiresAt} > ${table.issuedAt}`),
+    index('idx_checkin_qr_tokens_visit').on(table.visitScheduleId),
+    index('idx_checkin_qr_tokens_family_member').on(table.familyMemberUserId),
+  ],
+);
+
+// ============================================================================
+// checkin_override_requests (0017) - a caregiver at the home with no family member present asks a
+// supervisor to let the visit start. Kept as its own record so every override shows who asked, why,
+// who decided and why, and so it can be reported as an exception rather than a verified visit.
+// ============================================================================
+
+export const CHECKIN_OVERRIDE_REASONS = [
+  'no_family_member_present',
+  'family_phone_unavailable',
+  'network_problem',
+  'other',
+] as const;
+export type CheckinOverrideReason = (typeof CHECKIN_OVERRIDE_REASONS)[number];
+
+export const CHECKIN_OVERRIDE_STATUSES = ['pending', 'approved', 'denied'] as const;
+export type CheckinOverrideStatus = (typeof CHECKIN_OVERRIDE_STATUSES)[number];
+
+export const checkinOverrideRequests = pgTable(
+  'checkin_override_requests',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    visitScheduleId: uuid()
+      .notNull()
+      .references(() => visitSchedules.id),
+    requestedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    reason: text().$type<CheckinOverrideReason>().notNull(),
+    note: text(),
+    distanceFromGeofenceMeters: doublePrecision().notNull(),
+    status: text().$type<CheckinOverrideStatus>().notNull().default('pending'),
+    decidedBy: uuid().references(() => users.id),
+    decisionNote: text(),
+    requestedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'chk_checkin_override_requests_reason',
+      sql`${table.reason} IN ('no_family_member_present', 'family_phone_unavailable', 'network_problem', 'other')`,
+    ),
+    check(
+      'chk_checkin_override_requests_status',
+      sql`${table.status} IN ('pending', 'approved', 'denied')`,
+    ),
+    check(
+      'chk_checkin_override_requests_other_note',
+      sql`${table.reason} != 'other' OR length(btrim(coalesce(${table.note}, ''))) > 0`,
+    ),
+    check(
+      'chk_checkin_override_requests_decision',
+      sql`(${table.status} = 'pending' AND ${table.decidedBy} IS NULL AND ${table.decidedAt} IS NULL) OR
+          (${table.status} != 'pending' AND ${table.decidedBy} IS NOT NULL AND ${table.decidedAt} IS NOT NULL AND length(btrim(coalesce(${table.decisionNote}, ''))) > 0)`,
+    ),
+    // One open request per visit, so retrying can't stack up duplicates in the supervisor's queue.
+    uniqueIndex('uq_checkin_override_requests_pending')
+      .on(table.visitScheduleId)
+      .where(sql`${table.status} = 'pending'`),
+    index('idx_checkin_override_requests_visit').on(table.visitScheduleId, table.requestedAt),
+    index('idx_checkin_override_requests_requested_by').on(table.requestedBy),
+    index('idx_checkin_override_requests_decided_by').on(table.decidedBy),
   ],
 );
 
@@ -565,7 +606,9 @@ export const visitResolutions = pgTable(
 );
 
 // ============================================================================
-// audio_records
+// audio_records - the visit's 30-second recording, which the dependant's linked family members can
+// listen to as added assurance (0017). One per visit. The object is removed by the S3 bucket's
+// 90-day lifecycle rule (infra/lib/storage.ts); AUDIO_RETENTION_DAYS mirrors that number.
 // ============================================================================
 
 export const audioRecords = pgTable(
@@ -580,14 +623,11 @@ export const audioRecords = pgTable(
     // via foreignKey() below instead.
     verificationEventId: uuid().notNull(),
     s3Key: text().notNull().unique('uq_audio_records_s3_key'),
-    durationSeconds: integer(),
-    riskScore: numeric({ precision: 5, scale: 4 }),
-    modelVersion: text(),
-    processedAt: timestamp({ withTimezone: true }),
+    durationSeconds: integer().notNull(),
+    uploadedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check('chk_audio_records_risk_score_range', sql`${table.riskScore} BETWEEN 0 AND 1`),
-    index('idx_audio_records_verification_event').on(table.verificationEventId),
+    uniqueIndex('uq_audio_records_verification_event').on(table.verificationEventId),
     foreignKey({
       name: 'fk_audio_records_verification_event',
       columns: [table.verificationEventId],
@@ -634,7 +674,7 @@ export const consentRecords = pgTable(
 // ============================================================================
 // terms_acceptances (append-only) - a user accepting the app's terms of use and privacy notice
 // (2026-09-26, the mobile apps' consent screen). Not consent_records: that table is consent given
-// *about a subject* (a caregiver's or dependant's biometrics/audio), often by someone else on
+// *about a subject* (a caregiver's or dependant's location and audio), often by someone else on
 // their behalf; this is the signed-in user agreeing to the terms for themselves. One row per
 // document version accepted, so publishing a new version (src/terms.ts) asks everyone again while
 // the record of what each person agreed to, and when, is kept.
@@ -653,12 +693,12 @@ export const termsAcceptances = pgTable(
     document: text().notNull(),
     version: text().notNull(),
     acceptedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    // The consent screen's two checkboxes (migration 0014, terms v2): consent to photos being
-    // used to verify identity at visits, and to audio being recorded during visits. Kept on the
-    // acceptance as the append-only proof of what the person ticked, alongside the
-    // consent_records rows the same acceptance creates (which can later be revoked). Null on v1
-    // acceptances, which didn't ask - null means "not asked", not "refused".
-    biometricConsent: boolean(),
+    // The consent screen's two checkboxes (terms v3, migration 0017): consent to location being
+    // checked at visits, and to audio being recorded during visits for the family to hear. Kept on
+    // the acceptance as the append-only proof of what the person ticked, alongside the
+    // consent_records rows the same acceptance creates (which can later be revoked). Null on
+    // earlier acceptances, which didn't ask this - null means "not asked", not "refused".
+    locationConsent: boolean(),
     audioConsent: boolean(),
   },
   (table) => [
@@ -741,9 +781,7 @@ export const notificationLog = pgTable(
       .default(sql`uuid_generate_v7()`),
     type: text().notNull(),
     visitScheduleId: uuid().references(() => visitSchedules.id),
-    audioRecordId: uuid().references(() => audioRecords.id),
-    // NULL = every supervisor: a missed-visit alert is shared, any supervisor can acknowledge it
-    // (0016). A cognitive_risk alert always names its family member.
+    // NULL = every supervisor: these alerts are shared and any supervisor can acknowledge them.
     recipientUserId: uuid().references(() => users.id),
     channel: text(),
     sentAt: timestamp({ withTimezone: true }),
@@ -751,23 +789,14 @@ export const notificationLog = pgTable(
     acknowledgedBy: uuid().references(() => users.id),
   },
   (table) => [
-    check('chk_notification_log_type', sql`${table.type} IN ('missed_visit', 'cognitive_risk')`),
-    check(
-      'chk_notification_log_related_entity',
-      sql`(${table.type} = 'missed_visit' AND ${table.visitScheduleId} IS NOT NULL AND ${table.audioRecordId} IS NULL) OR
-          (${table.type} = 'cognitive_risk' AND ${table.audioRecordId} IS NOT NULL AND ${table.visitScheduleId} IS NULL)`,
-    ),
-    check(
-      'chk_notification_log_recipient',
-      sql`${table.recipientUserId} IS NOT NULL OR ${table.type} = 'missed_visit'`,
-    ),
+    check('chk_notification_log_type', sql`${table.type} IN ('missed_visit', 'checkin_override')`),
+    check('chk_notification_log_related_entity', sql`${table.visitScheduleId} IS NOT NULL`),
     // One alert per missed visit, so re-running the sweep never raises a second.
     uniqueIndex('uq_notification_log_missed_visit')
       .on(table.visitScheduleId)
       .where(sql`${table.type} = 'missed_visit'`),
     index('idx_notification_log_recipient_sent').on(table.recipientUserId, table.sentAt),
     index('idx_notification_log_visit_schedule').on(table.visitScheduleId),
-    index('idx_notification_log_audio_record').on(table.audioRecordId),
     index('idx_notification_log_acknowledged_by').on(table.acknowledgedBy),
   ],
 );

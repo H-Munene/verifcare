@@ -1,0 +1,262 @@
+// The visit's 30-second recording against a real Postgres, with S3 faked: who may upload, who may
+// listen, and the audit trail of listening.
+
+import { eq } from 'drizzle-orm';
+import express, { type Express } from 'express';
+import request from 'supertest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
+import * as schema from '../db/schema.js';
+import {
+  getDb,
+  getTestDatabaseUrl,
+  setupTestDb,
+  teardownTestDb,
+  truncateAllTables,
+} from '../db/testSupport.js';
+import type { VisitAudioStorage } from '../db/visitAudioStorage.js';
+import { createVisitAudioRouter } from './visitAudio.js';
+
+const hasTestDb = Boolean(getTestDatabaseUrl());
+
+function auth(sub: string, role: UserRole): string {
+  const user: AuthenticatedUser = { sub, role, email: undefined };
+  return Buffer.from(JSON.stringify(user)).toString('base64url');
+}
+
+describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
+  let app: Express;
+  let storage: {
+    createUploadUrl: ReturnType<typeof vi.fn<VisitAudioStorage['createUploadUrl']>>;
+    objectSize: ReturnType<typeof vi.fn<VisitAudioStorage['objectSize']>>;
+    createPlaybackUrl: ReturnType<typeof vi.fn<VisitAudioStorage['createPlaybackUrl']>>;
+  };
+  let visitId: string;
+  let dependantId: string;
+  let supervisorId: string;
+  let now: Date;
+  const caregiver = auth('cg-1', 'caregiver');
+  const family = auth('fam-1', 'family_member');
+
+  beforeAll(async () => {
+    await setupTestDb();
+  });
+
+  afterAll(async () => {
+    await teardownTestDb();
+  });
+
+  async function addUser(sub: string, role: UserRole, phoneNumber: string) {
+    const [row] = await getDb()
+      .insert(schema.users)
+      .values({ cognitoSub: sub, fullName: sub, phoneNumber, role })
+      .returning();
+    return row!;
+  }
+
+  async function grantAudioConsent() {
+    await getDb().insert(schema.consentRecords).values({
+      subjectType: 'dependant',
+      dependantId,
+      consentType: 'visit_audio',
+      grantedBy: supervisorId,
+    });
+  }
+
+  beforeEach(async () => {
+    await truncateAllTables();
+    now = new Date('2026-11-09T09:30:00Z');
+    storage = {
+      createUploadUrl: vi.fn<VisitAudioStorage['createUploadUrl']>().mockImplementation((id) =>
+        Promise.resolve({
+          uploadUrl: 'https://s3.example/upload',
+          s3Key: `${id}/clip.m4a`,
+          expiresAt: new Date('2026-11-09T09:35:00Z'),
+        }),
+      ),
+      objectSize: vi.fn<VisitAudioStorage['objectSize']>().mockResolvedValue(400_000),
+      createPlaybackUrl: vi.fn<VisitAudioStorage['createPlaybackUrl']>().mockResolvedValue({
+        url: 'https://s3.example/play',
+        expiresAt: new Date('2026-11-09T09:35:00Z'),
+      }),
+    };
+    app = express();
+    app.use(express.json());
+    app.locals.db = getDb();
+    const requireAuth: express.RequestHandler = (req, _res, next) => {
+      req.auth = JSON.parse(
+        Buffer.from(req.headers['x-test-auth'] as string, 'base64url').toString('utf8'),
+      ) as AuthenticatedUser;
+      next();
+    };
+    app.use('/visit-schedules', createVisitAudioRouter({ requireAuth, storage, now: () => now }));
+
+    const supervisor = await addUser('sup-1', 'supervisor', '+254700000001');
+    supervisorId = supervisor.id;
+    const caregiverUser = await addUser('cg-1', 'caregiver', '+254700000002');
+    await getDb().insert(schema.caregivers).values({ userId: caregiverUser.id });
+    const familyUser = await addUser('fam-1', 'family_member', '+254700000003');
+    await addUser('fam-2', 'family_member', '+254700000004');
+    const [dependant] = await getDb()
+      .insert(schema.dependants)
+      .values({
+        fullName: 'Test Dependant',
+        dob: '1950-01-01',
+        geofenceLat: -1.28,
+        geofenceLng: 36.81,
+        geofenceRadiusMeters: 100,
+        registeredBy: supervisor.id,
+      })
+      .returning();
+    dependantId = dependant!.id;
+    await getDb().insert(schema.dependantFamilyMembers).values({
+      dependantId,
+      familyMemberUserId: familyUser.id,
+      isPrimaryContact: true,
+      addedBy: supervisor.id,
+    });
+    const [visit] = await getDb()
+      .insert(schema.visitSchedules)
+      .values({
+        caregiverId: caregiverUser.id,
+        dependantId,
+        scheduledStart: new Date('2026-11-09T09:00:00Z'),
+        scheduledEnd: new Date('2026-11-09T10:00:00Z'),
+        status: 'in_progress',
+        createdBy: supervisor.id,
+      })
+      .returning();
+    visitId = visit!.id;
+    await getDb()
+      .insert(schema.verificationEvents)
+      .values({ visitScheduleId: visitId, checkinAt: new Date('2026-11-09T09:05:00Z') });
+  });
+
+  const upload = (who = caregiver) =>
+    request(app).post(`/visit-schedules/${visitId}/audio/upload-url`).set('x-test-auth', who);
+  const confirm = (body: Record<string, unknown> = {}, who = caregiver) =>
+    request(app)
+      .post(`/visit-schedules/${visitId}/audio`)
+      .set('x-test-auth', who)
+      .send({ s3Key: `${visitId}/clip.m4a`, durationSeconds: 30, ...body });
+  const listen = (who = family) =>
+    request(app).get(`/visit-schedules/${visitId}/audio`).set('x-test-auth', who);
+  const requirement = () =>
+    request(app).get(`/visit-schedules/${visitId}/audio/requirement`).set('x-test-auth', caregiver);
+
+  describe('recording', () => {
+    it('reports whether a recording is needed, following consent', async () => {
+      expect((await requirement()).body).toEqual({ required: false, recorded: false });
+
+      await grantAudioConsent();
+      expect((await requirement()).body).toEqual({ required: true, recorded: false });
+
+      await confirm();
+      expect((await requirement()).body).toEqual({ required: true, recorded: true });
+    });
+
+    it('refuses to take a recording without consent', async () => {
+      expect((await upload()).status).toBe(403);
+      expect((await confirm()).status).toBe(403);
+      expect(await getDb().select().from(schema.audioRecords)).toHaveLength(0);
+    });
+
+    it('stores one recording per visit, even if the caregiver retries', async () => {
+      await grantAudioConsent();
+
+      expect((await confirm()).status).toBe(201);
+      expect((await confirm({ durationSeconds: 28 })).status).toBe(201);
+
+      const rows = await getDb().select().from(schema.audioRecords);
+      expect(rows).toMatchObject([{ durationSeconds: 28 }]);
+    });
+
+    it('only accepts a recording during the visit', async () => {
+      await grantAudioConsent();
+      await getDb().update(schema.visitSchedules).set({ status: 'completed' });
+
+      expect((await upload()).status).toBe(409);
+      expect((await confirm()).status).toBe(409);
+    });
+
+    it('refuses another caregiver and other roles', async () => {
+      await grantAudioConsent();
+      const other = await addUser('cg-2', 'caregiver', '+254700000005');
+      await getDb().insert(schema.caregivers).values({ userId: other.id });
+
+      expect((await upload(auth('cg-2', 'caregiver'))).status).toBe(403);
+      expect((await upload(family)).status).toBe(403);
+      expect((await upload(auth('sup-1', 'supervisor'))).status).toBe(403);
+    });
+
+    it("refuses a key that isn't this visit's", async () => {
+      await grantAudioConsent();
+
+      expect((await confirm({ s3Key: 'someone-else/clip.m4a' })).status).toBe(400);
+    });
+
+    it('refuses a recording that was never uploaded, is empty, or is far too big', async () => {
+      await grantAudioConsent();
+
+      storage.objectSize.mockResolvedValueOnce(null);
+      expect((await confirm()).status).toBe(400);
+      storage.objectSize.mockResolvedValueOnce(0);
+      expect((await confirm()).status).toBe(422);
+      storage.objectSize.mockResolvedValueOnce(50_000_000);
+      expect((await confirm()).status).toBe(422);
+    });
+
+    it('refuses a length outside 5 to 31 seconds', async () => {
+      await grantAudioConsent();
+
+      expect((await confirm({ durationSeconds: 4 })).status).toBe(400);
+      expect((await confirm({ durationSeconds: 32 })).status).toBe(400);
+      expect((await confirm({ durationSeconds: 31 })).status).toBe(201);
+    });
+  });
+
+  describe('listening', () => {
+    beforeEach(async () => {
+      await grantAudioConsent();
+      await confirm();
+    });
+
+    it('gives a linked family member a playback URL and logs that they listened', async () => {
+      const response = await listen();
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        url: 'https://s3.example/play',
+        durationSeconds: 30,
+      });
+      const entries = await getDb()
+        .select()
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.action, 'visit_audio.listen'));
+      expect(entries).toHaveLength(1);
+    });
+
+    it('never gives a supervisor or the caregiver a way to listen', async () => {
+      expect((await listen(auth('sup-1', 'supervisor'))).status).toBe(403);
+      expect((await listen(caregiver)).status).toBe(403);
+      expect(storage.createPlaybackUrl).not.toHaveBeenCalled();
+    });
+
+    it("refuses a family member who isn't linked to this dependant", async () => {
+      expect((await listen(auth('fam-2', 'family_member'))).status).toBe(403);
+    });
+
+    it('reports a recording past the 90-day limit as gone', async () => {
+      now = new Date('2027-02-08T09:31:00Z');
+
+      expect((await listen()).status).toBe(410);
+      expect(storage.createPlaybackUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the visit has no recording', async () => {
+      await getDb().delete(schema.audioRecords);
+
+      expect((await listen()).status).toBe(404);
+    });
+  });
+});
