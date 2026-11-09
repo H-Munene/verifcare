@@ -4,10 +4,10 @@ import '../../api/dependants_api.dart';
 import '../../api/visit_schedules_api.dart';
 import '../../app_ui.dart';
 import '../../feed/visit_feed.dart';
-import '../../widgets/photo_needed_banner.dart';
 import '../../widgets/dependant_switcher.dart';
 import '../../widgets/states.dart';
 import '../../widgets/visit_widgets.dart';
+import '../check_in_code_screen.dart';
 import '../upcoming_visit_screen.dart';
 import '../visit_timeline_screen.dart';
 
@@ -26,8 +26,6 @@ class TodayTab extends StatefulWidget {
   /// The signed-in family member's first name for the greeting, once known.
   final String? myFirstName;
 
-  /// Opens the edit wizard's Photo step; null unless the caller is the primary contact.
-  final VoidCallback? onAddPhoto;
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
 
@@ -36,7 +34,6 @@ class TodayTab extends StatefulWidget {
     required this.dependant,
     required this.onSwitchDependant,
     required this.myFirstName,
-    required this.onAddPhoto,
     required this.dependantsApi,
     required this.visitSchedulesApi,
   });
@@ -125,6 +122,26 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
     if (mounted) _load();
   }
 
+  // A code only makes sense for today's visit: one due now, or later today (a caregiver may be
+  // early).
+  VisitSchedule? _codeVisit(NowState state) => switch (state) {
+    NowAwaitingCheckin(:final visit) => visit,
+    NowNext(:final visit) when DateUtils.isSameDay(visit.scheduledStart, DateTime.now()) => visit,
+    _ => null,
+  };
+
+  Future<void> _showCode(VisitSchedule visit) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CheckInCodeScreen(
+          visit: visit,
+          visitSchedulesApi: widget.visitSchedulesApi,
+        ),
+      ),
+    );
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -144,10 +161,6 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
             const SizedBox(height: 12),
             _Greeting(name: widget.myFirstName, dependantFirst: dependantFirst),
             const SizedBox(height: 16),
-            if (widget.dependant.needsPhoto) ...[
-              PhotoNeededBanner(dependant: widget.dependant, onAddPhoto: widget.onAddPhoto),
-              const SizedBox(height: 16),
-            ],
             if (_error case final message?)
               ErrorState(message: message, onRetry: _load)
             else if (data == null) ...[
@@ -161,6 +174,14 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
                 checkedInAt: data.checkedInAt,
                 onOpen: _open,
               ),
+              if (_codeVisit(data.now) case final visit?) ...[
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () => _showCode(visit),
+                  icon: const Icon(Icons.qr_code_2),
+                  label: const Text('Show check-in code'),
+                ),
+              ],
               const SizedBox(height: 8),
               const SectionTitle('Recent activity'),
               if (data.feed.isEmpty)
@@ -375,21 +396,25 @@ class _FeedRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final visit = event.visit;
     final caregiver = firstName(visit.caregiverDisplayName);
-    final dependant = firstName(visit.dependantDisplayName);
     final (icon, ink, tint, title, detail) = switch (event.kind) {
       FeedKind.arrived => (
         Icons.how_to_reg_outlined,
         primaryGreen,
         primaryTint,
         '$caregiver arrived',
-        'Confirmed at the home by location and photo.',
+        'Confirmed at the home by location.',
       ),
       FeedKind.started => (
         Icons.play_arrow_outlined,
         primaryGreen,
         primaryTint,
         'Visit started',
-        '$caregiver and $dependant were both confirmed by photo.',
+        event.startedBySupervisor
+            ? 'Started by a supervisor, as nobody from the family could show the code.'
+            : switch (event.confirmedBy) {
+                final name? => '${firstName(name)} confirmed $caregiver with the check-in code.',
+                null => '$caregiver checked in.',
+              },
       ),
       FeedKind.finished => (
         Icons.check,

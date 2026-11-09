@@ -6,9 +6,7 @@ const requiredEnv = {
   USER_POOL_CLIENT_ID: '62h8bi9cih94nhcd3hom9kheol',
   CAREGIVER_USER_POOL_CLIENT_ID: '4th550b5rk8st5fmgfdio465tr',
   FAMILY_MEMBER_USER_POOL_CLIENT_ID: '7b63vkbmrooqvu4g5to6c1gtvk',
-  BIOMETRIC_ENROLLMENTS_BUCKET_NAME: 'mzazicarestack-biometricenrollmentsbucket-abc123',
-  BIOMETRIC_FACES_COLLECTION_ID: 'mzazi-care-biometric-faces',
-  CHECKIN_LIVENESS_FRAMES_BUCKET_NAME: 'mzazicarestack-checkinlivenessframesbucket-abc123',
+  VISIT_AUDIO_BUCKET_NAME: 'mzazicarestack-visitaudiobucket-abc123',
 };
 
 describe('loadConfig', () => {
@@ -28,45 +26,30 @@ describe('loadConfig', () => {
         requiredEnv.CAREGIVER_USER_POOL_CLIENT_ID,
         requiredEnv.FAMILY_MEMBER_USER_POOL_CLIENT_ID,
       ],
-      biometricEnrollmentsBucketName: requiredEnv.BIOMETRIC_ENROLLMENTS_BUCKET_NAME,
-      biometricFacesCollectionId: requiredEnv.BIOMETRIC_FACES_COLLECTION_ID,
       geofenceAccuracyThresholdMeters: 20,
       checkinSessionTokenTtlSeconds: 600,
-      checkinLivenessFramesBucketName: requiredEnv.CHECKIN_LIVENESS_FRAMES_BUCKET_NAME,
-      checkinLivenessMatchThresholdPercent: 80,
-      checkinCoPresenceWindowSeconds: 120,
+      checkinQrTokenTtlSeconds: 60,
+      visitAudioBucketName: requiredEnv.VISIT_AUDIO_BUCKET_NAME,
     });
   });
 
-  it('defaults CHECKIN_LIVENESS_MATCH_THRESHOLD_PERCENT when unset', () => {
-    const config = loadConfig({ ...requiredEnv, DATABASE_URL: 'postgres://localhost/db' });
-
-    expect(config.checkinLivenessMatchThresholdPercent).toBe(80);
-  });
-
-  it('defaults CHECKIN_CO_PRESENCE_WINDOW_SECONDS to 120 when unset', () => {
-    const config = loadConfig({ ...requiredEnv, DATABASE_URL: 'postgres://localhost/db' });
-
-    expect(config.checkinCoPresenceWindowSeconds).toBe(120);
-  });
-
-  it('parses a custom CHECKIN_CO_PRESENCE_WINDOW_SECONDS', () => {
+  it('parses a custom CHECKIN_QR_TOKEN_TTL_SECONDS', () => {
     const config = loadConfig({
       ...requiredEnv,
       DATABASE_URL: 'postgres://localhost/db',
-      CHECKIN_CO_PRESENCE_WINDOW_SECONDS: '300',
+      CHECKIN_QR_TOKEN_TTL_SECONDS: '30',
     });
 
-    expect(config.checkinCoPresenceWindowSeconds).toBe(300);
+    expect(config.checkinQrTokenTtlSeconds).toBe(30);
   });
 
-  it('throws when CHECKIN_LIVENESS_FRAMES_BUCKET_NAME is missing', () => {
+  it('throws when VISIT_AUDIO_BUCKET_NAME is missing', () => {
     expect(() =>
       loadConfig({
-        ...withoutKey('CHECKIN_LIVENESS_FRAMES_BUCKET_NAME'),
+        ...withoutKey('VISIT_AUDIO_BUCKET_NAME'),
         DATABASE_URL: 'postgres://localhost/db',
       }),
-    ).toThrow(/CHECKIN_LIVENESS_FRAMES_BUCKET_NAME/);
+    ).toThrow(/VISIT_AUDIO_BUCKET_NAME/);
   });
 
   it('defaults GEOFENCE_ACCURACY_THRESHOLD_METERS/CHECKIN_SESSION_TOKEN_TTL_SECONDS when unset', () => {
@@ -165,23 +148,5 @@ describe('loadConfig', () => {
         DATABASE_URL: 'postgres://localhost/db',
       }),
     ).toThrow(/FAMILY_MEMBER_USER_POOL_CLIENT_ID/);
-  });
-
-  it('throws when BIOMETRIC_ENROLLMENTS_BUCKET_NAME is missing', () => {
-    expect(() =>
-      loadConfig({
-        ...withoutKey('BIOMETRIC_ENROLLMENTS_BUCKET_NAME'),
-        DATABASE_URL: 'postgres://localhost/db',
-      }),
-    ).toThrow(/BIOMETRIC_ENROLLMENTS_BUCKET_NAME/);
-  });
-
-  it('throws when BIOMETRIC_FACES_COLLECTION_ID is missing', () => {
-    expect(() =>
-      loadConfig({
-        ...withoutKey('BIOMETRIC_FACES_COLLECTION_ID'),
-        DATABASE_URL: 'postgres://localhost/db',
-      }),
-    ).toThrow(/BIOMETRIC_FACES_COLLECTION_ID/);
   });
 });

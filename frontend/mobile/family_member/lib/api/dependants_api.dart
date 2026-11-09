@@ -1,9 +1,6 @@
 import 'api_client.dart';
 
 /// A dependant as returned by GET /dependants and GET /dependants/{id}.
-/// GET /dependants' checkinPhotoStatus: only [ready] lets a visit be scheduled.
-enum CheckinPhotoStatus { ready, awaitingReview, missing }
-
 class Dependant {
   final String id;
   final String fullName;
@@ -16,12 +13,8 @@ class Dependant {
   final String? ward;
   final double geofenceLat;
   final double geofenceLng;
-  final bool cognitiveMonitoringEnabled;
   final bool active;
 
-  /// Where their check-in photo stands. Null when the server doesn't say (an older API), so no
-  /// alert is shown on a guess.
-  final CheckinPhotoStatus? checkinPhotoStatus;
 
   Dependant({
     required this.id,
@@ -35,9 +28,7 @@ class Dependant {
     this.ward,
     required this.geofenceLat,
     required this.geofenceLng,
-    required this.cognitiveMonitoringEnabled,
     required this.active,
-    this.checkinPhotoStatus,
   });
 
   factory Dependant.fromJson(Map<String, dynamic> json) => switch (json) {
@@ -47,7 +38,6 @@ class Dependant {
       'dob': String dob,
       'geofenceLat': num geofenceLat,
       'geofenceLng': num geofenceLng,
-      'cognitiveMonitoringEnabled': bool cognitiveMonitoringEnabled,
       'status': String status,
     } =>
       Dependant(
@@ -62,26 +52,13 @@ class Dependant {
         ward: json['ward'] as String?,
         geofenceLat: geofenceLat.toDouble(),
         geofenceLng: geofenceLng.toDouble(),
-        cognitiveMonitoringEnabled: cognitiveMonitoringEnabled,
         active: status == 'active',
-        checkinPhotoStatus: switch (json['checkinPhotoStatus']) {
-          'ready' => CheckinPhotoStatus.ready,
-          'awaiting_review' => CheckinPhotoStatus.awaitingReview,
-          'missing' => CheckinPhotoStatus.missing,
-          _ => null,
-        },
       ),
     _ => throw FormatException('Unexpected dependant: $json'),
   };
 
   int ageOn(DateTime today) => ageOnDate(dob, today);
 
-  /// No photo check-in can use yet, so visits can't be scheduled (the backend refuses). Not for a
-  /// deactivated dependant, who won't be visited anyway.
-  bool get needsPhoto =>
-      active &&
-      checkinPhotoStatus != null &&
-      checkinPhotoStatus != CheckinPhotoStatus.ready;
 
   /// "Ward, Constituency, County", skipping any that are missing.
   String? get areaText {
@@ -228,7 +205,6 @@ class DependantsApi {
     required String ward,
     required double geofenceLat,
     required double geofenceLng,
-    required bool cognitiveMonitoringEnabled,
     required String selfCognitoSub,
     required String selfPhoneNumber,
     required String selfFullName,
@@ -249,7 +225,6 @@ class DependantsApi {
       'geofenceLat': geofenceLat,
       'geofenceLng': geofenceLng,
       'geofenceRadiusMeters': standardGeofenceRadiusMeters,
-      'cognitiveMonitoringEnabled': cognitiveMonitoringEnabled,
       'primaryFamilyMember': {
         'cognitoSub': selfCognitoSub,
         'phoneNumber': selfPhoneNumber,
@@ -273,7 +248,6 @@ class DependantsApi {
     required String ward,
     required double geofenceLat,
     required double geofenceLng,
-    required bool cognitiveMonitoringEnabled,
     String? gender,
     String? homeAddressText,
     String? primaryConditionSummary,
@@ -288,7 +262,6 @@ class DependantsApi {
       'ward': ward,
       'geofenceLat': geofenceLat,
       'geofenceLng': geofenceLng,
-      'cognitiveMonitoringEnabled': cognitiveMonitoringEnabled,
     }),
   );
 
@@ -307,7 +280,3 @@ int ageOnDate(DateTime dob, DateTime today) {
 /// The check-in radius every family-registered dependant gets: the web app's settled default,
 /// wide enough for typical phone GPS accuracy (~5 m outdoors, worse indoors).
 const standardGeofenceRadiusMeters = 20;
-
-/// Cognitive monitoring is only offered for dependants over this age - the same rule as the admin
-/// web wizard (RegisterDependantPage.tsx).
-const cognitiveMonitoringMinAgeExclusive = 65;

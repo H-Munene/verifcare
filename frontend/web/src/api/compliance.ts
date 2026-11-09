@@ -52,7 +52,7 @@ export interface VisitSummary {
   totals: VisitSummaryCounts;
 }
 
-export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check';
+export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override';
 
 export const RESOLUTION_OUTCOMES = [
   'caregiver_absent',
@@ -127,7 +127,7 @@ export interface AlertResponse {
   }[];
 }
 
-export type ConsentType = 'biometric_verification' | 'audio_cognitive_monitoring';
+export type ConsentType = 'location_verification' | 'visit_audio';
 
 export interface ConsentState {
   status: 'active' | 'revoked' | 'none';

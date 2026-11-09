@@ -1,4 +1,3 @@
-import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/visit_schedules_api.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,7 +15,6 @@ Map<String, dynamic> _dependantJson({String dob = '1950-06-15'}) => {
   'geofenceLat': -1.2833,
   'geofenceLng': 36.7833,
   'geofenceRadiusMeters': 20,
-  'cognitiveMonitoringEnabled': false,
   'status': 'active',
 };
 
@@ -40,22 +38,6 @@ void main() {
         () => Dependant.fromJson({..._dependantJson()}..remove('dob')),
         throwsFormatException,
       );
-    });
-
-    test('needs a photo until check-in has one it can use', () {
-      Dependant withPhoto(Object? status, {String active = 'active'}) =>
-          Dependant.fromJson({
-            ..._dependantJson(),
-            'checkinPhotoStatus': status,
-            'status': active,
-          });
-      expect(withPhoto('missing').needsPhoto, isTrue);
-      expect(withPhoto('awaiting_review').needsPhoto, isTrue);
-      expect(withPhoto('ready').needsPhoto, isFalse);
-      // An older API that doesn't say: no alert on a guess.
-      expect(Dependant.fromJson(_dependantJson()).needsPhoto, isFalse);
-      // A deactivated dependant won't be visited, so isn't nagged about.
-      expect(withPhoto('missing', active: 'deactivated').needsPhoto, isFalse);
     });
   });
 
@@ -91,40 +73,35 @@ void main() {
     expect(outcome.notes, 'Too tired');
   });
 
-  test(
-    'VerificationAudit takes the first passing photo attempt of each type',
-    () {
-      final audit = VerificationAudit.fromJson({
-        'event': {'checkinAt': '2026-09-24T09:05:00Z', 'checkoutAt': null},
-        'attempts': [
-          {
-            'attemptType': 'caregiver_liveness',
-            'passed': false,
-            'attemptedAt': '2026-09-24T09:01:00Z',
-          },
-          {
-            'attemptType': 'caregiver_liveness',
-            'passed': true,
-            'attemptedAt': '2026-09-24T09:02:00Z',
-          },
-        ],
-      });
-      expect(
-        audit.caregiverVerifiedAt,
-        DateTime.parse('2026-09-24T09:02:00Z').toLocal(),
-      );
-      expect(audit.dependantVerifiedAt, isNull);
-      expect(audit.checkoutAt, isNull);
-    },
-  );
-
-  test('BiometricEnrollment reads the presigned view URL', () {
-    final enrollment = BiometricEnrollment.fromJson({
-      'id': 'e1',
-      'imageOrder': 1,
-      'imageUrl': 'https://bucket.s3.amazonaws.com/view',
-      'status': 'flagged',
+  test('VerificationAudit reads the arrival, check-in method and recording', () {
+    final audit = VerificationAudit.fromJson({
+      'event': {
+        'checkinAt': '2026-09-24T09:05:00Z',
+        'checkoutAt': null,
+        'checkinMethod': 'qr',
+        'qrFamilyMemberName': 'Achieng Otieno',
+        'audioRecordedAt': '2026-09-24T09:50:00Z',
+        'audioDurationSeconds': 30,
+        'audioSkipReason': null,
+        'audioSkipNote': null,
+      },
+      'attempts': [
+        {
+          'attemptType': 'geofence',
+          'passed': false,
+          'attemptedAt': '2026-09-24T09:01:00Z',
+        },
+        {
+          'attemptType': 'geofence',
+          'passed': true,
+          'attemptedAt': '2026-09-24T09:02:00Z',
+        },
+      ],
     });
-    expect(enrollment.status, 'flagged');
+    expect(audit.arrivedAt, DateTime.parse('2026-09-24T09:02:00Z').toLocal());
+    expect(audit.checkinMethod, 'qr');
+    expect(audit.qrFamilyMemberName, 'Achieng Otieno');
+    expect(audit.audioDurationSeconds, 30);
+    expect(audit.checkoutAt, isNull);
   });
 }

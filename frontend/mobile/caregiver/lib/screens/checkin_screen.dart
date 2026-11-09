@@ -1,6 +1,6 @@
 // Screen 04/05 of the wireframes (temp_images/Mzazi Care Caregiver App Wireframes.dc.html) - the
 // geofence check-in map and its bottom sheet. A passing geofence check moves straight on to
-// PhotoVerificationScreen (the caregiver/dependant photo step).
+// CodeScanScreen, where the family member's code starts the visit.
 
 import 'dart:async';
 
@@ -13,7 +13,7 @@ import '../api/checkin_api.dart';
 import '../api/directions_api.dart';
 import '../api/visit_schedules_api.dart';
 import '../location.dart';
-import 'photo_verification_screen.dart';
+import 'code_scan_screen.dart';
 
 const _primaryGreen = Color(0xFF047857);
 const _successGreen = Color(0xFF15B042);
@@ -42,7 +42,7 @@ class CheckInScreen extends StatefulWidget {
   final VisitSchedulesApi visitSchedulesApi;
   final CheckinApi checkinApi;
   final VoidCallback onBack;
-  // Both photos verified and the caregiver tapped Proceed - the visit is now in progress.
+  // The code was scanned (or a supervisor approved) and the visit is now in progress.
   final VoidCallback onCheckedIn;
 
   const CheckInScreen({
@@ -227,7 +227,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
         _result = result;
         _state = _SheetState.success;
       });
-      unawaited(_openPhotoVerification());
+      unawaited(_openCodeScan());
     } on ApiException catch (e) {
       if (!mounted) return;
       if (e.problem.status == 422) {
@@ -253,10 +253,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
     }
   }
 
-  Future<void> _openPhotoVerification() async {
+  Future<void> _openCodeScan() async {
     final sessionExpired = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => PhotoVerificationScreen(
+        builder: (_) => CodeScanScreen(
           visit: widget.visit,
           checkinApi: widget.checkinApi,
           session: _result!,
@@ -763,8 +763,8 @@ class _CheckInScreenState extends State<CheckInScreen> {
           SizedBox(
             height: 40,
             child: ElevatedButton(
-              // Reached only by backing out of the photo step while the session is still valid.
-              onPressed: _openPhotoVerification,
+              // Reached only by backing out of the scan step while the session is still valid.
+              onPressed: _openCodeScan,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryGreen,
                 foregroundColor: Colors.white,
@@ -773,7 +773,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 ),
                 elevation: 0,
               ),
-              child: const Text('Continue to photos'),
+              child: const Text('Continue to scan'),
             ),
           ),
         ],

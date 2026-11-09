@@ -8,7 +8,6 @@ import { and, asc, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
-import { checkinPhotoStatuses } from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
@@ -165,22 +164,26 @@ export function createDashboardRouter(dependencies: DashboardRouterDependencies)
         .orderBy(desc(schema.notificationLog.id))
         .limit(ATTENTION_LIST_LIMIT);
 
-      const [flagged] = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(schema.biometricEnrollments)
-        .where(eq(schema.biometricEnrollments.status, 'flagged'));
-
-      // Active dependants without a usable photo can't be scheduled (the scheduling guardrail).
-      const activeDependants = await db
-        .select({ id: schema.dependants.id, fullName: schema.dependants.fullName })
-        .from(schema.dependants)
-        .where(eq(schema.dependants.status, 'active'))
-        .orderBy(asc(schema.dependants.fullName));
-      const photoStatuses = await checkinPhotoStatuses(
-        db,
-        activeDependants.map((d) => d.id),
-      );
-      const withoutPhoto = activeDependants.filter((d) => photoStatuses.get(d.id) === 'missing');
+      // Caregivers at a home with no family member present, waiting on a supervisor right now.
+      const pendingOverrides = await db
+        .select({
+          id: schema.checkinOverrideRequests.id,
+          visitScheduleId: schema.checkinOverrideRequests.visitScheduleId,
+          reason: schema.checkinOverrideRequests.reason,
+          note: schema.checkinOverrideRequests.note,
+          requestedAt: schema.checkinOverrideRequests.requestedAt,
+          dependantName: schema.dependants.fullName,
+          caregiverName: schema.users.fullName,
+        })
+        .from(schema.checkinOverrideRequests)
+        .innerJoin(
+          schema.visitSchedules,
+          eq(schema.visitSchedules.id, schema.checkinOverrideRequests.visitScheduleId),
+        )
+        .innerJoin(schema.dependants, eq(schema.dependants.id, schema.visitSchedules.dependantId))
+        .innerJoin(schema.users, eq(schema.users.id, schema.checkinOverrideRequests.requestedBy))
+        .where(eq(schema.checkinOverrideRequests.status, 'pending'))
+        .orderBy(asc(schema.checkinOverrideRequests.requestedAt));
 
       res.status(200).json({
         date,
@@ -217,10 +220,12 @@ export function createDashboardRouter(dependencies: DashboardRouterDependencies)
               caregiverName: a.caregiverName,
             })),
           },
-          flaggedPhotos: flagged?.count ?? 0,
-          dependantsWithoutPhoto: {
-            total: withoutPhoto.length,
-            items: withoutPhoto.slice(0, ATTENTION_LIST_LIMIT),
+          pendingCheckinOverrides: {
+            total: pendingOverrides.length,
+            items: pendingOverrides.slice(0, ATTENTION_LIST_LIMIT).map((o) => ({
+              ...o,
+              requestedAt: o.requestedAt.toISOString(),
+            })),
           },
         },
       });

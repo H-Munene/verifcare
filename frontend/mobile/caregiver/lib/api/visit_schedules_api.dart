@@ -203,12 +203,50 @@ class VisitSchedulesApi {
     String visitScheduleId, {
     required double gpsLat,
     required double gpsLng,
+    String? audioSkipReason,
+    String? audioSkipNote,
   }) async => VisitSchedule.fromJson(
     await _client.post('/visit-schedules/$visitScheduleId/checkout', {
       'gpsLat': gpsLat,
       'gpsLng': gpsLng,
+      'audioSkipReason': ?audioSkipReason,
+      'audioSkipNote': ?audioSkipNote,
     }),
   );
+
+  /// Whether this visit needs a recording (the family consented) and whether one is already saved.
+  Future<({bool required, bool recorded})> audioRequirement(
+    String visitScheduleId,
+  ) async {
+    final json = await _client.get(
+      '/visit-schedules/$visitScheduleId/audio/requirement',
+    );
+    return (
+      required: json['required'] as bool,
+      recorded: json['recorded'] as bool,
+    );
+  }
+
+  /// Presign, upload straight to S3, then confirm. Safe to repeat: a retry replaces the recording.
+  Future<void> uploadAudio(
+    String visitScheduleId, {
+    required List<int> bytes,
+    required int durationSeconds,
+  }) async {
+    final presign = await _client.post(
+      '/visit-schedules/$visitScheduleId/audio/upload-url',
+      const {},
+    );
+    await ApiClient.uploadToPresignedUrl(
+      presign['uploadUrl'] as String,
+      bytes,
+      'audio/mp4',
+    );
+    await _client.post('/visit-schedules/$visitScheduleId/audio', {
+      's3Key': presign['s3Key'],
+      'durationSeconds': durationSeconds,
+    });
+  }
 }
 
 /// One care-plan task as seen from a visit (GET .../tasks) - status is null until recorded.
@@ -248,16 +286,18 @@ class VisitTask {
 
 /// GET .../verification, trimmed to what the visit timeline reads.
 class VerificationAudit {
+  final DateTime? arrivedAt;
   final DateTime? checkinAt;
   final DateTime? checkoutAt;
-  final DateTime? caregiverVerifiedAt;
-  final DateTime? dependantVerifiedAt;
+
+  /// 'qr' or 'supervisor_override'; null until the visit has started.
+  final String? checkinMethod;
 
   VerificationAudit({
+    this.arrivedAt,
     this.checkinAt,
     this.checkoutAt,
-    this.caregiverVerifiedAt,
-    this.dependantVerifiedAt,
+    this.checkinMethod,
   });
 
   factory VerificationAudit.fromJson(Map<String, dynamic> json) {
@@ -270,18 +310,17 @@ class VerificationAudit {
       'event': Map<String, dynamic>? event,
       'attempts': List<dynamic> attempts,
     }) {
-      // Same rule as the admin web app's VisitDetailPage: the first *passing* attempt per type.
-      DateTime? firstPass(String type) => parse(
-        attempts
-            .map((a) => a as Map<String, dynamic>)
-            .where((a) => a['attemptType'] == type && a['passed'] == true)
-            .firstOrNull?['attemptedAt'],
-      );
       return VerificationAudit(
+        // The first passing geofence check is when the caregiver reached the home.
+        arrivedAt: parse(
+          attempts
+              .map((a) => a as Map<String, dynamic>)
+              .where((a) => a['attemptType'] == 'geofence' && a['passed'] == true)
+              .firstOrNull?['attemptedAt'],
+        ),
         checkinAt: parse(event?['checkinAt']),
         checkoutAt: parse(event?['checkoutAt']),
-        caregiverVerifiedAt: firstPass('caregiver_liveness'),
-        dependantVerifiedAt: firstPass('dependant_liveness'),
+        checkinMethod: event?['checkinMethod'] as String?,
       );
     }
     throw FormatException('Unexpected verification audit: $json');

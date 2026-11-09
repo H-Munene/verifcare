@@ -2,7 +2,7 @@
 // Cognito requireAuth/requireRole('caregiver') + visit-ownership check every checkin/* route
 // already performs. Confirmed with the user as the more robust of two designs (senior-engineer
 // recommendation, not deferred to the user's own suggestion): a session-token-only design would
-// mean a leaked/intercepted session token alone is enough to submit liveness frames as the
+// mean a leaked/intercepted session token alone is enough to complete check-in as the
 // caregiver, with no requirement to also be authenticated as that Cognito user on that device.
 // Requiring both is defense-in-depth at negligible extra cost - the Cognito check this project
 // already has on every other route, plus proof this specific visit's geofence step was passed
@@ -15,7 +15,7 @@
 //
 // Expiry is read directly from verification_events.session_token_issued_at (HEZ-34 added this
 // column - HEZ-33's original plan to derive it from a verification_attempts row on every request
-// was revisited here: this design needs it on every one of the four remaining check-in requests,
+// was revisited here: this design needs it on every remaining check-in request,
 // and a direct column avoids both the extra cross-table query and coupling this auth check to
 // verification_attempts' own audit-log shape).
 

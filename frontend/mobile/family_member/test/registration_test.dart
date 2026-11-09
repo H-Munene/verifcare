@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:family_member/api/api_client.dart';
-import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/users_api.dart';
 import 'package:family_member/auth/cognito_auth_service.dart';
@@ -69,7 +68,6 @@ void main() {
               ward: 'KILELESHWA',
               geofenceLat: -1.28,
               geofenceLng: 36.78,
-              cognitiveMonitoringEnabled: true,
               selfCognitoSub: 'sub-1',
               selfPhoneNumber: '+254700000001',
               selfFullName: 'Achieng Otieno',
@@ -103,7 +101,6 @@ void main() {
       MaterialApp(
         home: DependantWizardScreen.register(
           dependantsApi: DependantsApi(client),
-          enrollmentsApi: BiometricEnrollmentsApi(client),
           usersApi: UsersApi(client),
           identity: IdentityClaims(sub: 'sub-1'),
           onDone: () {},
@@ -143,14 +140,6 @@ void main() {
     // The form's own list - each multi-line text field is a scrollable of its own too.
     final formList = find.byType(Scrollable).first;
 
-    // Cognitive monitoring stays off until the dependant is known to be over 65.
-    final monitoring = find.widgetWithText(
-      SwitchListTile,
-      'Cognitive monitoring',
-    );
-    await tester.scrollUntilVisible(monitoring, 100, scrollable: formList);
-    expect(tester.widget<SwitchListTile>(monitoring).onChanged, isNull);
-
     await tester.scrollUntilVisible(
       find.text('Date of birth'),
       -100,
@@ -162,8 +151,6 @@ void main() {
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
     expect(next().onPressed, isNotNull);
-    await tester.scrollUntilVisible(monitoring, 100, scrollable: formList);
-    expect(tester.widget<SwitchListTile>(monitoring).onChanged, isNotNull);
 
     // Location: each level unlocks the next; Next waits for the ward.
     await tester.tap(find.widgetWithText(ElevatedButton, 'Next'));
@@ -192,7 +179,7 @@ void main() {
     expect(next().onPressed, isNull);
 
     // Registering goes step by step - the header isn't a shortcut.
-    await tester.tap(find.text('Photo'));
+    await tester.tap(find.text('Family'));
     await tester.pumpAndSettle();
     expect(
       find.text('Choose the county, constituency and ward.'),
@@ -220,7 +207,6 @@ void main() {
         'ward': 'KILELESHWA',
         'geofenceLat': -1.2833,
         'geofenceLng': 36.7833,
-        'cognitiveMonitoringEnabled': true,
         'status': 'active',
       });
       final backend = MockClient((request) async {
@@ -256,7 +242,6 @@ void main() {
                       MaterialPageRoute(
                         builder: (_) => DependantWizardScreen.edit(
                           dependantsApi: DependantsApi(client),
-                          enrollmentsApi: BiometricEnrollmentsApi(client),
                           existing: existing,
                         ),
                       ),
@@ -306,12 +291,6 @@ void main() {
         expect(save().onPressed, isNotNull);
 
         // Editing: the step header jumps straight to any step.
-        await tester.tap(find.bySemanticsLabel('Step 5, Photo'));
-        await tester.pumpAndSettle();
-        expect(
-          find.textContaining('Replace it if it no longer looks like them'),
-          findsOneWidget,
-        );
         await tester.tap(find.bySemanticsLabel('Step 2, Location'));
         await tester.pumpAndSettle();
 
@@ -332,7 +311,6 @@ void main() {
         'ward': 'KILELESHWA',
         'geofenceLat': -1.2833,
         'geofenceLng': 36.7833,
-        'cognitiveMonitoringEnabled': true,
       });
       // Never the radius (supervisor-only) or date of birth (not editable).
       expect(patched.containsKey('geofenceRadiusMeters'), isFalse);
@@ -358,7 +336,6 @@ void main() {
         'ward': 'KILELESHWA',
         'geofenceLat': -1.2833,
         'geofenceLng': 36.7833,
-        'cognitiveMonitoringEnabled': false,
         'status': 'active',
       });
       final backend = MockClient(
@@ -374,7 +351,6 @@ void main() {
           MaterialApp(
             home: DependantWizardScreen.edit(
               dependantsApi: DependantsApi(client),
-              enrollmentsApi: BiometricEnrollmentsApi(client),
               existing: existing,
             ),
           ),

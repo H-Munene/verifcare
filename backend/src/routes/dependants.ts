@@ -56,14 +56,7 @@ import {
 } from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import { changedFields, recordAudit } from '../audit.js';
-import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
-import { cleanupBiometricEnrollmentsForSubject } from '../db/biometricOffboarding.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
-import {
-  checkinPhotoStatusCondition,
-  checkinPhotoStatuses,
-  type CheckinPhotoStatus,
-} from '../db/checkinPhotos.js';
 import type { Db } from '../db/client.js';
 import { grantConsents, hasGivenTermsConsents } from '../db/consents.js';
 import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
@@ -83,9 +76,6 @@ import { parseOrSendProblem } from '../validation.js';
 export interface DependantsRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
-  // Optional so existing callers/tests that don't touch biometric enrollment at all (most of them)
-  // don't need to construct one - offboarding cleanup (HEZ-85) is simply skipped without it.
-  faceCollection?: BiometricFaceCollection;
 }
 
 interface DependantResponse {
@@ -101,20 +91,13 @@ interface DependantResponse {
   geofenceLat: number;
   geofenceLng: number;
   geofenceRadiusMeters: number;
-  cognitiveMonitoringEnabled: boolean;
   status: 'active' | 'deactivated';
   registeredBy: string;
   createdAt: string;
   updatedAt: string;
-  // Where their check-in photo stands (2026-09-26) - see db/checkinPhotos.ts. Drives the family
-  // app's "photo needed" alert; a visit can only be scheduled once it's 'ready'.
-  checkinPhotoStatus: CheckinPhotoStatus;
 }
 
-function toDependantResponse(
-  row: typeof schema.dependants.$inferSelect,
-  checkinPhotoStatus: CheckinPhotoStatus,
-): DependantResponse {
+function toDependantResponse(row: typeof schema.dependants.$inferSelect): DependantResponse {
   return {
     id: row.id,
     fullName: row.fullName,
@@ -128,34 +111,11 @@ function toDependantResponse(
     geofenceLat: row.geofenceLat,
     geofenceLng: row.geofenceLng,
     geofenceRadiusMeters: row.geofenceRadiusMeters,
-    cognitiveMonitoringEnabled: row.cognitiveMonitoringEnabled,
     status: row.status,
     registeredBy: row.registeredBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    checkinPhotoStatus,
   };
-}
-
-// Every response path goes through here, so each one reports checkinPhotoStatus with one extra
-// query no matter how many dependants it returns.
-async function toDependantResponses(
-  db: Db,
-  rows: (typeof schema.dependants.$inferSelect)[],
-): Promise<DependantResponse[]> {
-  const statuses = await checkinPhotoStatuses(
-    db,
-    rows.map((row) => row.id),
-  );
-  return rows.map((row) => toDependantResponse(row, statuses.get(row.id) ?? 'missing'));
-}
-
-async function toOneDependantResponse(
-  db: Db,
-  row: typeof schema.dependants.$inferSelect,
-): Promise<DependantResponse> {
-  const statuses = await checkinPhotoStatuses(db, [row.id]);
-  return toDependantResponse(row, statuses.get(row.id) ?? 'missing');
 }
 
 interface CareTaskResponse {
@@ -285,7 +245,6 @@ function dependantColumns() {
     geofenceLat: schema.dependants.geofenceLat,
     geofenceLng: schema.dependants.geofenceLng,
     geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
-    cognitiveMonitoringEnabled: schema.dependants.cognitiveMonitoringEnabled,
     status: schema.dependants.status,
     registeredBy: schema.dependants.registeredBy,
     createdAt: schema.dependants.createdAt,
@@ -367,7 +326,6 @@ const createDependantRequestSchema = z.object({
   geofenceLat: z.number(),
   geofenceLng: z.number(),
   geofenceRadiusMeters: z.number().int().min(1),
-  cognitiveMonitoringEnabled: z.boolean().default(false),
   primaryFamilyMember: addFamilyMemberRequestSchema,
 });
 
@@ -382,7 +340,6 @@ const updateDependantRequestSchema = z.object({
   geofenceLat: z.number().optional(),
   geofenceLng: z.number().optional(),
   geofenceRadiusMeters: z.number().int().min(1).optional(),
-  cognitiveMonitoringEnabled: z.boolean().optional(),
   status: z.enum(['active', 'deactivated']).optional(),
 });
 
@@ -429,8 +386,6 @@ const DEPENDANT_SORT_KEYS = {
 
 const listDependantsQuerySchema = z.object({
   status: z.enum(['active', 'deactivated']).optional(),
-  // Where the check-in photo stands, as in checkinPhotoStatus on each dependant.
-  photo: z.enum(['ready', 'awaiting_review', 'missing']).optional(),
   sort: z.enum(['name', '-name', 'dob', '-dob']).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -457,7 +412,7 @@ function getDb(res: Response): Db | undefined {
 // Looks up whether callerSub is linked to dependantId, returning both the caller's own users row
 // (needed by callers for addedBy/registeredBy-style columns) and the link row itself (needed to
 // check isPrimaryContact). Returns undefined if the caller has no users row, or no link exists.
-// Exported for routes/biometricEnrollments.ts (HEZ-31), which needs the exact same
+// Exported for the routers that need the exact same
 // family_member-to-dependant ownership check, not a re-derived copy of it.
 export async function findFamilyMemberLink(
   db: Db,
@@ -622,7 +577,7 @@ async function resolveFamilyMemberIdentity(
 
 export function createDependantsRouter(dependencies: DependantsRouterDependencies): Router {
   const router = Router();
-  const { cognitoAdmin, requireAuth, faceCollection } = dependencies;
+  const { cognitoAdmin, requireAuth } = dependencies;
   // caregiver is forbidden on every route in this file (see the file header comment); the one
   // route that's narrower still (supervisor-only) adds its own requireRole afterward.
   router.use(requireAuth, requireRole('supervisor', 'family_member'));
@@ -685,7 +640,6 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             geofenceLat: body.geofenceLat,
             geofenceLng: body.geofenceLng,
             geofenceRadiusMeters: body.geofenceRadiusMeters,
-            cognitiveMonitoringEnabled: body.cognitiveMonitoringEnabled,
             registeredBy: callerRow.id,
           })
           .returning();
@@ -749,7 +703,6 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
             county: dependant.county,
             constituency: dependant.constituency,
             ward: dependant.ward,
-            cognitiveMonitoringEnabled: dependant.cognitiveMonitoringEnabled,
             primaryFamilyMemberId: familyMemberUserId,
           },
         });
@@ -757,8 +710,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return dependant;
       });
 
-      // Just registered, so no photo yet - the photo step comes after registration.
-      res.status(201).json(toDependantResponse(dependantRow, 'missing'));
+      res.status(201).json(toDependantResponse(dependantRow));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
         sendProblem(res, {
@@ -792,9 +744,6 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
       const conditions = [];
       if (query.status) {
         conditions.push(eq(schema.dependants.status, query.status));
-      }
-      if (query.photo) {
-        conditions.push(checkinPhotoStatusCondition(schema.dependants.id, query.photo));
       }
       const sort = resolveSort(query.sort, DEPENDANT_SORT_KEYS);
       if (query.cursor) {
@@ -844,7 +793,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         sort: sort?.param,
         value: sort ? (sort.param.endsWith('dob') ? row.dob : row.fullName) : undefined,
       }));
-      res.status(200).json({ items: await toDependantResponses(db, items), nextCursor });
+      res.status(200).json({ items: items.map(toDependantResponse), nextCursor });
     } catch (err) {
       next(err);
     }
@@ -881,7 +830,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           return;
         }
       }
-      res.status(200).json(await toOneDependantResponse(db, row));
+      res.status(200).json(toDependantResponse(row));
     } catch (err) {
       next(err);
     }
@@ -1021,7 +970,6 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
               'constituency',
               'ward',
               'geofenceRadiusMeters',
-              'cognitiveMonitoringEnabled',
               'status',
             ],
             // Geofence coordinates are GPS data - never copied into the log verbatim.
@@ -1031,13 +979,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         return row;
       });
 
-      // Best-effort, after the transaction above has already committed - see
-      // db/biometricOffboarding.ts's header comment for why this isn't inside it.
-      if (body.status === 'deactivated' && faceCollection) {
-        await cleanupBiometricEnrollmentsForSubject(db, faceCollection, 'dependant', dependantId);
-      }
-
-      res.status(200).json(await toOneDependantResponse(db, updated));
+      res.status(200).json(toDependantResponse(updated));
     } catch (err) {
       next(err);
     }

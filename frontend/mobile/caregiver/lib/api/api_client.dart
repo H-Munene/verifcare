@@ -122,7 +122,7 @@ class ApiClient {
       throw ApiException(
         Problem(
           type: 'about:blank',
-          title: 'Photo upload failed',
+          title: 'Upload failed',
           status: response.statusCode,
         ),
       );

@@ -33,9 +33,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Mzazi Care uses your location to confirm you're at the dependant's home when you check in and check out.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Mzazi Care takes a photo of you and the dependant to verify identity at check-in.</string>
+	<string>The camera is used to scan the check-in code on a family member's phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Mzazi Care records a short ambient audio log during the visit.</string>
+	<string>The microphone is used to make a short recording during a visit, which the dependant's family can listen to.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

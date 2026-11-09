@@ -75,7 +75,7 @@ void main() {
       VisitWithDetails(
         done,
         audit: VerificationAudit(
-          caregiverVerifiedAt: arrived,
+          arrivedAt: arrived,
           checkinAt: arrived.add(const Duration(minutes: 3)),
           checkoutAt: arrived.add(const Duration(hours: 2)),
         ),

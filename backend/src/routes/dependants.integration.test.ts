@@ -9,7 +9,6 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
-import type { BiometricFaceCollection } from '../db/biometricFaceCollection.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -34,7 +33,6 @@ interface DependantBody {
   geofenceRadiusMeters: number;
   status: string;
   registeredBy: string;
-  checkinPhotoStatus: 'ready' | 'awaiting_review' | 'missing';
 }
 interface DependantPageBody {
   items: DependantBody[];
@@ -80,10 +78,7 @@ function careTaskListBody(response: request.Response): CareTaskBody[] {
   return response.body as CareTaskBody[];
 }
 
-function buildTestApp(
-  cognitoAdmin: CognitoAdmin,
-  faceCollection?: BiometricFaceCollection,
-): Express {
+function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
   const app = express();
   app.use(express.json());
   app.locals.db = getDb();
@@ -98,7 +93,7 @@ function buildTestApp(
     next();
   };
 
-  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth, faceCollection }));
+  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -257,18 +252,18 @@ describe.skipIf(!hasTestDb)(
         });
       });
 
-      it("records the primary contact's photo and audio consent for a dependant they register, once they've given it on the consent screen", async () => {
+      it("records the primary contact's location and audio consent for a dependant they register, once they've given it on the consent screen", async () => {
         const db = getDb();
         const consenting = await createTestUser('fm-yes', 'family_member', '+254700000080');
         const onlyV1 = await createTestUser('fm-v1', 'family_member', '+254700000081');
-        // fm-yes ticked both boxes on the consent screen (terms v2); fm-v1 only accepted v1, which
+        // fm-yes ticked both boxes on the consent screen (terms v3); fm-v1 only accepted v1, which
         // never asked.
         await db.insert(schema.termsAcceptances).values([
           {
             userId: consenting.id,
             document: 'family_member',
-            version: '2',
-            biometricConsent: true,
+            version: '3',
+            locationConsent: true,
             audioConsent: true,
           },
           {
@@ -296,8 +291,8 @@ describe.skipIf(!hasTestDb)(
           .from(schema.consentRecords)
           .where(eq(schema.consentRecords.dependantId, dependantBody(registered).id));
         expect(consents.map((row) => row.consentType).sort()).toEqual([
-          'audio_cognitive_monitoring',
-          'biometric_verification',
+          'location_verification',
+          'visit_audio',
         ]);
         expect(consents.every((row) => row.grantedBy === consenting.id)).toBe(true);
 
@@ -800,49 +795,6 @@ describe.skipIf(!hasTestDb)(
     });
 
     describe('GET /dependants/{dependantId}', () => {
-      it('reports checkinPhotoStatus as missing, awaiting review, then ready, on single and list reads', async () => {
-        const supervisor = await createTestUser('sup-photo', 'supervisor', '+254700000044');
-        const dependant = await createTestDependant(supervisor.id);
-        const read = async () => {
-          const one = dependantBody(
-            await request(app)
-              .get(`/dependants/${dependant.id}`)
-              .set('x-test-auth', testAuthHeader('sup-photo', 'supervisor')),
-          );
-          const list = dependantPageBody(
-            await request(app)
-              .get('/dependants')
-              .set('x-test-auth', testAuthHeader('sup-photo', 'supervisor')),
-          );
-          const listed = list.items.find((item) => item.id === dependant.id);
-          expect(listed?.checkinPhotoStatus).toBe(one.checkinPhotoStatus);
-          return one.checkinPhotoStatus;
-        };
-        const enroll = (status: 'active' | 'flagged') =>
-          getDb()
-            .insert(schema.biometricEnrollments)
-            .values({
-              subjectType: 'dependant',
-              dependantId: dependant.id,
-              s3Key: `test/${dependant.id}/${status}.jpg`,
-              imageOrder: 1,
-              status,
-              ...(status === 'flagged' && {
-                matchedSubjectType: 'dependant' as const,
-                matchedSubjectId: dependant.id,
-                matchedSimilarity: 99,
-              }),
-              enrolledBy: supervisor.id,
-            });
-
-        expect(await read()).toBe('missing');
-        // Waiting for a supervisor's review - check-in can't use it yet.
-        await enroll('flagged');
-        expect(await read()).toBe('awaiting_review');
-        await enroll('active');
-        expect(await read()).toBe('ready');
-      });
-
       it('returns 404 for a nonexistent dependant', async () => {
         await createTestUser('sup-get-404', 'supervisor', '+254700000040');
         const response = await request(app)
@@ -964,46 +916,6 @@ describe.skipIf(!hasTestDb)(
         expect(dependantBody(response)).toMatchObject({
           primaryConditionSummary: 'Diabetic, requires daily insulin.',
         });
-      });
-
-      it('cleans up indexed biometric enrollments when deactivated (HEZ-85)', async () => {
-        const faceCollection: BiometricFaceCollection = {
-          checkDuplicate: vi.fn(),
-          indexFace: vi.fn(),
-          deleteFaces: vi.fn().mockResolvedValue(undefined),
-        };
-        const localApp = buildTestApp(cognitoAdmin, faceCollection);
-        await createTestUser('sup-offboard', 'supervisor', '+254700000059');
-        const created = await request(localApp)
-          .post('/dependants')
-          .set('x-test-auth', testAuthHeader('sup-offboard', 'supervisor'))
-          .send(createDependantPayload());
-        const dependantId = dependantBody(created).id;
-        const registeredBy = dependantBody(created).registeredBy;
-
-        const db = getDb();
-        await db.insert(schema.biometricEnrollments).values({
-          subjectType: 'dependant',
-          dependantId,
-          s3Key: `dependant/${dependantId}/1/photo.jpg`,
-          imageOrder: 1,
-          status: 'active',
-          rekognitionFaceId: 'face-id-1',
-          enrolledBy: registeredBy,
-        });
-
-        const response = await request(localApp)
-          .patch(`/dependants/${dependantId}`)
-          .set('x-test-auth', testAuthHeader('sup-offboard', 'supervisor'))
-          .send({ status: 'deactivated' });
-
-        expect(response.status).toBe(200);
-        expect(faceCollection.deleteFaces).toHaveBeenCalledWith(['face-id-1']);
-        const [row] = await db
-          .select()
-          .from(schema.biometricEnrollments)
-          .where(eq(schema.biometricEnrollments.dependantId, dependantId));
-        expect(row?.status).toBe('deleted');
       });
 
       it('lets the primary-contact family member move the location', async () => {

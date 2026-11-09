@@ -1,22 +1,18 @@
-// "Needs your attention": missed visits to acknowledge, photos flagged for review, and
-// dependants who can't be scheduled without a photo, one category at a time behind segmented
-// buttons, the list scrolling within whatever height its container gives it. Shared by the
+// "Needs your attention": missed visits to acknowledge and caregivers waiting at a home for a
+// supervisor to start their visit, one category at a time behind segmented buttons, the list scrolling within whatever height its container gives it. Shared by the
 // Overview's panel and the top bar's alerts panel (2026-09-27), so both show the same thing and
 // acknowledge the same way.
 
-import {
-  ArrowRight01Icon,
-  CalendarRemove02Icon,
-  CameraOff02Icon,
-  Clock01Icon,
-  UserIcon,
-  UserSearch01Icon,
-} from '@hugeicons/core-free-icons';
+import { CalendarRemove02Icon, Clock01Icon, Key01Icon, UserIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { DashboardOverview } from '../api/dashboard';
+import type {
+  CheckinOverrideReason,
+  DashboardOverview,
+  PendingCheckinOverride,
+} from '../api/dashboard';
 import { useApi } from '../api/useApi';
 import { Button } from '../design-system/Button';
 import { SegmentedControl, type Segment } from '../design-system/SegmentedControl';
@@ -26,11 +22,85 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-type AttentionCategory = 'missed' | 'photos' | 'noPhoto';
+type AttentionCategory = 'missed' | 'overrides';
+
+const OVERRIDE_REASON_LABELS: Record<CheckinOverrideReason, string> = {
+  no_family_member_present: 'No family member at the home',
+  family_phone_unavailable: "Family member's phone unavailable",
+  network_problem: 'Network problem',
+  other: 'Other',
+};
+
+// A caregiver is at the home with no family member to show a code. A note is required either way,
+// so every override records why it was allowed or refused.
+function OverrideItem({
+  override,
+  due,
+}: {
+  override: PendingCheckinOverride;
+  due: (iso: string) => string;
+}) {
+  const { dashboard } = useApi();
+  const queryClient = useQueryClient();
+  const [note, setNote] = useState('');
+  const decide = useMutation({
+    mutationFn: (decision: 'approve' | 'deny') =>
+      dashboard.decideCheckinOverride(override.id, decision, note.trim()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard-overview'] }),
+  });
+  const canDecide = note.trim() !== '' && !decide.isPending;
+  const noteId = `override-note-${override.id}`;
+
+  return (
+    <li className="attention__item attention__override">
+      <div className="attention__item-body">
+        <p className="attention__title">
+          {override.caregiverName} is at {override.dependantName}&rsquo;s home
+        </p>
+        <p className="attention__meta attention__facts">
+          <span>{OVERRIDE_REASON_LABELS[override.reason]}</span>
+          <span>
+            <HugeiconsIcon icon={Clock01Icon} size={13} strokeWidth={1.8} aria-hidden />
+            Asked {due(override.requestedAt)}
+          </span>
+        </p>
+        {override.note ? <p className="attention__meta">{override.note}</p> : null}
+        <label className="attention__note-label" htmlFor={noteId}>
+          Reason for your decision
+        </label>
+        <input
+          id={noteId}
+          className="ds-input"
+          value={note}
+          maxLength={1000}
+          onChange={(event) => setNote(event.target.value)}
+        />
+        <div className="attention__override-actions">
+          <Button
+            type="button"
+            variant="primary"
+            disabled={!canDecide}
+            onClick={() => decide.mutate('approve')}
+          >
+            Start visit
+          </Button>
+          <Button type="button" disabled={!canDecide} onClick={() => decide.mutate('deny')}>
+            Decline
+          </Button>
+          <Link to={`/visits?visit=${override.visitScheduleId}`}>Open visit</Link>
+        </div>
+        {decide.isError ? (
+          <p className="attention__error" role="alert">
+            That couldn&rsquo;t be saved. The visit may have moved on. Try again.
+          </p>
+        ) : null}
+      </div>
+    </li>
+  );
+}
 
 // "Needs your attention", one category at a time behind segmented buttons (user request,
-// 2026-09-26): missed visits to acknowledge, photos flagged for review, and dependants who can't
-// be scheduled without a photo. It opens on the first category with anything in it.
+// 2026-09-26). It opens on the first category with anything in it.
 export function AttentionList({
   attention,
   timeZone,
@@ -50,11 +120,10 @@ export function AttentionList({
   const acknowledging = acknowledge.isPending ? acknowledge.variables : undefined;
   const acknowledgeFailed = acknowledge.isError;
   const onAcknowledge = (notificationId: string) => acknowledge.mutate(notificationId);
-  const { missedVisitAlerts, flaggedPhotos, dependantsWithoutPhoto } = attention;
+  const { missedVisitAlerts, pendingCheckinOverrides } = attention;
   // Every entry, in a list that scrolls within the panel (user request, 2026-09-26). The server
   // caps each list at 100, so "N more" only appears past that.
   const alerts = missedVisitAlerts.items;
-  const withoutPhoto = dependantsWithoutPhoto.items;
   // Each category's icon is on its segment, not repeated on every entry (user request).
   const segments: Segment[] = [
     {
@@ -65,18 +134,11 @@ export function AttentionList({
       iconColor: 'var(--color-state-no-checkin-icon)',
     },
     {
-      id: 'photos',
-      label: 'Photos',
-      count: flaggedPhotos,
-      icon: UserSearch01Icon,
+      id: 'overrides',
+      label: 'Check-ins',
+      count: pendingCheckinOverrides.total,
+      icon: Key01Icon,
       iconColor: 'var(--color-state-awaiting-icon)',
-    },
-    {
-      id: 'noPhoto',
-      label: 'No photo',
-      count: dependantsWithoutPhoto.total,
-      icon: CameraOff02Icon,
-      iconColor: 'var(--color-state-upcoming-icon)',
     },
   ];
   const [chosen, setChosen] = useState<AttentionCategory | null>(null);
@@ -168,63 +230,15 @@ export function AttentionList({
             )
           ) : null}
 
-          {category === 'photos' ? (
-            flaggedPhotos === 0 ? (
-              <p className="attention__empty">No photos waiting for review.</p>
+          {category === 'overrides' ? (
+            pendingCheckinOverrides.total === 0 ? (
+              <p className="attention__empty">No caregivers waiting to start a visit.</p>
             ) : (
-              <div className="attention__item">
-                <div className="attention__item-body">
-                  <p className="attention__title">
-                    {plural(flaggedPhotos, 'photo looks', 'photos look')} like someone already
-                    registered
-                  </p>
-                  <p className="attention__meta">
-                    Check-in can't use {flaggedPhotos === 1 ? 'it' : 'them'} until you review{' '}
-                    {flaggedPhotos === 1 ? 'it' : 'them'}.
-                  </p>
-                  <div className="attention__actions">
-                    <Link to="/reviews">Review photos</Link>
-                  </div>
-                </div>
-              </div>
-            )
-          ) : null}
-
-          {category === 'noPhoto' ? (
-            dependantsWithoutPhoto.total === 0 ? (
-              <p className="attention__empty">Every active dependant has a photo.</p>
-            ) : (
-              <>
-                <p className="attention__meta attention__intro">
-                  Visits can't be scheduled for these dependants until a photo is added.
-                </p>
-                <ul className="attention__list attention__rows">
-                  {withoutPhoto.map((d) => (
-                    <li key={d.id}>
-                      <Link to={`/dependants/${d.id}`} className="attention__row">
-                        {/* The dependant's first initial in a circle, beside their name (user
-                            request), so the list reads as people at a glance. */}
-                        <span className="attention__avatar" aria-hidden>
-                          {d.fullName.trim().charAt(0).toUpperCase() || '?'}
-                        </span>
-                        <span className="attention__title attention__name">{d.fullName}</span>
-                        <HugeiconsIcon
-                          icon={ArrowRight01Icon}
-                          size={16}
-                          strokeWidth={1.8}
-                          className="attention__chevron"
-                          aria-hidden
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                  {dependantsWithoutPhoto.total > withoutPhoto.length ? (
-                    <li className="attention__more">
-                      And {dependantsWithoutPhoto.total - withoutPhoto.length} more.
-                    </li>
-                  ) : null}
-                </ul>
-              </>
+              <ul className="attention__list">
+                {pendingCheckinOverrides.items.map((override) => (
+                  <OverrideItem key={override.id} override={override} due={due} />
+                ))}
+              </ul>
             )
           ) : null}
         </div>

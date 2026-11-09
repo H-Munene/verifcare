@@ -40,8 +40,8 @@ every table.
 Runs after the table migration, since every statement here depends on tables (and `0000`'s
 functions) already existing.
 
-- **Five `trg_*_updated_at` triggers** (`users`, `caregivers`, `dependants`,
-  `biometric_enrollments`, `visit_schedules`): `BEFORE UPDATE ... EXECUTE FUNCTION
+- **Five `trg_*_updated_at` triggers** (`users`, `caregivers`, `dependants`, `visit_schedules`, and
+  `biometric_enrollments`, which `0017` removes along with its table): `BEFORE UPDATE ... EXECUTE FUNCTION
   set_updated_at()`. This is a real DB-level guarantee, not an application-level one - it fires
   for every writer (this backend, `psql`, a future second service), unlike Drizzle's
   `.$onUpdate()` column option, which only fires for writes that go through that specific Drizzle

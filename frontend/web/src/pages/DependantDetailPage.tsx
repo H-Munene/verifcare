@@ -3,7 +3,6 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
-import { BiometricEnrollmentSection } from '../components/BiometricEnrollmentSection';
 import { FamilyMembersTable } from '../components/FamilyMembersTable';
 import {
   FamilyMemberResolver,
@@ -22,20 +21,16 @@ import { DetailSkeleton } from '../design-system/Skeleton';
 import { BirthdayCakeIcon, Location01Icon, UserIcon } from '@hugeicons/core-free-icons';
 import { MetaList } from '../design-system/MetaList';
 
-type DetailTab = 'family' | 'enrollment' | 'visits' | 'cognitive';
+type DetailTab = 'family' | 'visits';
 
 const TABS = [
   { id: 'family' as const, label: 'Family' },
-  { id: 'enrollment' as const, label: 'Enrollment' },
   { id: 'visits' as const, label: 'Visit History' },
-  { id: 'cognitive' as const, label: 'Cognitive Trend' },
 ];
 
 // Wireframe page 6 (Dependant Detail), restructured into tabs (2026-09-23, user request, matching
 // temp_images/tabs_ui.PNG) - the identity header (name/status/meta/actions) stays outside the tabs
-// since it applies to the whole page, not to any one section. Cognitive Trend still renders as an
-// honest empty state - the audio/cognitive-risk pipeline doesn't exist yet, so there is genuinely
-// nothing to show there; Visit History is real now (VisitHistoryList, shared with
+// since it applies to the whole page, not to any one section. Visit History is real now (VisitHistoryList, shared with
 // CaregiverDetailPage's identical tab), since HEZ-32/HEZ-42's visit-schedule/verification-audit
 // endpoints exist and are already consumed by VisitsPage/VisitDetailPage.
 /** A calendar date (YYYY-MM-DD) as e.g. "22 Sep 2026"; noon UTC keeps the day in every zone. */
@@ -160,21 +155,7 @@ export function DependantDetailPage() {
           </section>
         ) : null}
 
-        {activeTab === 'enrollment' ? (
-          <BiometricEnrollmentSection
-            subjectType="dependant"
-            subjectId={dependant.id}
-            subjectName={dependant.fullName}
-          />
-        ) : null}
-
         {activeTab === 'visits' ? <VisitHistoryList dependantId={dependant.id} /> : null}
-
-        {activeTab === 'cognitive' ? (
-          <p className="dependant-detail__empty">
-            No cognitive-risk data yet - the acoustic model service has not been built yet.
-          </p>
-        ) : null}
       </div>
 
       {addingMember ? (

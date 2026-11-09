@@ -6,6 +6,7 @@ import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 import '../location.dart';
 import '../visit_notifications.dart';
+import '../widgets/visit_audio_recorder.dart';
 
 // visit_task_completions.reason's enum (backend/src/db/schema.ts taskSkipReasonEnum).
 const _skipReasons = {
@@ -15,9 +16,18 @@ const _skipReasons = {
   'other': 'Other',
 };
 
+// verification_events.audio_skip_reason (backend/src/db/schema.ts).
+const _audioSkipReasons = {
+  'dependant_declined': 'Dependant preferred not to be recorded',
+  'dependant_unwell_or_asleep': 'Dependant unwell or asleep',
+  'technical_problem': 'Technical problem',
+  'other': 'Other',
+};
+
 /// Review before checkout: every unticked task needs a reason before the button enables (for
 /// optional tasks too, per the user's own spec - stricter than the server, which only gates on
-/// required ones). The audio log shows as present/absent but never blocks checkout.
+/// required ones). A visit whose family consented to audio needs a recording, or a reason for not
+/// having one: a dependant must never be made to speak.
 ///
 /// Checkout sends the phone's current location, and the server refuses it outside the dependant's
 /// home radius; that refusal (or any other failure) stays on screen above the button rather than
@@ -29,6 +39,10 @@ class CheckoutScreen extends StatefulWidget {
   final List<VisitTask> tasks;
   final Set<String> checkedTaskIds;
   final bool hasRecording;
+  final bool audioRequired;
+
+  /// The server already holds this visit's recording, so there's nothing more to upload.
+  final bool alreadyUploaded;
 
   const CheckoutScreen({
     super.key,
@@ -37,6 +51,8 @@ class CheckoutScreen extends StatefulWidget {
     required this.tasks,
     required this.checkedTaskIds,
     required this.hasRecording,
+    required this.audioRequired,
+    this.alreadyUploaded = false,
   });
 
   @override
@@ -46,6 +62,9 @@ class CheckoutScreen extends StatefulWidget {
 class _CheckoutScreenState extends State<CheckoutScreen> {
   final _reasons = <String, String>{};
   final _notes = <String, TextEditingController>{};
+  final _audioNote = TextEditingController();
+  String? _audioSkipReason;
+  bool _uploadFailed = false;
   bool _submitting = false;
   String? _error;
 
@@ -53,8 +72,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       .where((t) => !widget.checkedTaskIds.contains(t.careTaskId))
       .toList();
 
+  bool get _hasAudio => widget.hasRecording || widget.alreadyUploaded;
+
+  // Also shown after a failed upload, so a dead connection can't trap someone at the door.
+  bool get _showAudioReason =>
+      widget.audioRequired && (!_hasAudio || _uploadFailed);
+
+  bool get _audioAccountedFor {
+    if (!widget.audioRequired || (_hasAudio && _audioSkipReason == null)) {
+      return true;
+    }
+    return _audioSkipReason != null &&
+        (_audioSkipReason != 'other' || _audioNote.text.trim().isNotEmpty);
+  }
+
   bool get _canSubmit =>
       !_submitting &&
+      _audioAccountedFor &&
       _unchecked.every((t) => _reasons.containsKey(t.careTaskId));
 
   @override
@@ -62,6 +96,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     for (final controller in _notes.values) {
       controller.dispose();
     }
+    _audioNote.dispose();
     super.dispose();
   }
 
@@ -103,11 +138,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           );
         }),
       );
+      // A reason chosen after a failed upload means going without the recording.
+      final skip = widget.audioRequired ? _audioSkipReason : null;
+      if (skip == null && widget.audioRequired && widget.hasRecording) {
+        try {
+          await uploadVisitAudio(widget.visitSchedulesApi, widget.visit.id);
+        } catch (_) {
+          if (mounted) setState(() => _uploadFailed = true);
+          return _fail(
+            "Couldn't upload the recording. Try again, or choose a reason below to check out "
+            'without it.',
+          );
+        }
+      }
+      final note = _audioNote.text.trim();
       await widget.visitSchedulesApi.checkout(
         widget.visit.id,
         gpsLat: position.latitude,
         gpsLng: position.longitude,
+        audioSkipReason: skip,
+        audioSkipNote: skip == null || note.isEmpty ? null : note,
       );
+      await deleteVisitAudio(widget.visit.id);
       await VisitNotifications.showCheckedOut(widget.visit);
       if (!mounted) return;
       Navigator.of(context).popUntil((route) => route.isFirst);
@@ -155,16 +207,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   ),
                 ),
             ]),
-            const SizedBox(height: 16),
-            _card([
-              _statusRow(
-                done: widget.hasRecording,
-                title: widget.hasRecording
-                    ? 'Audio log recorded'
-                    : 'No audio log recorded',
-                subtitle: 'Kept on this phone for now - not uploaded yet',
-              ),
-            ]),
+            if (widget.audioRequired) ...[
+              const SizedBox(height: 16),
+              _card([
+                _statusRow(
+                  done: _hasAudio,
+                  title: _hasAudio ? 'Recording ready' : 'No recording',
+                  subtitle: _hasAudio
+                      ? "Saved at check-out for the dependant's family to listen to"
+                      : 'Go back to record, or give a reason below',
+                ),
+                if (_showAudioReason) _buildAudioReason(),
+              ]),
+            ],
           ],
         ),
       ),
@@ -228,6 +283,42 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
     );
   }
+
+  Widget _buildAudioReason() => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    child: Column(
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: _audioSkipReason,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Reason for no recording',
+            isDense: true,
+          ),
+          items: [
+            for (final entry in _audioSkipReasons.entries)
+              DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+          ],
+          onChanged: _submitting
+              ? null
+              : (value) => setState(() => _audioSkipReason = value),
+        ),
+        if (_audioSkipReason == 'other') ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: _audioNote,
+            enabled: !_submitting,
+            maxLength: 500,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              labelText: 'Details',
+              isDense: true,
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
 
   Widget _card(List<Widget> children) => Container(
     decoration: BoxDecoration(

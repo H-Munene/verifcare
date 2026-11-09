@@ -10,8 +10,8 @@
 // member finishes self-registration before reaching the app's home, where the screen is shown),
 // since an acceptance is recorded against that row.
 //
-// Consent checkboxes (2026-09-27, terms v2): accepting also means ticking two required boxes -
-// photos used to verify identity at visits, and audio recorded during visits - and this endpoint
+// Consent checkboxes (terms v3, 2026-11-09): accepting also means ticking two required boxes -
+// location checked at visits, and audio recorded during visits - and this endpoint
 // refuses an acceptance without both, so no app (or stale build) can record agreement to terms
 // whose consents weren't given. Each acceptance then creates the matching consent_records rows,
 // which is what the rest of the system checks (e.g. scheduling): for a caregiver, their own
@@ -44,8 +44,8 @@ const acceptTermsRequestSchema = z.object({
   version: z.string().min(1),
   // The consent screen's two required checkboxes - literal true, so a missing or false value is a
   // 400 rather than an acceptance without consent.
-  biometricConsent: z.literal(true, {
-    error: 'Consent to photo identity verification is required to accept the terms.',
+  locationConsent: z.literal(true, {
+    error: 'Consent to location checks at visits is required to accept the terms.',
   }),
   audioConsent: z.literal(true, {
     error: 'Consent to audio recording during visits is required to accept the terms.',
@@ -214,7 +214,7 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             userId,
             document: terms.document,
             version: terms.version,
-            biometricConsent: body.biometricConsent,
+            locationConsent: body.locationConsent,
             audioConsent: body.audioConsent,
           })
           .onConflictDoNothing()
@@ -231,7 +231,7 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             metadata: {
               document: terms.document,
               version: terms.version,
-              consentTypesGranted: ['biometric_verification', 'audio_cognitive_monitoring'],
+              consentTypesGranted: ['location_verification', 'visit_audio'],
             },
           });
         }

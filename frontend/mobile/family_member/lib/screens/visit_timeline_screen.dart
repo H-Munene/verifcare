@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
+import '../widgets/visit_recording_card.dart';
 import '../widgets/visit_widgets.dart';
 
-/// A visit's four milestones - the same steps, from the same GET .../verification data, as the
+/// A visit's milestones - the same steps, from the same GET .../verification data, as the
 /// admin web app's VisitDetailPage and the caregiver app's timeline - followed by what the
 /// caregiver recorded for each care activity (GET .../task-outcomes).
 /// On a missed visit every step that never happened is drawn with an X; on one still in progress
@@ -136,9 +137,13 @@ class _VisitTimelineScreenState extends State<VisitTimelineScreen> {
       ];
     }
     final steps = [
-      ('Checked in', audit.checkinAt),
-      ('Caregiver photo verified', audit.caregiverVerifiedAt),
-      ('Dependant photo verified', audit.dependantVerifiedAt),
+      ('Arrived at the home', audit.arrivedAt),
+      (
+        audit.checkinMethod == 'supervisor_override'
+            ? 'Started by a supervisor'
+            : 'Confirmed with the check-in code',
+        audit.checkinAt,
+      ),
       ('Checked out', audit.checkoutAt),
     ];
     return [
@@ -157,6 +162,15 @@ class _VisitTimelineScreenState extends State<VisitTimelineScreen> {
           ],
         ),
       ),
+      if (audit.audioRecordedAt != null || audit.audioSkipReason != null) ...[
+        const SizedBox(height: 8),
+        const SectionTitle('Visit recording'),
+        VisitRecordingCard(
+          visitScheduleId: widget.visit.id,
+          audit: audit,
+          visitSchedulesApi: widget.visitSchedulesApi,
+        ),
+      ],
       // Nothing is recorded until the caregiver starts ticking activities off, so a missed or
       // just-started visit shows no section rather than an empty one.
       if (outcomes.isNotEmpty) ...[

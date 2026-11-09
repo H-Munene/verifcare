@@ -1,4 +1,4 @@
-// Server-side sorting and the dependant photo filter (2026-09-26, the supervisor console's
+// Server-side sorting (2026-09-26, the supervisor console's
 // sortable, filterable tables), against a real local Postgres. The point is that paging a sorted
 // list visits every row exactly once in order - including ties and a nullable column - and that a
 // cursor made for one sort is refused on another.
@@ -167,47 +167,6 @@ describe.skipIf(!hasTestDb)('sorted and filtered lists (real Postgres)', () => {
         .get(`/dependants?sort=dob&limit=2&cursor=${nextCursor}`)
         .set('x-test-auth', supervisor);
       expect(response.status).toBe(400);
-    });
-
-    it('filters by photo status', async () => {
-      const [ready, flagged, none] = await addDependants([
-        ['Has Photo', '1940-01-01'],
-        ['Flagged Photo', '1941-01-01'],
-        ['No Photo', '1942-01-01'],
-      ]);
-      const enroll = (dependantId: string, status: string, key: string) =>
-        getDb()
-          .insert(schema.biometricEnrollments)
-          .values({
-            subjectType: 'dependant',
-            dependantId,
-            s3Key: `test/${key}.jpg`,
-            imageOrder: 1,
-            status,
-            ...(status === 'flagged' && {
-              matchedSubjectType: 'dependant' as const,
-              matchedSubjectId: dependantId,
-              matchedSimilarity: 99,
-            }),
-            enrolledBy: supervisorId,
-          });
-      await enroll(ready!.id, 'active', 'a');
-      await enroll(flagged!.id, 'flagged', 'b');
-      // A deleted photo doesn't count.
-      await enroll(none!.id, 'deleted', 'c');
-
-      for (const [status, expected] of [
-        ['ready', 'Has Photo'],
-        ['awaiting_review', 'Flagged Photo'],
-        ['missing', 'No Photo'],
-      ] as const) {
-        const rows = await allPages<{ fullName: string; checkinPhotoStatus: string }>(
-          `/dependants?photo=${status}`,
-        );
-        expect(rows.map((d) => d.fullName)).toEqual([expected]);
-        // The filter and the status each dependant reports agree.
-        expect(rows[0]?.checkinPhotoStatus).toBe(status);
-      }
     });
   });
 

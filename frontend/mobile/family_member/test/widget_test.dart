@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:family_member/api/api_client.dart';
-import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/family_link_requests_api.dart';
 import 'package:family_member/api/terms_api.dart';
@@ -29,7 +28,6 @@ void main() {
         usersApi: UsersApi(apiClient),
         dependantsApi: DependantsApi(apiClient),
         visitSchedulesApi: VisitSchedulesApi(apiClient),
-        enrollmentsApi: BiometricEnrollmentsApi(apiClient),
         termsApi: TermsApi(apiClient),
         linkRequestsApi: FamilyLinkRequestsApi(apiClient),
       ),

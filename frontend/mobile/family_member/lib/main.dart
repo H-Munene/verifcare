@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'api/api_client.dart';
-import 'api/biometric_enrollments_api.dart';
 import 'api/dependants_api.dart';
 import 'api/family_link_requests_api.dart';
 import 'api/terms_api.dart';
@@ -27,7 +26,6 @@ void main() {
       usersApi: UsersApi(apiClient),
       dependantsApi: DependantsApi(apiClient),
       visitSchedulesApi: VisitSchedulesApi(apiClient),
-      enrollmentsApi: BiometricEnrollmentsApi(apiClient),
       termsApi: TermsApi(apiClient),
       linkRequestsApi: FamilyLinkRequestsApi(apiClient),
     ),
@@ -39,7 +37,6 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   final UsersApi usersApi;
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
-  final BiometricEnrollmentsApi enrollmentsApi;
   final TermsApi termsApi;
   final FamilyLinkRequestsApi linkRequestsApi;
 
@@ -49,7 +46,6 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
     required this.usersApi,
     required this.dependantsApi,
     required this.visitSchedulesApi,
-    required this.enrollmentsApi,
     required this.termsApi,
     required this.linkRequestsApi,
   });
@@ -64,7 +60,6 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
         usersApi: usersApi,
         dependantsApi: dependantsApi,
         visitSchedulesApi: visitSchedulesApi,
-        enrollmentsApi: enrollmentsApi,
         termsApi: termsApi,
         linkRequestsApi: linkRequestsApi,
       ),
@@ -79,7 +74,6 @@ class _RootScreen extends StatefulWidget {
   final UsersApi usersApi;
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
-  final BiometricEnrollmentsApi enrollmentsApi;
   final TermsApi termsApi;
   final FamilyLinkRequestsApi linkRequestsApi;
 
@@ -88,7 +82,6 @@ class _RootScreen extends StatefulWidget {
     required this.usersApi,
     required this.dependantsApi,
     required this.visitSchedulesApi,
-    required this.enrollmentsApi,
     required this.termsApi,
     required this.linkRequestsApi,
   });
@@ -145,7 +138,6 @@ class _RootScreenState extends State<_RootScreen> {
             authService: widget.authService,
             dependantsApi: widget.dependantsApi,
             visitSchedulesApi: widget.visitSchedulesApi,
-            enrollmentsApi: widget.enrollmentsApi,
             usersApi: widget.usersApi,
             linkRequestsApi: widget.linkRequestsApi,
             identity: identity,
@@ -168,7 +160,6 @@ class _RootScreenState extends State<_RootScreen> {
                 MaterialPageRoute(
                   builder: (_) => DependantWizardScreen.register(
                     dependantsApi: widget.dependantsApi,
-                    enrollmentsApi: widget.enrollmentsApi,
                     usersApi: widget.usersApi,
                     identity: identity,
                     onDone: () => _goToHome(identity),
@@ -218,7 +209,6 @@ class _RootScreenState extends State<_RootScreen> {
           authService: widget.authService,
           dependantsApi: widget.dependantsApi,
           visitSchedulesApi: widget.visitSchedulesApi,
-          enrollmentsApi: widget.enrollmentsApi,
           usersApi: widget.usersApi,
           linkRequestsApi: widget.linkRequestsApi,
           identity: identity,

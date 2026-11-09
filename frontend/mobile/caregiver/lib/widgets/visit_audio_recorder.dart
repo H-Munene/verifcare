@@ -8,15 +8,17 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
-const maxRecordingDuration = Duration(minutes: 5);
-const _minRecordingDuration = Duration(seconds: 1);
+const maxRecordingDuration = Duration(seconds: 30);
+// Long enough that a stray tap can't count as the visit's recording (the server enforces it too).
+const _minRecordingDuration = Duration(seconds: 5);
 const _barCount = 36;
 
 /// Where a visit's audio log lives. Kept in app-private storage (other apps can't read it) and
-/// keyed by visit, so the recording survives the app being closed mid-visit. Nothing uploads it
-/// yet - the acoustic-model upload is later work - so it deliberately outlives checkout.
+/// keyed by visit, so the recording survives the app being closed mid-visit. It stays here until
+/// the visit has been checked out, so a failed upload or a refused check-out can simply be retried.
 Future<File> visitAudioFile(String visitScheduleId) async {
   final dir = await getApplicationDocumentsDirectory();
   return File('${dir.path}/visit_audio/$visitScheduleId.m4a');
@@ -25,11 +27,38 @@ Future<File> visitAudioFile(String visitScheduleId) async {
 // The recorded loudness levels, so the playback waveform still draws after an app restart.
 File _levelsFile(File audio) => File(audio.path.replaceFirst('.m4a', '.json'));
 
+// The recording's length, which the upload has to state and the file doesn't readily give up.
+File _secondsFile(File audio) => File(audio.path.replaceFirst('.m4a', '.seconds'));
+
+/// Uploads the recording saved on this phone for the visit.
+Future<void> uploadVisitAudio(
+  VisitSchedulesApi api,
+  String visitScheduleId,
+) async {
+  final file = await visitAudioFile(visitScheduleId);
+  final seconds = _secondsFile(file);
+  await api.uploadAudio(
+    visitScheduleId,
+    bytes: await file.readAsBytes(),
+    durationSeconds: await seconds.exists()
+        ? int.parse(await seconds.readAsString())
+        : maxRecordingDuration.inSeconds,
+  );
+}
+
+/// Removes the visit's recording from this phone, once it is no longer needed here.
+Future<void> deleteVisitAudio(String visitScheduleId) async {
+  final file = await visitAudioFile(visitScheduleId);
+  for (final path in [file, _levelsFile(file), _secondsFile(file)]) {
+    if (await path.exists()) await path.delete();
+  }
+}
+
 enum _Mode { loading, idle, recording, recorded }
 
 /// Hold-to-record audio log with a live waveform, then playback / re-record (the user's
-/// temp_images/audio1.png and audio2.png mockups). Optional for checkout (user decision
-/// 2026-09-24); capped at [maxRecordingDuration].
+/// temp_images/audio1.png and audio2.png mockups), capped at [maxRecordingDuration]. The family
+/// can listen to it, and check-out asks for a reason if there isn't one.
 class VisitAudioRecorder extends StatefulWidget {
   final String visitScheduleId;
   final ValueChanged<bool> onRecordingChanged;
@@ -150,23 +179,27 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
     await _amplitudeSubscription?.cancel();
     _mode = _Mode.loading;
     await _recorder.stop();
+    _elapsed = DateTime.now().difference(_startedAt!);
 
     if (_elapsed < _minRecordingDuration) {
       await _deleteFiles();
       _setMode(_Mode.idle);
       if (mounted) {
-        showSnack(context, 'Press and hold to record.', error: false);
+        showSnack(context, 'Hold for at least 5 seconds.', error: false);
       }
       return;
     }
     await _levelsFile(_file).writeAsString(jsonEncode(_levels));
+    await _secondsFile(
+      _file,
+    ).writeAsString(min(_elapsed.inSeconds, maxRecordingDuration.inSeconds).toString());
     await _player.setSourceDeviceFile(_file.path);
     _position = Duration.zero;
     _setMode(_Mode.recorded);
   }
 
   Future<void> _deleteFiles() async {
-    for (final file in [_file, _levelsFile(_file)]) {
+    for (final file in [_file, _levelsFile(_file), _secondsFile(_file)]) {
       if (await file.exists()) await file.delete();
     }
   }
@@ -241,7 +274,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
               const SizedBox(width: 8),
             ],
             Text(
-              recording ? 'RECORDING AMBIENT AUDIO' : 'AUDIO LOG',
+              recording ? 'RECORDING' : 'VISIT RECORDING',
               style: const TextStyle(
                 fontSize: 12,
                 letterSpacing: 0.6,
@@ -270,8 +303,8 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
         const SizedBox(height: 12),
         Text(
           recording
-              ? 'Recording will auto-stop at 5 minutes.'
-              : 'Optional. Press and hold to record - up to 5 minutes.',
+              ? 'Recording stops by itself at 30 seconds.'
+              : "Press and hold to record up to 30 seconds. The dependant's family can listen to this.",
           textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 12, color: inkTertiary),
         ),
@@ -319,7 +352,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'AUDIO LOG',
+          'VISIT RECORDING',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 12,

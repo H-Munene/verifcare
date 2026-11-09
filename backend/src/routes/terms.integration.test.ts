@@ -38,7 +38,7 @@ function termsBody(response: request.Response): TermsBody {
 
 // What the consent screen sends once both checkboxes are ticked.
 function acceptBody(version: string, overrides: Record<string, unknown> = {}) {
-  return { version, biometricConsent: true, audioConsent: true, ...overrides };
+  return { version, locationConsent: true, audioConsent: true, ...overrides };
 }
 
 function buildTestApp(): Express {
@@ -256,9 +256,9 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
   it('refuses an acceptance unless both consents are given (400)', async () => {
     await createTestCaregiver('cg-1', '+254700000001');
     for (const overrides of [
-      { biometricConsent: false },
+      { locationConsent: false },
       { audioConsent: false },
-      { biometricConsent: undefined },
+      { locationConsent: undefined },
       { audioConsent: 'yes' },
     ]) {
       const response = await request(app)
@@ -271,7 +271,7 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(await consentRows()).toHaveLength(0);
   });
 
-  it("records the caregiver's own photo and audio consent with the acceptance", async () => {
+  it("records the caregiver's own location and audio consent with the acceptance", async () => {
     const caregiver = await createTestCaregiver('cg-1', '+254700000001');
     const response = await request(app)
       .post('/terms/current/accept')
@@ -280,12 +280,12 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(response.status).toBe(200);
 
     const [acceptance] = await getDb().select().from(schema.termsAcceptances);
-    expect(acceptance).toMatchObject({ biometricConsent: true, audioConsent: true });
+    expect(acceptance).toMatchObject({ locationConsent: true, audioConsent: true });
     const rows = await consentRows();
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.consentType).sort()).toEqual([
-      'audio_cognitive_monitoring',
-      'biometric_verification',
+      'location_verification',
+      'visit_audio',
     ]);
     for (const row of rows) {
       expect(row).toMatchObject({
@@ -325,7 +325,7 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
   it('never duplicates an active consent, but grants again after one was revoked', async () => {
     const caregiver = await createTestCaregiver('cg-1', '+254700000001');
     const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000009');
-    // Already consented to photo verification (e.g. recorded by a supervisor); audio was granted
+    // Already consented to location checks (e.g. recorded by a supervisor); audio was granted
     // once and later withdrawn.
     await getDb()
       .insert(schema.consentRecords)
@@ -333,13 +333,13 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
         {
           subjectType: 'caregiver',
           caregiverId: caregiver.id,
-          consentType: 'biometric_verification',
+          consentType: 'location_verification',
           grantedBy: supervisor.id,
         },
         {
           subjectType: 'caregiver',
           caregiverId: caregiver.id,
-          consentType: 'audio_cognitive_monitoring',
+          consentType: 'visit_audio',
           grantedBy: supervisor.id,
           revokedAt: new Date('2026-09-20T08:00:00Z'),
         },
@@ -355,8 +355,8 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
 
     const active = (await consentRows()).filter((row) => row.revokedAt === null);
     expect(active.map((row) => [row.consentType, row.grantedBy]).sort()).toEqual([
-      ['audio_cognitive_monitoring', caregiver.id],
-      ['biometric_verification', supervisor.id],
+      ['location_verification', supervisor.id],
+      ['visit_audio', caregiver.id],
     ]);
   });
   it('asks someone who accepted v1 again, since v2 adds the consents', async () => {

@@ -23,7 +23,10 @@ export interface VisitSchedule {
   updatedAt: string;
 }
 
-export type VerificationAttemptType = 'geofence' | 'caregiver_liveness' | 'dependant_liveness';
+export type VerificationAttemptType = 'geofence' | 'family_location' | 'qr_scan';
+
+export type AudioSkipReason =
+  'dependant_declined' | 'dependant_unwell_or_asleep' | 'technical_problem' | 'other';
 
 export interface VerificationEvent {
   visitScheduleId: string;
@@ -32,10 +35,14 @@ export interface VerificationEvent {
   checkinGpsLat: number | null;
   checkinGpsLng: number | null;
   distanceFromGeofenceMeters: number | null;
-  caregiverMatchConfidence: number | null;
-  dependantMatchConfidence: number | null;
-  caregiverLivenessPassed: boolean | null;
-  dependantLivenessPassed: boolean | null;
+  checkinMethod: 'qr' | 'supervisor_override' | null;
+  qrFamilyMemberName: string | null;
+  familyDistanceFromGeofenceMeters: number | null;
+  // Whether a recording exists or why not. Supervisors can't listen: only the family can.
+  audioRecordedAt: string | null;
+  audioDurationSeconds: number | null;
+  audioSkipReason: AudioSkipReason | null;
+  audioSkipNote: string | null;
 }
 
 export interface VerificationAttempt {
