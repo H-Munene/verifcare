@@ -7,7 +7,13 @@ import type { ApiClient } from './client';
 import type { ExceptionKind, VisitResolution } from './compliance';
 
 export type VisitStatus =
-  'scheduled' | 'in_progress' | 'completed' | 'missed' | 'cancelled' | 'investigated';
+  | 'scheduled'
+  | 'in_progress'
+  | 'completed'
+  | 'missed'
+  | 'cancelled'
+  | 'investigated'
+  | 'reassigned';
 
 export interface VisitSchedule {
   id: string;
@@ -18,6 +24,8 @@ export interface VisitSchedule {
   scheduledStart: string;
   scheduledEnd: string;
   status: VisitStatus;
+  routeSequence?: number | null;
+  recoveredFromVisitId?: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

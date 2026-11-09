@@ -21,6 +21,9 @@ export interface Caregiver {
   occupation: CaregiverOccupation | null;
   employeeNumber: string | null;
   hireDate: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+  baseAreaText: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -45,6 +48,9 @@ export interface CreateCaregiverRequest {
   dob: string;
   gender: CaregiverGender;
   occupation: CaregiverOccupation;
+  baseLat?: number;
+  baseLng?: number;
+  baseAreaText?: string;
 }
 
 export interface UpdateCaregiverRequest {
@@ -59,6 +65,9 @@ export interface UpdateCaregiverRequest {
   employeeNumber?: string;
   hireDate?: string;
   active?: boolean;
+  baseLat?: number;
+  baseLng?: number;
+  baseAreaText?: string;
 }
 
 export interface ListCaregiversParams {

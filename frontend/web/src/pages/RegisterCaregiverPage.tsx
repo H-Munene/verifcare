@@ -10,6 +10,10 @@ import type {
 } from '../api/caregivers';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
+import { ExactLocationMap } from '../components/ExactLocationMap';
+import { LocationSelector, type ResolvedWard } from '../components/LocationSelector';
+import { getConfig } from '../config';
+import { isPointInFeature } from '../geo/adminBoundaries';
 import { Button } from '../design-system/Button';
 import { Card } from '../design-system/Card';
 import { Input } from '../design-system/Input';
@@ -87,6 +91,27 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
   const [gender, setGender] = useState<CaregiverGender | ''>(initial?.gender ?? '');
   const [occupation, setOccupation] = useState<CaregiverOccupation | ''>(initial?.occupation ?? '');
 
+  // The home base: where a planned route starts, and the fallback for "nearest" when offering a
+  // late visit. Optional, but a caregiver without one is left out of day plans.
+  const [area, setArea] = useState<ResolvedWard | null>(null);
+  const [baseLat, setBaseLat] = useState<number | null>(null);
+  const [baseLng, setBaseLng] = useState<number | null>(null);
+
+  function handleAreaResolved(resolved: ResolvedWard | null): void {
+    setArea(resolved);
+    setBaseLat(null);
+    setBaseLng(null);
+  }
+
+  const basePinValid =
+    baseLat === null || baseLng === null || !area
+      ? true
+      : isPointInFeature(baseLat, baseLng, area.wardFeature);
+  const homeBase =
+    area && baseLat !== null && baseLng !== null
+      ? { baseLat, baseLng, baseAreaText: `${area.wardName}, ${area.countyName}` }
+      : {};
+
   const createMutation = useMutation({ mutationFn: caregivers.createCaregiver });
   const updateMutation = useMutation({
     mutationFn: (body: Parameters<typeof caregivers.updateCaregiver>[1]) =>
@@ -102,7 +127,8 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
     idNumber.trim() !== '' &&
     dob !== '' &&
     gender !== '' &&
-    occupation !== '';
+    occupation !== '' &&
+    basePinValid;
   const pending = createMutation.isPending || updateMutation.isPending;
   const mutationError = createMutation.error ?? updateMutation.error;
 
@@ -119,6 +145,7 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
       dob,
       gender,
       occupation,
+      ...homeBase,
     };
 
     if (isEdit) {
@@ -269,6 +296,34 @@ function CaregiverForm({ caregiverId, initial }: { caregiverId?: string; initial
             </select>
           </div>
         </Card>
+        <Card className="register-caregiver-page__section">
+          <div className="register-caregiver-page__section-title">Home base</div>
+          <p className="register-caregiver-page__hint">
+            Where this caregiver&rsquo;s day starts, used to plan routes and find who is closest. An
+            area is enough, so don&rsquo;t pin their exact front door.
+            {initial?.baseAreaText ? ` Currently ${initial.baseAreaText}.` : ''}
+          </p>
+          <LocationSelector onWardResolved={handleAreaResolved} />
+          {area ? (
+            <ExactLocationMap
+              apiKey={getConfig().googleMapsApiKey}
+              wardFeature={area.wardFeature}
+              lat={baseLat}
+              lng={baseLng}
+              radiusMeters={0}
+              onPositionChange={(lat, lng) => {
+                setBaseLat(lat);
+                setBaseLng(lng);
+              }}
+            />
+          ) : null}
+          {basePinValid ? null : (
+            <div className="register-caregiver-page__error">
+              Move the pin inside the selected ward.
+            </div>
+          )}
+        </Card>
+
         {mutationError ? (
           <div className="register-caregiver-page__error">
             {mutationError instanceof ApiError

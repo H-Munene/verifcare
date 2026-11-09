@@ -35,7 +35,9 @@ export function AlertsBell() {
   });
   const attention = query.data?.attention;
   const count = attention
-    ? attention.missedVisitAlerts.total + attention.pendingCheckinOverrides.total
+    ? attention.missedVisitAlerts.total +
+      attention.pendingCheckinOverrides.total +
+      attention.visitsNeedingCover.total
     : 0;
 
   return (

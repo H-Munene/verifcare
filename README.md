@@ -5,7 +5,7 @@ It lets a care agency prove that a scheduled visit happened at the right place, 
 At check-in, the caregiver's phone checks it is within the dependant's home geofence, then scans a short-lived code shown on a family member's phone at the home.
 If nobody from the family is there, a supervisor can start the visit, and it is reported as an exception.
 The caregiver can record up to 30 seconds per visit, which only the dependant's family can listen to.
-Supervisors schedule and monitor visits from a web console, caregivers check in and out with a mobile app, and family members follow their dependant's care from a second mobile app.
+Supervisors plan each day's routes and monitor visits from a web console, caregivers check in and out with a mobile app, and family members follow their dependant's care from a second mobile app.
 
 | Component | Path | Stack |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ How a request moves through the system (the numbers match the diagram):
 5. **AWS APIs:** `Lambda -> NAT gateway -> internet gateway -> Secrets Manager / S3 / Cognito`.
    There are no VPC endpoints, so the single NAT gateway carries all of this traffic.
 6. **Uploads:** `App -> S3` directly, using presigned URLs issued by the API, for visit recordings.
-7. **Missed visits:** `EventBridge (every 15 minutes) -> missed-visit sweep Lambda -> RDS` marks overdue visits as missed and raises alerts.
+7. **Missed visits:** `EventBridge (every minute) -> missed-visit sweep Lambda -> RDS` marks overdue visits as missed, raises alerts, and offers late visits to the nearest available caregiver.
 8. **Operations:** `CloudWatch alarms -> SNS ops topic -> email` on Lambda errors, API 5xx responses, and high RDS CPU or low storage.
 9. **Deploys:** `GitHub Actions (OIDC) or a developer -> IAM deploy role -> CloudFormation`, followed by the migration runner Lambda for schema changes.
 
