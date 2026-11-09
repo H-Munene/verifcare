@@ -73,10 +73,17 @@ export function createMissedVisitSweep(
   // Every minute (2026-11-09): this also runs missed-visit recovery, where an offer lasts five
   // minutes and each one passing to the next caregiver is time a dependant is left waiting. About
   // 43,200 invocations a month, inside the Lambda free tier.
-  new events.Rule(stack, "MissedVisitSweepSchedule", {
+  const schedule = new events.Rule(stack, "MissedVisitSweepSchedule", {
     schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
     targets: [new eventsTargets.LambdaFunction(missedVisitSweepFunction)],
   });
+  // At this rate the first run can land mid-deploy. Lambda would then create the log group itself,
+  // and CloudFormation's own create of it fails with AlreadyExists, rolling back the whole stack.
+  // The child exists only under cdk.json's managed log group flag, which unit tests don't load.
+  const logGroup = missedVisitSweepFunction.node.tryFindChild("LogGroup");
+  if (logGroup) {
+    schedule.node.addDependency(logGroup);
+  }
 
   new cdk.CfnOutput(stack, "MissedVisitSweepFunctionName", {
     value: missedVisitSweepFunction.functionName,

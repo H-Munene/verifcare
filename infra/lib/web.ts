@@ -31,11 +31,17 @@ export function createWeb(stack: cdk.Stack, props: WebProps): void {
     removalPolicy: cdk.RemovalPolicy.RETAIN,
   });
 
+  // Named explicitly because the generated name is still held by the access control kept with the
+  // disabled distribution from the stack deleted on 2026-11-01, and names must be unique per account.
+  const originAccessControl = new cloudfront.S3OriginAccessControl(stack, "WebOriginAccessControl", {
+    originAccessControlName: "mzazi-care-web-console",
+  });
+
   const distribution = new cloudfront.Distribution(stack, "WebDistribution", {
     comment: "Mzazi Care supervisor web console",
     defaultRootObject: "index.html",
     defaultBehavior: {
-      origin: origins.S3BucketOrigin.withOriginAccessControl(webBucket),
+      origin: origins.S3BucketOrigin.withOriginAccessControl(webBucket, { originAccessControl }),
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
       // HSTS, nosniff, X-Frame-Options SAMEORIGIN and a strict-origin-when-cross-origin referrer
