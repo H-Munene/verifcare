@@ -2,6 +2,8 @@
 ## Development Plan: Language-Independent Acoustic Markers
 
 **Status:** Plan for building the model from scratch. Scoping review done 2026-09-28: the feature list in 3.1 is frozen, and the decisions from that review are recorded in place and in `docs/ml-dev-log.md` (local). Checkpoint 1 review 2026-09-28: 90 s truncation, D2, D6 opened, and the within-subject tolerance, all recorded in place.
+**Restart after Stage 2 (2026-10-27, developer decision):** the v2 Stage 3-5 outputs and the saved model are cleared (still in git history; the v2 run gave test ROC-AUC 0.409, 95 % CI 0.184-0.642). Stages 0-2 stand: the data audit, D1-D7, the 90 s truncation, the split and the 5 × 5 folds. Stages 3-5 are to be redesigned on the same DementiaNet data, so Stage 3's frozen feature list is open again. **The test set is already used**, so the guard's marker (`results/05_model_evaluation/test_set_used.json`) is kept and blocks it. Any result from the restart is a cross-validation result on the training portion and is reported as exploratory, not as a held-out performance estimate.
+**v3 result (2026-10-28, exploratory, CV only):** person-weighted ROC-AUC 0.556, 95 % CI 0.434-0.677 (corrected). Not shown better than C1 (v2 features, +0.034, Bonferroni p = 1.0) or C2 (channel proxies only, +0.002, p = 1.0). C3, C4 and C5 raise no confound flag, but the main effect is too weak for that to mean much. Full readings in `results/04v3_model_training/summary.md` and `results/05v3_model_evaluation/summary.md`.
 **Audience:** the developer and the coding agent. The agent treats this file as the source of truth. If something in it turns out to be wrong once real data is inspected, the agent stops, says so, and proposes a change. It never silently deviates.
 
 ---
@@ -179,7 +181,96 @@ No subject appears in both train and test; no subject appears in more than one v
 
 ---
 
-## Stage 3 — Feature Engineering (language-independent)
+## Stages 3-5, v3: pretrained speech representations (APPROVED 2026-10-27: D8 and D9)
+
+The developer chose this approach on 2026-10-27, after the v2 restart (see Status), and approved this section the same day. It replaces the v2 Stages 3-5 below, which stay as history. The pre-registered values are in `config.py` under "v3". Stages 0-2, the principles in section 0, the guard, D1-D7, the 5 × 5 folds, D2 weights, the rank-preserving calibration and the D5 threshold rule all carry over unchanged.
+
+### v3.0 What changes and why
+
+v2 measured 18 hand-picked features and got chance-level discrimination. v3 instead passes the audio through a large speech model pretrained on many languages and trains a small classifier on its internal representation (an "embedding"). In published dementia work this usually carries more signal than hand-picked features, including in the ADReSS-M English-to-Greek transfer task ([Tamm et al. 2023](https://arxiv.org/abs/2303.03049)).
+
+The trade-off is the reason this section has more confound checks than v2. An embedding captures everything in the audio, not just the speaker's timing: the microphone, the room, the speaker's identity and the language being spoken. A model trained on it can score well by recognising the recording instead of the condition. A 2024 study found exactly this with wav2vec 2.0 dementia classifiers ("Clever Hans Effect Found in Automatic Detection of Alzheimer's Disease through Speech", [arXiv 2406.07410](https://arxiv.org/abs/2406.07410)). The v3.4 checks exist to catch that.
+
+### v3.1 Encoder (decision D8)
+
+**Proposed: `facebook/wav2vec2-xls-r-300m`, frozen (never fine-tuned), with the Hugging Face revision hash pinned in `config.py`.**
+
+| Candidate | Licence | Languages | Size | Verdict |
+|---|---|---|---|---|
+| XLS-R 300M | Apache-2.0 (model card) | 128, including Swahili; **not** Luo or Kikuyu | 300M parameters, about 1.2 GB | Proposed |
+| mHuBERT-147 | CC BY-NC-SA 4.0 (non-commercial) | 147, including Swahili | 95M | Excluded: the licence blocks use in a product |
+| WavLM, HuBERT, wav2vec 2.0 base | Varies | English only | 95M-300M | Excluded: English-only pretraining undercuts the cross-language goal |
+| Whisper encoder | MIT | Multilingual | Varies | Not proposed: trained to transcribe, so its representation leans towards the words, which we avoid by design |
+
+- **Why frozen:** fine-tuning 300M parameters on 137 people would overfit, and this machine has no GPU. Freezing also means each clip's embedding is computed once and cached, so cross-validation only trains a small classifier.
+- **Coverage caveat:** Swahili is in the pretraining data, but Luo and Kikuyu are not. The language-shift check (v3.5) is the only evidence we can get on that without labelled Kenyan data.
+
+### v3.2 From a recording to one vector (single-recording function, per section 1.2)
+
+1. **Input:** the Stage 2 processed audio (16 kHz mono, trimmed, 30 s minimum, first 90 s kept). The whole recording is used, pauses included, because pauses carry signal.
+2. **Windows:** consecutive non-overlapping 20 s windows. The last window is kept if it is at least 5 s long; otherwise it joins the previous one. Reason: XLS-R's attention cost grows with input length and long inputs exceed laptop memory. 20 s keeps each window well inside the length the model saw in pretraining.
+3. **Per window:** run the encoder and keep all 25 hidden states (the CNN output plus 24 transformer layers). Mean-pool each layer over time, which gives 25 × 1024 numbers per window.
+4. **Per recording:** average the windows, weighted by window duration. The result is 25 × 1024 per recording, cached as one file per clip with the encoder revision recorded inside it.
+5. **Determinism:** inference mode, fixed seed and one thread count. A test checks that two runs on the same file match to 1e-5.
+
+**Scope of extraction:** training-portion and trajectory clips only. Test-split clips are never read: the guard's marker already blocks them, and the extraction script also refuses them itself.
+
+### v3.3 Classifier (one pre-registered pipeline)
+
+**Pipeline:** layer selection, then standardise, then PCA, then L2 logistic regression, then rank-preserving Platt calibration (slope ≥ 0, as in v2).
+
+- **Tuned in the inner 3-fold person-grouped search only** (20 random configurations, the same budget as v2):
+  - layer: one of {6, 9, 12, 15, 18}. Middle layers are reported to carry the most acoustic and paralinguistic information; the last layers lean towards the phonetic content of the language;
+  - PCA components: one of {8, 16, 32, 64};
+  - the regularisation strength C, on a log grid from 1e-4 to 1e2.
+- **Why only one pipeline:** with no unused test set, the outer CV folds are the only honest estimate. That estimate stays honest only if we don't pick a winner among several candidates using those same outer folds. So SVM, random forest and XGBoost are not run in v3. Two comparators (v3.4) are run alongside, but only to check the embedding model; neither can be "chosen".
+- **Scoring, weights and metrics:** person-weighted ROC-AUC as primary, with D2 weights and every v2 metric (Brier score, ECE, per-clip metrics). The D5 threshold rule is applied to the out-of-fold predictions and reported.
+
+### v3.4 Comparators and confound checks (all pre-registered, all on the same 5 × 5 folds)
+
+| # | Run | What it answers | Pre-registered reading |
+|---|---|---|---|
+| C1 | v2's 18 hand features + L2 logistic regression (re-extracted with the unchanged v2 code) | Does the embedding add anything over the features we had? | The embedding model counts as better only if the corrected repeated k-fold t-test favours it at α = 0.05 ÷ 2 (Bonferroni over C1 and C2) |
+| C2 | Channel-quality proxies only (noise floor, spectral bandwidth, spectral flatness) + L2 logistic regression | How far can the recording conditions alone go? | Same test. If the embedding model doesn't beat C2, its signal can't be told apart from the microphone and is reported that way |
+| C3 | The same embedding pipeline, run only on the non-speech parts of each clip (the frozen pause detector's pauses, concatenated) | The Clever Hans test: does silence alone predict the label? | Descriptive. If C3's AUC is at least the main model's AUC minus 0.05, the report says the signal most likely comes from the recording, not the speaker |
+| C4 | Person-level correlation of the out-of-fold scores with the channel proxies and with duration | Do the scores follow the recording? | Descriptive; any \|r\| > 0.3 is reported next to the main result |
+| C5 | Robustness: embeddings re-extracted under bandpass alone, and under bandpass + pink noise at 10 dB SNR (v2's conditions, seeds and SNR method) | Does the model survive phone-quality audio? | The single formal test is the second condition vs clean (corrected t-test), as in v2 |
+
+C5 is limited to two conditions because every condition means a full re-extraction on CPU.
+
+### v3.5 Evaluation and reporting
+
+- **The headline result is the outer-fold CV estimate of the v3.3 pipeline**, with its 95 % interval across the 25 folds. It is labelled exploratory, because the held-out test set was used in v2 and stays locked. The report never presents a v3 number as a held-out test result.
+- **Final model:** refit on the whole training portion and saved, with metadata (encoder revision, layer, PCA size, package versions, seed). It then scores the trajectory clips for the descriptive pre-symptomatic analysis, as in v2.
+- **Language shift (D4, optional, licence permitting):** compare embeddings of unlabelled Kenyan speech (for example AfriVoices-KE or Kencorpus) with the healthy training group. This matters more in v3 than in v2, because embeddings encode language.
+- **No feature-level interpretability:** the 1024 dimensions have no individual meaning. Instead we report the chosen layer across folds and the C1-C4 checks. This is stated as a limitation.
+
+### v3.6 Compute, dependencies and deployment
+
+- **New dependencies:** `torch` (the CPU wheel; 2.14.1+cpu exists for Python 3.14 on Windows) and `transformers`, both pinned in `requirements.txt`. The model weights download to the Hugging Face cache, never into the repo.
+- **Runtime:** measured on 5 training clips and reported to the developer before the full extraction starts. The full extraction covers about 250 pool clips + trajectory clips, plus C3's pause-only input and C5's two degraded copies.
+- **Deployment (later, only if the result justifies it):** the shadow-mode Lambda would need XLS-R inside its container image (the image limit is 10 GB and memory up to 10,240 MB). Per-recording CPU time is measured locally first.
+
+### v3.7 Code (built and tested on synthetic data before any real run)
+
+- `src/mzazi_acoustic/embeddings/`: the single-recording windowing, pooling and caching function.
+- `scripts/03v3_embeddings.py`: training and trajectory clips only.
+- The v3.3 candidate goes into `model_training/candidates.py`, reusing the existing CV, weights, calibration, metrics and corrected t-test.
+- `scripts/04v3_train.py` and `scripts/05v3_validation.py` for v3.3-v3.5.
+- **Tests (synthetic audio, tiny random-weight encoder so they run without the download):**
+  - window boundaries, including the 5 s merge rule;
+  - pooled shapes;
+  - determinism;
+  - test-split clips are refused;
+  - layer selection happens inside the pipeline, so it is fitted per fold.
+
+### Decisions (developer, 2026-10-27)
+
+- **D8 = XLS-R 300M, frozen.** Approved.
+- **D9 = the v3.3 pipeline and search space, the v3.4 comparators and reading rules, and the "exploratory, no held-out test" labelling, as written.** Approved.
+- Limitation 17 added (below).
+
+## Stage 3 — Feature Engineering (language-independent) [v2: outputs cleared 2026-10-27; kept as history and as the C1 comparator's definition]
 
 **Goal:** a small feature set fixed in advance, measurable in any language, and checked before any model sees it.
 
@@ -457,6 +548,7 @@ The rule's exact form, and its false-alarm rate over a typical visit schedule, i
 14. **Other voices in training, monologues in deployment (added 2026-10-05):** D1 = (a) keeps clips with other voices (about 60 % of people in each class), while the supervisor-approved deployment records prompted monologues. The single-speaker sensitivity analysis is the closest estimate of monologue performance.
 15. **Pause detector not validated against human annotation (added 2026-10-05):** the hand-annotation step was skipped (developer decision), so the accuracy of every pause feature on real speech is unverified, including how much stop consonants contaminate the short-pause band. The settings were pre-registered and never tuned, so this is a lack of validation, not a risk of tuning to the results.
 16. **Chance-level discrimination in cross-validation (added 2026-10-05):** on DementiaNet, the pre-chosen language-independent feature set barely separates the classes. The chosen logistic regression has a person-weighted CV ROC-AUC of 0.522 (SD 0.059); raw scores reach 0.553. At the 90 %-specificity threshold, CV sensitivity is 10 %. The strongest single feature, articulation rate (out-of-fold AUC about 0.62), is also flagged for depending on recording length. Possible reasons, none established: the detector is unvalidated (limitation 15); label noise (limitations 2 and 7); and other voices in about 60 % of people's clips.
+17. **No untouched test set for v3 (added 2026-10-27):** v2 used the held-out test set once and it stays locked. Every v3 figure is therefore a cross-validation estimate on the training portion, kept honest by running one pre-registered pipeline (no winner picked on the outer folds), but still not a held-out result.
 
 ---
 

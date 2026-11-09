@@ -9,6 +9,7 @@ Routing is switched on only inside `routing()`, so the setting never leaks into 
 
 import sklearn
 from scipy import stats
+from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -20,6 +21,7 @@ from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
 from mzazi_acoustic.common import config
+from mzazi_acoustic.embeddings.xlsr import LayerSelect
 
 
 SEARCH_N_JOBS = -1  # all cores for the inner search; tests set 1 so spies see every fit and score
@@ -49,7 +51,18 @@ def make_pipeline(name, seed):
     Median imputation comes first: some features are undefined for some clips (e.g. median pause
     length with no pauses), and imputation is a learned step, so it must be fit inside the fold.
     PLAN.md 3.3 step 1 may replace this choice once the real missingness is known.
+
+    v3 (PLAN.md v3.3): the embedding pipeline adds a layer-selection step and PCA, both fitted inside
+    the fold. Imputation only matters for C3, where a clip with almost no pause audio has no embedding.
     """
+    if name == config.V3_MODEL:
+        return Pipeline([
+            ("impute", SimpleImputer(strategy="median")),
+            ("select", LayerSelect()),
+            ("scale", StandardScaler().set_fit_request(sample_weight=False)),
+            ("pca", PCA(n_components=32, random_state=seed)),
+            ("model", LogisticRegression(max_iter=5000).set_fit_request(sample_weight=True)),
+        ])
     return Pipeline([
         ("impute", SimpleImputer(strategy="median")),
         ("scale", StandardScaler().set_fit_request(sample_weight=False)),
@@ -58,17 +71,20 @@ def make_pipeline(name, seed):
 
 
 def search_space(name):
-    """config.SEARCH_SPACES turned into scipy distributions, keyed for the Pipeline's model step."""
+    """The search space turned into scipy distributions. config.SEARCH_SPACES keys name a parameter of
+    the model step; config.V3_SEARCH_SPACE keys already name their step (e.g. pca__n_components)."""
+    spaces = {**config.SEARCH_SPACES, config.V3_MODEL: config.V3_SEARCH_SPACE}
     space = {}
-    for param, spec in config.SEARCH_SPACES[name].items():
+    for param, spec in spaces[name].items():
+        key = param if "__" in param else f"model__{param}"
         if isinstance(spec, list):
-            space[f"model__{param}"] = spec
+            space[key] = spec
         elif spec[0] == "log":
-            space[f"model__{param}"] = stats.loguniform(spec[1], spec[2])
+            space[key] = stats.loguniform(spec[1], spec[2])
         elif spec[0] == "int":
-            space[f"model__{param}"] = stats.randint(spec[1], spec[2] + 1)
+            space[key] = stats.randint(spec[1], spec[2] + 1)
         elif spec[0] == "uniform":
-            space[f"model__{param}"] = stats.uniform(spec[1], spec[2] - spec[1])
+            space[key] = stats.uniform(spec[1], spec[2] - spec[1])
     return space
 
 
