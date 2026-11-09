@@ -67,6 +67,8 @@ export interface VisitRecord {
   familyDistanceFromGeofenceMeters: number | null;
   audioRecorded: boolean;
   audioSkipReason: schema.AudioSkipReason | null;
+  /** Set when this visit took over from another caregiver's late visit. */
+  recoveredFromVisitId: string | null;
   /** Failed check-in attempts, e.g. `geofence: out_of_range`, one entry per attempt. */
   failedChecks: { attemptType: string; failureReason: string | null; count: number }[];
   /** Required tasks recorded as not completed, with the reason given. */
@@ -157,6 +159,7 @@ export async function visitRecords(
       checkinMethod: schema.verificationEvents.checkinMethod,
       familyDistanceFromGeofenceMeters: schema.verificationEvents.familyDistanceFromGeofenceMeters,
       audioSkipReason: schema.verificationEvents.audioSkipReason,
+      recoveredFromVisitId: schema.visitSchedules.recoveredFromVisitId,
       audioRecordId: schema.audioRecords.id,
     })
     .from(schema.visitSchedules)

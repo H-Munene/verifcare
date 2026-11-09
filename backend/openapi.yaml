@@ -1737,6 +1737,33 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /compliance/caregiver-performance:
+    get:
+      tags: [Compliance]
+      summary: How each caregiver's visits went over a period (supervisors only)
+      description: |
+        Separate measures with no overall score. A miss resolved as outside the caregiver's control
+        is counted as excused rather than against them, and a visit taken over by someone else is
+        a miss for the original caregiver and covered for the one who stepped in.
+      operationId: getCaregiverPerformance
+      parameters:
+        - $ref: '#/components/parameters/PeriodFrom'
+        - $ref: '#/components/parameters/PeriodTo'
+      responses:
+        '200':
+          description: One row per caregiver with activity in the period.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [period, items]
+                properties:
+                  period:
+                    $ref: '#/components/schemas/Period'
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CaregiverPerformanceRow'
   /compliance/exceptions:
     get:
       tags: [Compliance]
@@ -1990,7 +2017,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [visits, visit-summary, consents, terms, audit-log]
+            enum: [visits, visit-summary, caregiver-performance, consents, terms, audit-log]
         - $ref: '#/components/parameters/PeriodFrom'
         - $ref: '#/components/parameters/PeriodTo'
         - name: groupBy
@@ -3797,6 +3824,47 @@ components:
               caregiverId: { type: string, format: uuid }
               caregiverName: { type: string }
               reason: { type: string, enum: [already_scheduled, no_consent, no_home_base] }
+    CaregiverPerformanceRow:
+      type: object
+      required: [caregiverId, caregiverName, assigned, completed, missed, excused, weeks]
+      properties:
+        caregiverId: { type: string, format: uuid }
+        caregiverName: { type: string }
+        assigned: { type: integer }
+        completed: { type: integer }
+        missed: { type: integer }
+        excused: { type: integer }
+        completionRate: { type: [number, 'null'] }
+        checkedIn: { type: integer }
+        onTimeRate: { type: [number, 'null'] }
+        averageCheckinDelayMinutes: { type: [number, 'null'] }
+        averageVisitMinutes: { type: [number, 'null'] }
+        averagePlannedMinutes: { type: [number, 'null'] }
+        requiredTasksDoneRate: { type: [number, 'null'] }
+        qrVerifiedRate: { type: [number, 'null'] }
+        supervisorOverrides: { type: integer }
+        failedCheckins: { type: integer }
+        recordingsProvided: { type: integer }
+        recordingsSkipped:
+          type: object
+          additionalProperties: { type: integer }
+        offersReceived: { type: integer }
+        offersAccepted: { type: integer }
+        offersDeclined: { type: integer }
+        offersExpired: { type: integer }
+        averageOfferResponseMinutes: { type: [number, 'null'] }
+        visitsCovered: { type: integer }
+        weeks:
+          type: array
+          items:
+            type: object
+            required: [weekStart, completed, missed, onTime, checkedIn]
+            properties:
+              weekStart: { type: string, format: date }
+              completed: { type: integer }
+              missed: { type: integer }
+              onTime: { type: integer }
+              checkedIn: { type: integer }
     Period:
       type: object
       required: [from, to]
