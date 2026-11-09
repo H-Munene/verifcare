@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../api/biometric_enrollments_api.dart';
 import '../api/dependants_api.dart';
 import '../api/family_link_requests_api.dart';
 import '../api/users_api.dart';
@@ -31,7 +30,6 @@ class HomeScreen extends StatefulWidget {
   final CognitoAuthService authService;
   final DependantsApi dependantsApi;
   final VisitSchedulesApi visitSchedulesApi;
-  final BiometricEnrollmentsApi enrollmentsApi;
   final UsersApi usersApi;
   final FamilyLinkRequestsApi linkRequestsApi;
   final IdentityClaims identity;
@@ -42,7 +40,6 @@ class HomeScreen extends StatefulWidget {
     required this.authService,
     required this.dependantsApi,
     required this.visitSchedulesApi,
-    required this.enrollmentsApi,
     required this.usersApi,
     required this.linkRequestsApi,
     required this.identity,
@@ -65,7 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _attention = 0;
   ({String id, String fullName})? _me;
   bool _isPrimaryContact = false;
-  // Bumped after an edit, so every tab rebuilds and reloads (e.g. a replaced photo).
+  // Bumped after an edit, so every tab rebuilds and reloads.
   int _version = 0;
 
   Dependant? get _selected =>
@@ -141,8 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  // Only the primary contact may edit or add the photo (the backend enforces it too), so those
-  // actions show only once the caller's own link is confirmed as primary.
+  // Only the primary contact may edit (the backend enforces it too), so that action shows only once the caller's own link is confirmed as primary.
   Future<void> _checkPrimaryContact() async {
     final me = _me;
     final dependant = _selected;
@@ -200,7 +196,6 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute<void>(
         builder: (_) => DependantWizardScreen.register(
           dependantsApi: widget.dependantsApi,
-          enrollmentsApi: widget.enrollmentsApi,
           usersApi: widget.usersApi,
           identity: widget.identity,
           onDone: () => Navigator.of(context).pop(),
@@ -217,14 +212,12 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => DependantWizardScreen.edit(
           dependantsApi: widget.dependantsApi,
-          enrollmentsApi: widget.enrollmentsApi,
           existing: dependant,
           initialStep: initialStep,
         ),
       ),
     );
     if (!mounted) return;
-    // A photo may have been replaced even when the details weren't saved, so reload either way.
     setState(() => _version++);
     await _load();
     if (updated != null && mounted) showSnack(context, 'Details saved.', error: false);
@@ -407,9 +400,6 @@ class _HomeScreenState extends State<HomeScreen> {
           final name? => firstName(name),
           null => null,
         },
-        onAddPhoto: _isPrimaryContact
-            ? () => _edit(initialStep: DependantWizardScreen.photoStep)
-            : null,
         dependantsApi: widget.dependantsApi,
         visitSchedulesApi: widget.visitSchedulesApi,
       ),
@@ -460,10 +450,6 @@ class _DependantOption extends StatelessWidget {
     final notes = [
       '${dependant.ageOn(DateTime.now())} years',
       if (!dependant.active) 'Deactivated',
-      if (dependant.needsPhoto)
-        dependant.checkinPhotoStatus == CheckinPhotoStatus.awaitingReview
-            ? 'Photo awaiting review'
-            : 'Photo needed',
     ].join(' · ');
     return ListTile(
       minTileHeight: 64,

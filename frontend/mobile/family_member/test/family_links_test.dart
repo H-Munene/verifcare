@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:family_member/api/api_client.dart';
-import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/family_link_requests_api.dart';
 import 'package:family_member/api/users_api.dart';
@@ -47,9 +46,7 @@ Map<String, dynamic> _dependant(String id, String name) => {
   'geofenceLat': -1.2833,
   'geofenceLng': 36.7833,
   'geofenceRadiusMeters': 20,
-  'cognitiveMonitoringEnabled': false,
   'status': 'active',
-  'checkinPhotoStatus': 'ready',
 };
 
 final _incoming = {
@@ -128,7 +125,6 @@ class _Backend {
           'isPrimaryContact': true,
         },
       ]),
-      '/biometric-enrollments' => _json([]),
       _ => throw StateError('Unexpected request: ${request.url}'),
     };
   });
@@ -147,7 +143,6 @@ Future<void> _pumpHome(WidgetTester tester) async {
         authService: authService,
         dependantsApi: DependantsApi(client),
         visitSchedulesApi: VisitSchedulesApi(client),
-        enrollmentsApi: BiometricEnrollmentsApi(client),
         usersApi: UsersApi(client),
         linkRequestsApi: FamilyLinkRequestsApi(client),
         identity: IdentityClaims(sub: 'sub-1', role: 'family_member'),

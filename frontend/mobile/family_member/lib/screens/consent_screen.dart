@@ -6,16 +6,17 @@ import '../api/api_client.dart';
 import '../api/terms_api.dart';
 import '../app_ui.dart';
 
-// The consent screen's two required checkboxes (2026-09-27, terms v2), given on behalf of the
-// dependants this person registers or is the primary contact for. Accepting sends both to the
-// server, which records them for each of those dependants - a dependant without photo consent
-// can't be scheduled.
-const _biometricConsentLabel =
-    'For the dependants I register or am the primary contact for, I agree to their photo being '
-    'used to confirm their identity at each visit.';
+// The consent screen's two required checkboxes (terms v3, 2026-11-09), given for the family member
+// and for every dependant they register or are the primary contact for. Accepting sends both to
+// the server, which records them as consent records - a dependant without location consent can't
+// be scheduled.
+const _locationConsentLabel =
+    'For myself and the dependants I register or am the primary contact for, I agree to location '
+    'being checked at the home when visits start and end, including my phone when I show a '
+    'check-in code.';
 const _audioConsentLabel =
-    'For the same dependants, I agree to audio being recorded during their visits for '
-    'cognitive monitoring.';
+    'For the same dependants, I agree to audio being recorded during their visits for the family '
+    'to listen to.';
 
 /// Shows [child] only once the signed-in user has accepted the current terms of use and privacy
 /// notice (2026-09-26, user request). Until then the terms fill the screen and can't be dismissed:
@@ -57,7 +58,7 @@ class _ConsentGateState extends State<ConsentGate> {
   String? _error;
   String? _notice;
   bool _accepting = false;
-  bool _biometricConsent = false;
+  bool _locationConsent = false;
   bool _audioConsent = false;
 
   @override
@@ -80,7 +81,7 @@ class _ConsentGateState extends State<ConsentGate> {
         _notice = notice;
         // Fresh terms (first load, or a new version after a 409) mean fresh consent: ticks given
         // against wording that has since changed don't carry over.
-        _biometricConsent = false;
+        _locationConsent = false;
         _audioConsent = false;
         _stage = terms.accepted ? _Stage.accepted : _Stage.asking;
       });
@@ -104,7 +105,7 @@ class _ConsentGateState extends State<ConsentGate> {
       await widget.termsApi.accept(
         sub: widget.sub,
         version: terms.version,
-        biometricConsent: _biometricConsent,
+        locationConsent: _locationConsent,
         audioConsent: _audioConsent,
       );
       if (mounted) setState(() => _stage = _Stage.accepted);
@@ -166,10 +167,10 @@ class _ConsentGateState extends State<ConsentGate> {
               notice: _notice,
               error: _error,
               accepting: _accepting,
-              biometricConsent: _biometricConsent,
+              locationConsent: _locationConsent,
               audioConsent: _audioConsent,
-              onBiometricConsentChanged: (value) =>
-                  setState(() => _biometricConsent = value),
+              onLocationConsentChanged: (value) =>
+                  setState(() => _locationConsent = value),
               onAudioConsentChanged: (value) =>
                   setState(() => _audioConsent = value),
               onAccept: _accept,
@@ -187,9 +188,9 @@ class _TermsView extends StatelessWidget {
   final String? notice;
   final String? error;
   final bool accepting;
-  final bool biometricConsent;
+  final bool locationConsent;
   final bool audioConsent;
-  final ValueChanged<bool> onBiometricConsentChanged;
+  final ValueChanged<bool> onLocationConsentChanged;
   final ValueChanged<bool> onAudioConsentChanged;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
@@ -199,9 +200,9 @@ class _TermsView extends StatelessWidget {
     required this.notice,
     required this.error,
     required this.accepting,
-    required this.biometricConsent,
+    required this.locationConsent,
     required this.audioConsent,
-    required this.onBiometricConsentChanged,
+    required this.onLocationConsentChanged,
     required this.onAudioConsentChanged,
     required this.onAccept,
     required this.onDecline,
@@ -307,9 +308,9 @@ class _TermsView extends StatelessWidget {
                   const SizedBox(height: 10),
                 ],
                 _consentBox(
-                  _biometricConsentLabel,
-                  biometricConsent,
-                  onBiometricConsentChanged,
+                  _locationConsentLabel,
+                  locationConsent,
+                  onLocationConsentChanged,
                 ),
                 _consentBox(
                   _audioConsentLabel,
@@ -337,7 +338,7 @@ class _TermsView extends StatelessWidget {
                     Expanded(
                       child: ElevatedButton(
                         onPressed:
-                            accepting || !biometricConsent || !audioConsent
+                            accepting || !locationConsent || !audioConsent
                             ? null
                             : onAccept,
                         style: pillButtonStyle,

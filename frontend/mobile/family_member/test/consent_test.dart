@@ -252,7 +252,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(backend.acceptBodies.single, {
         'version': '1',
-        'biometricConsent': true,
+        'locationConsent': true,
         'audioConsent': true,
       });
       expect(find.text('HOME'), findsOneWidget);

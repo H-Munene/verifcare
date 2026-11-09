@@ -1,12 +1,9 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:image_picker/image_picker.dart';
 
-import '../api/biometric_enrollments_api.dart';
 import '../api/dependants_api.dart';
 import '../api/users_api.dart';
 import '../app_ui.dart';
@@ -15,7 +12,7 @@ import '../auth/cognito_auth_service.dart';
 import '../geo/kenya_areas.dart';
 
 /// Registering or editing a dependant, in the same step order as the admin web wizard
-/// (RegisterDependantPage.tsx): Details, Location, Pin, Photo.
+/// (RegisterDependantPage.tsx): Details, Location, Pin, Family.
 ///
 /// Differences from the web wizard, all decided with the user (docs/family-app-plan.md):
 /// - Location is three plain dropdowns with no boundary map.
@@ -25,8 +22,8 @@ import '../geo/kenya_areas.dart';
 ///   may change it afterwards.
 /// - The caller is always the primary contact, so the contact steps reduce to a relationship field.
 ///
-/// Registering creates the dependant when leaving the Pin step; the Photo step then enrolls
-/// against the new id, and there is no way back to earlier steps so it can never be created twice.
+/// Registering creates the dependant when leaving the Pin step, and the Family step then links
+/// anyone else who helps with their care.
 ///
 /// Editing (primary contact only) is the same steps pre-filled, with Save available from any
 /// step, as on the web. Date of birth can't be changed (the backend doesn't allow it), and the
@@ -34,10 +31,9 @@ import '../geo/kenya_areas.dart';
 /// pops with the updated Dependant on save.
 class DependantWizardScreen extends StatefulWidget {
   final DependantsApi dependantsApi;
-  final BiometricEnrollmentsApi enrollmentsApi;
   final Dependant? existing;
 
-  /// Editing only: the step to open on - e.g. the Photo step (3) from the "photo needed" banner.
+  /// Editing only: the step to open on.
   final int initialStep;
   // Registration only.
   final UsersApi? usersApi;
@@ -47,7 +43,6 @@ class DependantWizardScreen extends StatefulWidget {
   const DependantWizardScreen.register({
     super.key,
     required this.dependantsApi,
-    required this.enrollmentsApi,
     required UsersApi this.usersApi,
     required IdentityClaims this.identity,
     required VoidCallback this.onDone,
@@ -57,25 +52,21 @@ class DependantWizardScreen extends StatefulWidget {
   const DependantWizardScreen.edit({
     super.key,
     required this.dependantsApi,
-    required this.enrollmentsApi,
     required Dependant this.existing,
     this.initialStep = 0,
   }) : usersApi = null,
        identity = null,
        onDone = null;
 
-  /// The Photo step's index, for opening the edit wizard straight on it.
-  static const photoStep = _photoStep;
 
   @override
   State<DependantWizardScreen> createState() => _DependantWizardScreenState();
 }
 
-const _stepLabels = ['Details', 'Location', 'Pin', 'Family', 'Photo'];
-// Named, since editing's header jumps and the photo banner open specific steps. Family comes
+const _stepLabels = ['Details', 'Location', 'Pin', 'Family'];
+// Named, since editing's header jumps to specific steps. Family comes
 // after Pin because the dependant has to exist before anyone can be linked to them.
 const _familyStep = 3;
-const _photoStep = 4;
 const _kenyaCentre = LatLng(0.0236, 37.9062);
 
 class _DependantWizardScreenState extends State<DependantWizardScreen> {
@@ -91,7 +82,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   final _condition = TextEditingController();
   DateTime? _dob;
   String? _gender;
-  bool _cognitiveMonitoring = false;
 
   // Location
   KenyaAreas? _areas;
@@ -104,12 +94,9 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   CameraPosition? _initialCamera;
   GoogleMapController? _map;
 
-  // Registration and photo
+  // Registration
   bool _submitting = false;
   Dependant? _created;
-  Uint8List? _photo;
-  String? _photoResult; // 'active' | 'flagged' once enrolled
-  List<BiometricEnrollment>? _currentPhotos; // editing: what's enrolled already
   List<FamilyMemberLink>?
   _members; // the Family step's list, loaded when first shown
   bool _membersRequested = false;
@@ -158,23 +145,8 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
     _condition.text = existing.primaryConditionSummary ?? '';
     _dob = existing.dob;
     _gender = existing.gender;
-    _cognitiveMonitoring = existing.cognitiveMonitoringEnabled;
     _pin = LatLng(existing.geofenceLat, existing.geofenceLng);
     _initialCamera = CameraPosition(target: _pin!, zoom: 18);
-    _loadCurrentPhotos();
-  }
-
-  Future<void> _loadCurrentPhotos() async {
-    try {
-      final photos = await widget.enrollmentsApi.listCurrentForDependant(
-        widget.existing!.id,
-      );
-      photos.sort((a, b) => a.imageOrder.compareTo(b.imageOrder));
-      if (mounted) setState(() => _currentPhotos = photos);
-    } catch (_) {
-      // Only a preview of the current photo - replacing one still works without it.
-      if (mounted) setState(() => _currentPhotos = const []);
-    }
   }
 
   @override
@@ -193,9 +165,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   }
 
   int? get _age => _dob == null ? null : ageOnDate(_dob!, DateTime.now());
-
-  bool get _cognitiveMonitoringAllowed =>
-      (_age ?? 0) > cognitiveMonitoringMinAgeExclusive;
 
   static String? _text(TextEditingController c) =>
       c.text.trim().isEmpty ? null : c.text.trim();
@@ -259,16 +228,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   Future<void> _save() async {
     setState(() => _submitting = true);
     try {
-      // Save is the one button for the whole edit, so it also enrols a replacement photo.
-      // Photo first: a rejected one (no face, several faces) stops here with nothing saved, and a
-      // retry after a failed PATCH skips the photo that already went through.
-      if (_photo case final photo? when _photoResult == null) {
-        final status = await widget.enrollmentsApi.enrollDependantPhoto(
-          dependantId: widget.existing!.id,
-          jpegBytes: photo,
-        );
-        if (mounted) setState(() => _photoResult = status);
-      }
       final updated = await widget.dependantsApi.updateDependant(
         widget.existing!.id,
         fullName: '${_text(_firstName)} ${_text(_lastName)}',
@@ -280,19 +239,8 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         ward: _ward!.name,
         geofenceLat: _pin!.latitude,
         geofenceLng: _pin!.longitude,
-        cognitiveMonitoringEnabled:
-            _cognitiveMonitoringAllowed && _cognitiveMonitoring,
       );
       if (!mounted) return;
-      // The screen closes, so the review notice goes in a snack that outlives it.
-      if (_photoResult == 'flagged') {
-        showSnack(
-          context,
-          'Saved. The new photo looks like someone already enrolled, so a '
-          'supervisor will review it.',
-          error: false,
-        );
-      }
       Navigator.of(context).pop(updated);
     } catch (e) {
       if (mounted) showSnack(context, errorText(e));
@@ -382,8 +330,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
         ward: _ward!.name,
         geofenceLat: _pin!.latitude,
         geofenceLng: _pin!.longitude,
-        cognitiveMonitoringEnabled:
-            _cognitiveMonitoringAllowed && _cognitiveMonitoring,
         selfCognitoSub: widget.identity!.sub,
         selfPhoneNumber: me.phoneNumber ?? widget.identity!.phoneNumber ?? '',
         selfFullName: me.fullName,
@@ -470,37 +416,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   }
 
   // ------------------------------------------------------------------------------------------
-  // Photo
-
-  Future<void> _pickPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(
-      source: source,
-      preferredCameraDevice: CameraDevice.rear,
-      maxWidth: 1600,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
-    if (mounted) setState(() => _photo = bytes);
-  }
-
-  Future<void> _uploadPhoto() async {
-    setState(() => _submitting = true);
-    try {
-      final status = await widget.enrollmentsApi.enrollDependantPhoto(
-        dependantId: (_created ?? widget.existing)!.id,
-        jpegBytes: _photo!,
-      );
-      if (mounted) setState(() => _photoResult = status);
-    } catch (e) {
-      // e.g. a 422 for a photo with no face or several faces - the server's detail says which.
-      if (mounted) showSnack(context, errorText(e));
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  // ------------------------------------------------------------------------------------------
   // Layout
 
   @override
@@ -550,8 +465,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
                 0 => _buildDetails(),
                 1 => _buildLocation(),
                 2 => _buildExactLocation(),
-                _familyStep => _buildFamily(),
-                _ => _buildPhoto(),
+                _ => _buildFamily(),
               },
             ),
           ],
@@ -562,7 +476,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
   }
 
   Widget _buildActions() {
-    final blocker = _editing && _step == _photoStep ? _saveBlocker : _blocker;
+    final blocker = _editing && _step == _familyStep ? _saveBlocker : _blocker;
     final Widget primary;
     final Widget? secondary;
     final back = OutlinedButton(
@@ -575,7 +489,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
       ),
       child: const Text('Back'),
     );
-    if (_editing && _step == _photoStep) {
+    if (_editing && _step == _familyStep) {
       primary = ElevatedButton(
         onPressed: blocker == null && !_submitting ? _save : null,
         style: pillButtonStyle,
@@ -591,11 +505,13 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
             : const Text('Save'),
       );
       secondary = back;
-    } else if (_step == _photoStep) {
+    } else if (_step == _familyStep) {
+      // The dependant already exists by this step, so there's no Back: going to Pin would
+      // register them again.
       primary = ElevatedButton(
         onPressed: _submitting ? null : widget.onDone,
         style: pillButtonStyle,
-        child: Text(_photoResult == null ? 'Skip for now' : 'Finish'),
+        child: const Text('Finish'),
       );
       secondary = null;
     } else {
@@ -613,11 +529,7 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
               )
             : Text(_step == 2 && !_editing ? 'Register' : 'Next'),
       );
-      // No Back from Family when registering: the dependant exists by then, and going back to Pin
-      // would register them again.
-      secondary = _step == 0 || (!_editing && _step == _familyStep)
-          ? null
-          : back;
+      secondary = _step == 0 ? null : back;
     }
     return Material(
       color: Colors.white,
@@ -768,21 +680,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
           alignLabelWithHint: true,
         ),
       ),
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        value: _cognitiveMonitoringAllowed && _cognitiveMonitoring,
-        onChanged: _cognitiveMonitoringAllowed
-            ? (value) => setState(() => _cognitiveMonitoring = value)
-            : null,
-        title: const Text('Cognitive monitoring'),
-        subtitle: Text(
-          _cognitiveMonitoringAllowed
-              ? 'Uses short audio recordings from visits to watch for changes.'
-              : 'Available only for dependants over the age of '
-                    '$cognitiveMonitoringMinAgeExclusive.',
-          style: const TextStyle(fontSize: 12, color: inkTertiary),
-        ),
-      ),
     ]);
   }
 
@@ -922,111 +819,6 @@ class _DependantWizardScreenState extends State<DependantWizardScreen> {
       ],
     );
   }
-
-  Widget _buildPhoto() {
-    final photo = _photo;
-    final name = _created?.fullName ?? 'the dependant';
-    final current = _currentPhotos?.firstOrNull;
-    return _formList([
-      Text(
-        _editing
-            ? 'Caregivers confirm who they are visiting against this photo at '
-                  'every check-in. Replace it if it no longer looks like them - '
-                  'the new photo is used once you save.'
-            : '$name is registered. Add a clear photo of their face - caregivers '
-                  'confirm who they are visiting against it at every check-in.',
-        style: const TextStyle(fontSize: 14, color: inkSecondary),
-      ),
-      // Editing, before a replacement is picked: the photo enrolled today.
-      if (_editing && photo == null)
-        switch ((_currentPhotos, current)) {
-          (null, _) => const Center(child: CircularProgressIndicator()),
-          (_, null) => const Text(
-            'No photo enrolled yet.',
-            style: TextStyle(color: inkTertiary),
-          ),
-          (_, final current?) => ClipRRect(
-            borderRadius: BorderRadius.zero,
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: Image.network(
-                current.imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const Center(
-                  child: Text(
-                    'Could not load the current photo.',
-                    style: TextStyle(color: inkTertiary),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        },
-      if (photo != null)
-        ClipRRect(
-          borderRadius: BorderRadius.zero,
-          child: AspectRatio(
-            aspectRatio: 1,
-            child: Image.memory(photo, fit: BoxFit.cover),
-          ),
-        ),
-      switch (_photoResult) {
-        'active' => const _ResultBanner(ok: true, text: 'Photo accepted.'),
-        'flagged' => const _ResultBanner(
-          ok: false,
-          text:
-              'This face looks like someone already enrolled, so a supervisor '
-              'will review the photo.',
-        ),
-        _ => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Registering has no Save - Finish only closes - so the upload needs its own button.
-            if (photo != null && !_editing) ...[
-              ElevatedButton(
-                onPressed: _submitting ? null : _uploadPhoto,
-                style: pillButtonStyle,
-                child: _submitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text('Use this photo'),
-              ),
-              const SizedBox(height: 8),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _submitting
-                        ? null
-                        : () => _pickPhoto(ImageSource.camera),
-                    icon: const Icon(Icons.photo_camera_outlined),
-                    label: const Text('Take photo'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _submitting
-                        ? null
-                        : () => _pickPhoto(ImageSource.gallery),
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Gallery'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      },
-    ]);
-  }
 }
 
 class _StepHeader extends StatelessWidget {
@@ -1145,34 +937,4 @@ class _AreaMenu extends StatelessWidget {
       },
     );
   }
-}
-
-class _ResultBanner extends StatelessWidget {
-  final bool ok;
-  final String text;
-  const _ResultBanner({required this.ok, required this.text});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: ok ? successTint : dangerTint,
-      borderRadius: BorderRadius.zero,
-    ),
-    child: Row(
-      children: [
-        Icon(
-          ok ? Icons.check_circle : Icons.info_outline,
-          color: ok ? successGreen : dangerRed,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(color: ok ? successGreen : dangerRed),
-          ),
-        ),
-      ],
-    ),
-  );
 }

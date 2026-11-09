@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:family_member/api/api_client.dart';
-import 'package:family_member/api/biometric_enrollments_api.dart';
 import 'package:family_member/api/dependants_api.dart';
 import 'package:family_member/api/family_link_requests_api.dart';
 import 'package:family_member/api/users_api.dart';
@@ -48,7 +47,6 @@ final _dependant = {
   'geofenceLat': -1.2833,
   'geofenceLng': 36.7833,
   'geofenceRadiusMeters': 20,
-  'cognitiveMonitoringEnabled': false,
   'status': 'active',
 };
 
@@ -61,11 +59,9 @@ final _secondDependant = {
 };
 
 /// [callerIsPrimary]: whether the signed-in user (u1) is the dependant's primary contact.
-/// [photoStatus]: the dependant's checkinPhotoStatus.
 /// [dependants]: how many dependants the caller is linked to (0, 1 or 2).
 MockClient _backend({
   bool callerIsPrimary = true,
-  String photoStatus = 'ready',
   int dependants = 1,
 }) => MockClient((request) async {
   final path = request.url.path.replaceFirst('/prod', '');
@@ -73,8 +69,8 @@ MockClient _backend({
   final Object body = switch (path) {
     '/dependants' => {
       'items': [
-        if (dependants > 0) {..._dependant, 'checkinPhotoStatus': photoStatus},
-        if (dependants > 1) {..._secondDependant, 'checkinPhotoStatus': 'ready'},
+        if (dependants > 0) _dependant,
+        if (dependants > 1) _secondDependant,
       ],
       'nextCursor': null,
     },
@@ -112,12 +108,11 @@ MockClient _backend({
         'isPrimaryContact': callerIsPrimary,
       },
     ],
-    '/biometric-enrollments' => [],
     '/visit-schedules/v-now/verification' => {
       'event': {'checkinAt': _iso(const Duration(minutes: 25)), 'checkoutAt': null},
       'attempts': [
         {
-          'attemptType': 'caregiver_liveness',
+          'attemptType': 'geofence',
           'passed': true,
           'attemptedAt': _iso(const Duration(minutes: 28)),
         },
@@ -175,7 +170,6 @@ Future<void> _pumpHome(
         authService: authService,
         dependantsApi: DependantsApi(client),
         visitSchedulesApi: VisitSchedulesApi(client),
-        enrollmentsApi: BiometricEnrollmentsApi(client),
         usersApi: UsersApi(client),
         linkRequestsApi: FamilyLinkRequestsApi(client),
         identity: IdentityClaims(sub: 'sub-1', role: 'family_member'),
@@ -283,9 +277,9 @@ void main() {
         expect(find.text('Care activities'), findsOneWidget);
         expect(find.text('Give morning medication'), findsOneWidget);
         expect(find.text('Declined - Too tired'), findsOneWidget);
-        // Photo steps never passed in this fixture, but the visit wasn't missed, so they read
+        // The arrival was never recorded in this fixture, but the visit wasn't missed, so it reads
         // "Not yet" rather than showing a red X.
-        expect(find.text('Not yet'), findsNWidgets(2));
+        expect(find.text('Not yet'), findsOneWidget);
 
         await tester.pageBack();
         await tester.pumpAndSettle();
@@ -363,50 +357,5 @@ void main() {
       await _goTo(tester, 'Visits');
       expect(find.text('No dependants yet'), findsOneWidget);
     }, () => _backend(dependants: 0));
-  });
-
-  group('a dependant without a usable photo', () {
-    testWidgets('the primary contact is told to add one, and taken to the Photo step', (
-      tester,
-    ) async {
-      await http.runWithClient(() async {
-        await _pumpHome(tester, const Size(360, 780));
-        expect(find.text('Add a photo of Wanjiku'), findsOneWidget);
-
-        await tester.tap(find.widgetWithText(FilledButton, 'Add photo'));
-        await tester.pumpAndSettle();
-        expect(find.text('Edit details'), findsOneWidget);
-        expect(
-          find.textContaining('Replace it if it no longer looks like them'),
-          findsOneWidget,
-        );
-      }, () => _backend(photoStatus: 'missing'));
-    });
-
-    testWidgets('another family member is told the primary contact must add it', (
-      tester,
-    ) async {
-      await http.runWithClient(() async {
-        await _pumpHome(tester, const Size(360, 780));
-        expect(find.text('Wanjiku has no photo yet'), findsOneWidget);
-        expect(find.widgetWithText(FilledButton, 'Add photo'), findsNothing);
-      }, () => _backend(callerIsPrimary: false, photoStatus: 'missing'));
-    });
-
-    testWidgets('a photo waiting for review is not asked for again', (tester) async {
-      await http.runWithClient(() async {
-        await _pumpHome(tester, const Size(360, 780));
-        expect(find.text("Wanjiku's photo is waiting for review"), findsOneWidget);
-        expect(find.widgetWithText(FilledButton, 'Add photo'), findsNothing);
-      }, () => _backend(photoStatus: 'awaiting_review'));
-    });
-
-    testWidgets('nothing is shown once the photo is ready', (tester) async {
-      await http.runWithClient(() async {
-        await _pumpHome(tester, const Size(360, 780));
-        expect(find.text('Add a photo of Wanjiku'), findsNothing);
-        expect(find.byIcon(Icons.photo_camera_outlined), findsNothing);
-      }, _backend);
-    });
   });
 }
