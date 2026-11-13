@@ -14,18 +14,26 @@ def normalise(vectors):
 class Embedder:
     """Frozen, pinned ECAPA-TDNN on the CPU. Nothing here trains."""
 
-    def __init__(self):
+    def __init__(self, local_dir=None):
+        """local_dir: a folder already holding the pinned model (the voice Lambda's image), so
+        nothing is fetched. Otherwise the pinned revision is downloaded once into the data folder."""
         import torch
         from speechbrain.inference.speaker import EncoderClassifier
         from speechbrain.utils.fetching import FetchConfig, LocalStrategy
 
         torch.set_num_threads(config.SV_TORCH_THREADS)
         self._torch = torch
-        # COPY, because the default symlinks need developer mode on Windows.
-        self.model = EncoderClassifier.from_hparams(
-            source=config.SV_MODEL_NAME, fetch_config=FetchConfig(revision=config.SV_MODEL_REVISION),
-            savedir=str(config.SV_DATA_DIR / "ecapa"), run_opts={"device": "cpu"},
-            local_strategy=LocalStrategy.COPY)
+        if local_dir is not None:
+            # hyperparams.yaml loads its weights from pretrained_path, which names the Hub.
+            self.model = EncoderClassifier.from_hparams(
+                source=str(local_dir), savedir=str(local_dir), run_opts={"device": "cpu"},
+                overrides={"pretrained_path": str(local_dir)}, local_strategy=LocalStrategy.NO_LINK)
+        else:
+            # COPY, because the default symlinks need developer mode on Windows.
+            self.model = EncoderClassifier.from_hparams(
+                source=config.SV_MODEL_NAME, fetch_config=FetchConfig(revision=config.SV_MODEL_REVISION),
+                savedir=str(config.SV_DATA_DIR / "ecapa"), run_opts={"device": "cpu"},
+                local_strategy=LocalStrategy.COPY)
         self.model.eval()
 
     def embed_batch(self, batch):
