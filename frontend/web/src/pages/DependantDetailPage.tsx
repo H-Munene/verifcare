@@ -8,6 +8,7 @@ import {
   type FamilyMemberSelection,
 } from '../components/FamilyMemberResolver';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VoiceChecksList } from '../components/VoiceChecksList';
 import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
@@ -21,11 +22,12 @@ import { BirthdayCakeIcon, Location01Icon, UserIcon } from '@hugeicons/core-free
 import { MetaList } from '../design-system/MetaList';
 import { LoadError } from '../design-system/LoadError';
 
-type DetailTab = 'family' | 'visits';
+type DetailTab = 'family' | 'visits' | 'voice';
 
 const TABS = [
   { id: 'family' as const, label: 'Family' },
   { id: 'visits' as const, label: 'Visit History' },
+  { id: 'voice' as const, label: 'Voice Checks' },
 ];
 
 // Wireframe page 6 (Dependant Detail), restructured into tabs (2026-09-23, user request, matching
@@ -158,6 +160,7 @@ export function DependantDetailPage() {
         ) : null}
 
         {activeTab === 'visits' ? <VisitHistoryList dependantId={dependant.id} /> : null}
+        {activeTab === 'voice' ? <VoiceChecksList dependantId={dependant.id} /> : null}
       </div>
 
       {addingMember ? (

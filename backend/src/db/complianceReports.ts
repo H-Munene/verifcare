@@ -65,6 +65,11 @@ export interface VisitRecord {
   checkoutDistanceFromGeofenceMeters: number | null;
   checkinMethod: schema.CheckinMethod | null;
   familyDistanceFromGeofenceMeters: number | null;
+  /** How check-out was confirmed. Null for visits checked out before family confirmation (0019). */
+  checkoutMethod: schema.CheckoutMethod | null;
+  checkoutOverrideReason: schema.CheckoutOverrideReason | null;
+  checkoutOverrideNote: string | null;
+  /** Whether the dependant's recording exists. */
   audioRecorded: boolean;
   audioSkipReason: schema.AudioSkipReason | null;
   /** Set when this visit took over from another caregiver's late visit. */
@@ -77,15 +82,16 @@ export interface VisitRecord {
 }
 
 /** An exception is a visit a supervisor should account for. */
-export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override';
+export type ExceptionKind =
+  'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override' | 'checkout_override';
 
 export interface VisitAssessment {
   outcome: TrendOutcome;
   /**
    * Every check passed: checked in by scanning a family member's code (both phones were inside the
    * geofence, or no code could have been issued or scanned), and checked out inside the radius. A
-   * supervisor override never counts. Visits checked out before checkout location
-   * was recorded (migration 0015) can't show the last part, so they don't count.
+   * supervisor override never counts, nor does a check-out override. Visits checked out before
+   * checkout location was recorded (migration 0015) can't show the last part, so they don't count.
    */
   fullyVerified: boolean;
   late: boolean;
@@ -108,6 +114,7 @@ export function assessVisit(visit: VisitRecord, now: Date): VisitAssessment {
     visit.checkinAt !== null &&
     visit.checkoutAt !== null &&
     visit.checkinMethod === 'qr' &&
+    visit.checkoutMethod !== 'override' &&
     visit.checkoutDistanceFromGeofenceMeters !== null &&
     visit.checkoutDistanceFromGeofenceMeters <= visit.geofenceRadiusMeters;
 
@@ -123,6 +130,9 @@ export function assessVisit(visit: VisitRecord, now: Date): VisitAssessment {
   }
   if (visit.checkinMethod === 'supervisor_override') {
     exceptionKinds.push('supervisor_override');
+  }
+  if (visit.checkoutMethod === 'override') {
+    exceptionKinds.push('checkout_override');
   }
   return { outcome, fullyVerified, late, missingCheckout, exceptionKinds };
 }
@@ -158,6 +168,9 @@ export async function visitRecords(
         schema.verificationEvents.checkoutDistanceFromGeofenceMeters,
       checkinMethod: schema.verificationEvents.checkinMethod,
       familyDistanceFromGeofenceMeters: schema.verificationEvents.familyDistanceFromGeofenceMeters,
+      checkoutMethod: schema.verificationEvents.checkoutMethod,
+      checkoutOverrideReason: schema.verificationEvents.checkoutOverrideReason,
+      checkoutOverrideNote: schema.verificationEvents.checkoutOverrideNote,
       audioSkipReason: schema.verificationEvents.audioSkipReason,
       recoveredFromVisitId: schema.visitSchedules.recoveredFromVisitId,
       audioRecordId: schema.audioRecords.id,
@@ -169,9 +182,13 @@ export async function visitRecords(
       schema.verificationEvents,
       eq(schema.verificationEvents.visitScheduleId, schema.visitSchedules.id),
     )
+    // The dependant's recording only: two per visit since 0019, and one row per visit is wanted.
     .leftJoin(
       schema.audioRecords,
-      eq(schema.audioRecords.verificationEventId, schema.visitSchedules.id),
+      and(
+        eq(schema.audioRecords.verificationEventId, schema.visitSchedules.id),
+        eq(schema.audioRecords.role, 'dependant'),
+      ),
     )
     .where(visitCondition)
     .orderBy(asc(schema.visitSchedules.scheduledStart), asc(schema.visitSchedules.id));
@@ -585,6 +602,7 @@ export async function consentRegister(db: Db, now: Date): Promise<ConsentRegiste
   const consentsOf = (subjectId: string): Record<ConsentType, ConsentState> => ({
     location_verification: latest.get(`${subjectId}:location_verification`) ?? NO_CONSENT,
     visit_audio: latest.get(`${subjectId}:visit_audio`) ?? NO_CONSENT,
+    voice_verification: latest.get(`${subjectId}:voice_verification`) ?? NO_CONSENT,
   });
   const hasLocationConsent = (subjectId: string) =>
     latest.get(`${subjectId}:location_verification`)?.status === 'active';

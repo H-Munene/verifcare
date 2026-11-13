@@ -30,6 +30,7 @@ describe('loadConfig', () => {
       checkinSessionTokenTtlSeconds: 600,
       checkinQrTokenTtlSeconds: 60,
       visitAudioBucketName: requiredEnv.VISIT_AUDIO_BUCKET_NAME,
+      voiceFunctionName: undefined,
     });
   });
 

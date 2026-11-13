@@ -9,6 +9,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
+import { createFakeVoiceService } from '../voiceService.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -93,7 +94,10 @@ function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
     next();
   };
 
-  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
+  app.use(
+    '/dependants',
+    createDependantsRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
+  );
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -256,15 +260,16 @@ describe.skipIf(!hasTestDb)(
         const db = getDb();
         const consenting = await createTestUser('fm-yes', 'family_member', '+254700000080');
         const onlyV1 = await createTestUser('fm-v1', 'family_member', '+254700000081');
-        // fm-yes ticked both boxes on the consent screen (terms v3); fm-v1 only accepted v1, which
+        // fm-yes ticked every box on the consent screen (terms v4); fm-v1 only accepted v1, which
         // never asked.
         await db.insert(schema.termsAcceptances).values([
           {
             userId: consenting.id,
             document: 'family_member',
-            version: '3',
+            version: '4',
             locationConsent: true,
             audioConsent: true,
+            voiceConsent: true,
           },
           {
             userId: onlyV1.id,
@@ -293,6 +298,7 @@ describe.skipIf(!hasTestDb)(
         expect(consents.map((row) => row.consentType).sort()).toEqual([
           'location_verification',
           'visit_audio',
+          'voice_verification',
         ]);
         expect(consents.every((row) => row.grantedBy === consenting.id)).toBe(true);
 

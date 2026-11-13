@@ -72,10 +72,14 @@ import {
   type SortKey,
 } from '../pagination.js';
 import { E164_MESSAGE, E164_PHONE_NUMBER, parseOrSendProblem } from '../validation.js';
+import { removeEnrollment } from '../voiceChecks.js';
+import type { VoiceService } from '../voiceService.js';
 
 export interface DependantsRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
+  // Deactivating a dependant deletes their voiceprint.
+  voice: VoiceService;
 }
 
 interface DependantResponse {
@@ -967,6 +971,12 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
         });
         return row;
       });
+      if (updated.status === 'deactivated' && existing.status !== 'deactivated') {
+        await removeEnrollment(db, dependencies.voice, {
+          subjectType: 'dependant',
+          id: dependantId,
+        });
+      }
 
       res.status(200).json(toDependantResponse(updated));
     } catch (err) {

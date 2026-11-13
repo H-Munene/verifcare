@@ -61,7 +61,7 @@ describe('routers sharing /visit-schedules are mounted so each role can reach it
       (await request(app).post(`${visit}/checkin/override`).send({ reason: 'network_problem' }))
         .status,
     ).toBe(503);
-    expect((await request(app).post(`${visit}/audio/upload-url`)).status).toBe(503);
+    expect((await request(app).post(`${visit}/audio/dependant/upload-url`)).status).toBe(503);
   });
 
   it('keeps a supervisor out of the recording but lets them reach overrides', async () => {

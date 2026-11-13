@@ -8,9 +8,12 @@ import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
 import type {
   AudioSkipReason,
+  CheckoutOverrideReason,
   VerificationAttempt,
   VerificationAttemptType,
+  VisitRecording,
   VisitSchedule,
+  VoiceCheckResult,
 } from '../api/visitSchedules';
 import { Badge } from '../design-system/Badge';
 import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
@@ -34,7 +37,34 @@ const ATTEMPT_LABELS: Record<VerificationAttemptType, string> = {
   geofence: 'location',
   family_location: 'family phone location',
   qr_scan: 'code scan',
+  checkout_qr: 'check-out code scan',
+  checkout_code: 'check-out code entry',
 };
+
+const OVERRIDE_LABELS: Record<CheckoutOverrideReason, string> = {
+  no_family_member_present: 'No family member was there',
+  family_phone_unavailable: "The family member's phone wasn't available",
+  camera_or_code_problem: "The code wouldn't scan or wasn't accepted",
+  other: 'Other reason',
+};
+
+const VOICE_LABELS: Record<VoiceCheckResult, string> = {
+  match: 'Voice matches',
+  mismatch: "Voice doesn't match",
+  too_short: 'Too little speech to check',
+  not_enrolled: 'Not checked: no voice recorded yet',
+  no_consent: 'Not checked: no consent',
+  unavailable: 'Not checked: the check was unavailable',
+};
+
+/** "20 s. Voice matches (score 0.71, advisory)". */
+function recordingSummary(recording: VisitRecording): string {
+  const check = recording.voiceCheck;
+  const result = check
+    ? `${VOICE_LABELS[check.result]}${check.score != null ? ` (score ${check.score.toFixed(2)}, advisory)` : ''}`
+    : 'Not checked';
+  return `${recording.durationSeconds} s. ${result}`;
+}
 
 /** How the visit went, for the home pin and the timeline. */
 function visitOutcome(visit: VisitSchedule, checkedIn: boolean, now: number): HomeState {
@@ -111,7 +141,25 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
         ? { label: 'Started by a supervisor', timestamp: event.checkinAt }
         : {}),
     },
-    { label: 'Checked out', timestamp: event?.checkoutAt ?? null },
+    { label: 'Asked to check out', timestamp: event?.checkoutRequestedAt ?? null },
+    {
+      ...attemptStep(
+        event?.checkoutMethod === 'override'
+          ? "Checked out without the family's code"
+          : 'Checked out with the family code',
+        attempts,
+        event?.checkoutMethod === 'code' ? 'checkout_code' : 'checkout_qr',
+      ),
+      // Visits checked out before family confirmation existed have only a check-out time.
+      timestamp: event?.checkoutAt ?? null,
+      ...(event?.checkoutMethod === 'override' && event.checkoutOverrideReason
+        ? {
+            detail: `${OVERRIDE_LABELS[event.checkoutOverrideReason]}${
+              event.checkoutOverrideNote ? `: ${event.checkoutOverrideNote}` : ''
+            }`,
+          }
+        : {}),
+    },
   ].map((step) => ({
     ...step,
     // A missed visit crosses out every step; otherwise, once it's over, only the ones that
@@ -202,17 +250,40 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
             <dd>{event.qrFamilyMemberName}</dd>
           </div>
         ) : null}
-        {event?.audioRecordedAt ? (
+        {(['caregiver', 'dependant'] as const).map((role) => {
+          const recording = event?.recordings.find((r) => r.role === role);
+          const label = role === 'caregiver' ? "Caregiver's voice" : "Dependant's voice";
+          if (recording) {
+            return (
+              <div key={role} className="visit-details__wide">
+                <dt>{label}</dt>
+                <dd>{recordingSummary(recording)}</dd>
+              </div>
+            );
+          }
+          return role === 'dependant' && event?.audioSkipReason ? (
+            <div key={role} className="visit-details__wide">
+              <dt>{label}</dt>
+              <dd>
+                Not recorded: {AUDIO_SKIP_LABELS[event.audioSkipReason]}
+                {event.audioSkipNote ? ` (${event.audioSkipNote})` : ''}
+              </dd>
+            </div>
+          ) : null;
+        })}
+        {event?.checkoutMethod ? (
           <div className="visit-details__wide">
-            <dt>Recording</dt>
-            <dd>{event.audioDurationSeconds} seconds, available to the family only</dd>
-          </div>
-        ) : event?.audioSkipReason ? (
-          <div className="visit-details__wide">
-            <dt>Recording</dt>
+            <dt>Checked out</dt>
             <dd>
-              None: {AUDIO_SKIP_LABELS[event.audioSkipReason]}
-              {event.audioSkipNote ? ` (${event.audioSkipNote})` : ''}
+              {event.checkoutMethod === 'override'
+                ? `Without the family's code: ${
+                    event.checkoutOverrideReason
+                      ? OVERRIDE_LABELS[event.checkoutOverrideReason]
+                      : 'no reason recorded'
+                  }${event.checkoutOverrideNote ? ` (${event.checkoutOverrideNote})` : ''}`
+                : `Confirmed by ${event.checkoutFamilyMemberName ?? 'a family member'}, code ${
+                    event.checkoutMethod === 'qr' ? 'scanned' : 'typed'
+                  }`}
             </dd>
           </div>
         ) : null}

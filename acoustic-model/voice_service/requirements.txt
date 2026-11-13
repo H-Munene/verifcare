@@ -1,0 +1,10 @@
+# The voice Lambda's image. Versions match requirements-speaker.txt, which produced the evaluated
+# results; torch and torchaudio are installed first from PyTorch's CPU index (see the Dockerfile).
+numpy==2.5.3
+scipy==1.18.1
+soundfile==0.14.0
+speechbrain==1.1.2
+silero-vad==6.2.3
+huggingface_hub==2.4.0
+# A pinned static ffmpeg, to decode the AAC (m4a) recordings the apps upload.
+imageio-ffmpeg==0.6.0

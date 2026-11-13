@@ -52,7 +52,8 @@ export interface VisitSummary {
   totals: VisitSummaryCounts;
 }
 
-export type ExceptionKind = 'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override';
+export type ExceptionKind =
+  'missed' | 'missing_checkout' | 'failed_check' | 'supervisor_override' | 'checkout_override';
 
 export const RESOLUTION_OUTCOMES = [
   'caregiver_absent',
@@ -101,6 +102,8 @@ export interface ComplianceException {
   checkoutAt: string | null;
   kinds: ExceptionKind[];
   failedChecks: { attemptType: string; failureReason: string | null; count: number }[];
+  // Why the caregiver checked out without the family's code.
+  checkoutOverride: { reason: string; note: string | null } | null;
   latestResolution: ResolutionSummary | null;
 }
 
@@ -127,7 +130,7 @@ export interface AlertResponse {
   }[];
 }
 
-export type ConsentType = 'location_verification' | 'visit_audio';
+export type ConsentType = 'location_verification' | 'visit_audio' | 'voice_verification';
 
 export interface ConsentState {
   status: 'active' | 'revoked' | 'none';

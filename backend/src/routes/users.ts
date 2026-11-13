@@ -22,6 +22,8 @@ import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { cursorCondition, decodeCursor, paginate } from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
+import { removeEnrollment } from '../voiceChecks.js';
+import type { VoiceService } from '../voiceService.js';
 
 export interface UsersRouterDependencies {
   cognitoAdmin: CognitoAdmin;
@@ -29,6 +31,8 @@ export interface UsersRouterDependencies {
   // requireAuth.
   requireAuth: RequestHandler;
   requireVerifiedIdentity: RequestHandler;
+  // Deactivating a caregiver deletes their voiceprint.
+  voice: VoiceService;
 }
 
 interface UserResponse {
@@ -376,6 +380,13 @@ export function createUsersRouter(dependencies: UsersRouterDependencies): Router
         });
         return row;
       });
+      if (
+        updated.role === 'caregiver' &&
+        updated.status === 'deactivated' &&
+        existing.status !== 'deactivated'
+      ) {
+        await removeEnrollment(db, dependencies.voice, { subjectType: 'caregiver', id: userId });
+      }
       res.status(200).json(toUserResponse(updated));
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {

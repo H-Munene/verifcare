@@ -280,7 +280,7 @@ async function main() {
   const consents: (typeof schema.consentRecords.$inferInsert)[] = [];
   const grant = (
     subject: { caregiverId: string } | { dependantId: string },
-    consentType: 'location_verification' | 'visit_audio',
+    consentType: 'location_verification' | 'visit_audio' | 'voice_verification',
     grantedBy: string,
     revokedAt?: Date,
   ) => {
@@ -305,12 +305,14 @@ async function main() {
   for (const [i, c] of caregivers.entries()) {
     grant({ caregiverId: c.id }, 'location_verification', c.id);
     if (i !== 7) {
-      grant(
-        { caregiverId: c.id },
-        'visit_audio',
-        c.id,
-        i === 3 ? at(addDays(today, -8), 18) : undefined,
-      );
+      for (const consentType of ['visit_audio', 'voice_verification'] as const) {
+        grant(
+          { caregiverId: c.id },
+          consentType,
+          c.id,
+          i === 3 ? at(addDays(today, -8), 18) : undefined,
+        );
+      }
     }
   }
   for (const [i, d] of dependants.entries()) {
@@ -321,12 +323,14 @@ async function main() {
       i === LOCATION_REVOKED ? at(locationRevokedOn, 9) : undefined,
     );
     if (i !== 20 && i !== 27) {
-      grant(
-        { dependantId: d.id },
-        'visit_audio',
-        d.familyId,
-        i === 2 || i === 13 ? at(addDays(today, -15), 17) : undefined,
-      );
+      for (const consentType of ['visit_audio', 'voice_verification'] as const) {
+        grant(
+          { dependantId: d.id },
+          consentType,
+          d.familyId,
+          i === 2 || i === 13 ? at(addDays(today, -15), 17) : undefined,
+        );
+      }
     }
   }
   await insertAll(schema.consentRecords, consents);
@@ -338,12 +342,12 @@ async function main() {
   const hasAudio = (id: string, when: Date) =>
     audioConsent.has(id) && (audioConsent.get(id) === null || audioConsent.get(id)! > when);
 
-  // The current terms are version 3. Some people only accepted 2, and a few never accepted any.
+  // The current terms are version 4. Some people only accepted 3, and a few never accepted any.
   const terms: (typeof schema.termsAcceptances.$inferInsert)[] = [];
   const accept = (userId: string, document: 'caregiver' | 'family_member', versions: string[]) =>
     versions.forEach((version, v) => {
       const id = randomUUID();
-      const acceptedAt = at(addDays(firstDay, version === '3' ? 5 + v : -30), 8);
+      const acceptedAt = at(addDays(firstDay, version === '4' ? 5 + v : -30), 8);
       terms.push({
         id,
         userId,
@@ -352,14 +356,16 @@ async function main() {
         acceptedAt,
         locationConsent: true,
         audioConsent: true,
+        // Version 4 added the voice box.
+        voiceConsent: version === '4' ? true : null,
       });
       log(acceptedAt, userId, 'terms.accept', 'terms_acceptance', id, { document, version });
     });
   caregivers.forEach((c, i) =>
-    accept(c.id, 'caregiver', i === 9 ? [] : i >= 7 ? ['2'] : ['2', '3']),
+    accept(c.id, 'caregiver', i === 9 ? [] : i >= 7 ? ['3'] : ['3', '4']),
   );
   dependants.forEach((d, i) =>
-    accept(d.familyId, 'family_member', i % 7 === 3 ? [] : i % 5 === 0 ? ['2'] : ['3']),
+    accept(d.familyId, 'family_member', i % 7 === 3 ? [] : i % 5 === 0 ? ['3'] : ['4']),
   );
   await insertAll(schema.termsAcceptances, terms);
 
@@ -453,6 +459,21 @@ async function main() {
       familyDistanceFromGeofenceMeters: override ? null : between(2, 40),
       audioSkipReason: skipReason,
       audioSkipNote: skipReason === 'other' ? 'Too much noise from building works.' : null,
+      // Confirmed with the family's code, or now and then overridden with a reason (0019).
+      ...(checkoutAt
+        ? chance(0.08)
+          ? {
+              checkoutRequestedAt: minutes(checkoutAt, -3),
+              checkoutMethod: 'override' as const,
+              checkoutOverrideReason: 'family_phone_unavailable' as const,
+            }
+          : {
+              checkoutRequestedAt: minutes(checkoutAt, -3),
+              checkoutMethod: 'qr' as const,
+              checkoutFamilyMemberUserId: dependant.familyId,
+              checkoutFamilyDistanceMeters: between(2, 30),
+            }
+        : {}),
     });
     log(checkinAt, caregiverId, 'visit.checkin', 'visit_schedule', visitId, {
       method: override ? 'supervisor_override' : 'qr',
@@ -460,14 +481,22 @@ async function main() {
     if (!checkoutAt) {
       return 'in_progress';
     }
-    if (audioAllowed && !skipAudio) {
-      audio.push({
-        verificationEventId: visitId,
-        s3Key: `visit-audio/${visitId}/${randomUUID()}.m4a`,
-        durationSeconds: 30,
-        uploadedAt: checkoutAt,
-      });
-      log(checkoutAt, caregiverId, 'visit_audio.upload', 'visit_schedule', visitId);
+    // Two recordings per visit since 0019: the caregiver's, and the dependant's unless skipped.
+    if (audioAllowed) {
+      for (const role of skipAudio
+        ? (['caregiver'] as const)
+        : (['caregiver', 'dependant'] as const)) {
+        audio.push({
+          verificationEventId: visitId,
+          role,
+          s3Key: `${visitId}/${role}/${randomUUID()}.m4a`,
+          durationSeconds: role === 'caregiver' ? 15 : 22,
+          uploadedAt: minutes(checkoutAt, -4),
+        });
+        log(minutes(checkoutAt, -4), caregiverId, 'visit_audio.upload', 'visit_schedule', visitId, {
+          role,
+        });
+      }
     }
     for (const task of tasksOf.get(dependantId)!) {
       const status = task.required

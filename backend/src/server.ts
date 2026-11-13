@@ -1,6 +1,8 @@
+import { LambdaClient } from '@aws-sdk/client-lambda';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Pool } from 'pg';
 import { createApp } from './app.js';
+import { createLambdaVoiceService } from './voiceService.js';
 import { createCognitoAdmin } from './auth/cognitoAdmin.js';
 import { createRequireAuth, createRequireVerifiedIdentity } from './auth/middleware.js';
 import { createIdTokenVerifier } from './auth/verifier.js';
@@ -37,12 +39,21 @@ const visitAudioStorage = createVisitAudioStorage({
   bucketName: config.visitAudioBucketName,
 });
 
+// The real voice Lambda when VOICE_FUNCTION_NAME is set, otherwise app.ts's fake.
+const voiceService = config.voiceFunctionName
+  ? createLambdaVoiceService({
+      lambdaClient: new LambdaClient({}),
+      functionName: config.voiceFunctionName,
+    })
+  : undefined;
+
 const app = createApp({
   db,
   requireAuth,
   requireVerifiedIdentity,
   cognitoAdmin,
   visitAudioStorage,
+  voiceService,
   geofenceAccuracyThresholdMeters: config.geofenceAccuracyThresholdMeters,
   checkinSessionTokenTtlSeconds: config.checkinSessionTokenTtlSeconds,
   checkinQrTokenTtlSeconds: config.checkinQrTokenTtlSeconds,

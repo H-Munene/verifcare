@@ -8,6 +8,7 @@ import express, { type Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
+import { createFakeVoiceService } from '../voiceService.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -59,6 +60,7 @@ function buildTestApp(): Express {
   app.use(
     '/dependants',
     createDependantsRouter({
+      voice: createFakeVoiceService(),
       requireAuth,
       cognitoAdmin: {
         assignRole: () => Promise.resolve(),

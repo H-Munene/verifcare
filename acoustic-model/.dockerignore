@@ -1,0 +1,6 @@
+# Only the voice Lambda image is built from here (voice_service/Dockerfile). It needs src/ and
+# voice_service/; data, venvs and results must never reach an image.
+*
+!src/
+!voice_service/
+**/__pycache__

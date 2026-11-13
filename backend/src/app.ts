@@ -4,12 +4,14 @@ import { pinoHttp } from 'pino-http';
 import type { CognitoAdmin } from './auth/cognitoAdmin.js';
 import type { Db } from './db/client.js';
 import type { VisitAudioStorage } from './db/visitAudioStorage.js';
+import { createFakeVoiceService, type VoiceService } from './voiceService.js';
 import { sendProblem } from './errors.js';
 import { logger } from './logger.js';
 import { createCaregiversRouter } from './routes/caregivers.js';
 import { createCheckinRouter } from './routes/checkin.js';
 import { createCheckinCodeRouter } from './routes/checkinCode.js';
 import { createCheckinOverridesRouter } from './routes/checkinOverrides.js';
+import { createCheckoutRouter } from './routes/checkout.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
 import { createComplianceRouter } from './routes/compliance.js';
 import { createDashboardRouter } from './routes/dashboard.js';
@@ -24,6 +26,8 @@ import { createVisitAudioRouter } from './routes/visitAudio.js';
 import { createVisitPlansRouter } from './routes/visitPlans.js';
 import { createVisitResolutionsRouter } from './routes/visitResolutions.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
+import { createVoiceChecksRouter } from './routes/voiceChecks.js';
+import { createVoiceEnrollmentsRouter } from './routes/voiceEnrollments.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -67,8 +71,10 @@ export interface AppDependencies {
   checkinSessionTokenTtlSeconds?: number;
   // How long a family member's check-in code stays valid (config.ts's default applies if omitted).
   checkinQrTokenTtlSeconds?: number;
-  // The visit's 30-second recording. Its routes exist only when this is provided.
+  // Visit recordings and voice enrolment audio. Their routes exist only when this is provided.
   visitAudioStorage?: VisitAudioStorage;
+  // The voice check. A fake that always matches when omitted, for tests; lambda.ts always sets it.
+  voiceService?: VoiceService;
 }
 
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
@@ -124,10 +130,14 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   // /auth/whoami diagnostic routes from the two prior issues are now superseded and removed
   // (both were explicitly documented as temporary, pending exactly this).
   const { requireAuth, requireVerifiedIdentity, cognitoAdmin, visitAudioStorage } = dependencies;
+  const voice = dependencies.voiceService ?? createFakeVoiceService();
   if (requireAuth && requireVerifiedIdentity && cognitoAdmin) {
-    app.use('/users', createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity }));
-    app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
-    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
+    app.use(
+      '/users',
+      createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity, voice }),
+    );
+    app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth, voice }));
+    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth, voice }));
   }
   // HEZ-32's visit-scheduling endpoints - unlike the routers above, this needs only requireAuth
   // (no cognitoAdmin/requireVerifiedIdentity - nothing here touches Cognito), so it's wired
@@ -147,9 +157,16 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     if (visitAudioStorage) {
       app.use(
         '/visit-schedules',
-        createVisitAudioRouter({ requireAuth, storage: visitAudioStorage }),
+        createVisitAudioRouter({ requireAuth, storage: visitAudioStorage, voice }),
+      );
+      app.use(
+        '/voice-enrollments',
+        createVoiceEnrollmentsRouter({ requireAuth, storage: visitAudioStorage, voice }),
       );
     }
+    app.use('/voice-checks', createVoiceChecksRouter({ requireAuth }));
+    // Check-out's caregiver steps (routes/checkout.ts).
+    app.use('/visit-schedules', createCheckoutRouter({ requireAuth }));
     // Check-in's caregiver steps - a separate router at the same prefix (see routes/checkin.ts).
     app.use(
       '/visit-schedules',

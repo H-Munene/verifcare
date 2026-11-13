@@ -8,6 +8,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, UserRole } from '../auth/verifier.js';
+import { createFakeVoiceService } from '../voiceService.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -46,8 +47,14 @@ function buildTestApp(): Express {
     assignRole: vi.fn().mockResolvedValue(undefined),
     createUser: vi.fn().mockResolvedValue('unused-sub'),
   };
-  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
-  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+  app.use(
+    '/dependants',
+    createDependantsRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
+  );
+  app.use(
+    '/caregivers',
+    createCaregiversRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
+  );
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
