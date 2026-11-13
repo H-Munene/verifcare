@@ -38,7 +38,7 @@ function termsBody(response: request.Response): TermsBody {
 
 // What the consent screen sends once both checkboxes are ticked.
 function acceptBody(version: string, overrides: Record<string, unknown> = {}) {
-  return { version, locationConsent: true, audioConsent: true, ...overrides };
+  return { version, locationConsent: true, audioConsent: true, voiceConsent: true, ...overrides };
 }
 
 function buildTestApp(): Express {
@@ -280,12 +280,17 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(response.status).toBe(200);
 
     const [acceptance] = await getDb().select().from(schema.termsAcceptances);
-    expect(acceptance).toMatchObject({ locationConsent: true, audioConsent: true });
+    expect(acceptance).toMatchObject({
+      locationConsent: true,
+      audioConsent: true,
+      voiceConsent: true,
+    });
     const rows = await consentRows();
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.map((row) => row.consentType).sort()).toEqual([
       'location_verification',
       'visit_audio',
+      'voice_verification',
     ]);
     for (const row of rows) {
       expect(row).toMatchObject({
@@ -317,7 +322,7 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(response.status).toBe(200);
 
     const rows = await consentRows();
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(6);
     expect(new Set(rows.map((row) => row.dependantId))).toEqual(new Set([primary, alsoPrimary]));
     expect(rows.every((row) => row.grantedBy === familyMember.id)).toBe(true);
   });
@@ -357,6 +362,7 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(active.map((row) => [row.consentType, row.grantedBy]).sort()).toEqual([
       ['location_verification', supervisor.id],
       ['visit_audio', caregiver.id],
+      ['voice_verification', caregiver.id],
     ]);
   });
   it('asks someone who accepted v1 again, since v2 adds the consents', async () => {

@@ -16,8 +16,13 @@ export interface ConsentSubject {
   id: string;
 }
 
-// Both consents the apps' consent screen asks for, so accepting the terms records both.
-export const TERMS_CONSENT_TYPES: readonly ConsentType[] = ['location_verification', 'visit_audio'];
+// Every consent the apps' consent screen asks for (three since terms v4), so accepting the terms
+// records them all.
+export const TERMS_CONSENT_TYPES: readonly ConsentType[] = [
+  'location_verification',
+  'visit_audio',
+  'voice_verification',
+];
 
 // A record counts until it's revoked (routes/consentRecords.ts's revoke sets revoked_at; rows are
 // never deleted, so the history of who granted and withdrew what stays intact).
@@ -112,7 +117,7 @@ export async function grantConsents(
 }
 
 /**
- * Whether [userId] has ticked both consent boxes on the consent screen in any accepted version of
+ * Whether [userId] has ticked every consent box on the consent screen in an accepted version of
  * the terms. Consent given once isn't withdrawn by a later terms version, so any such acceptance
  * counts (withdrawal is per subject, through POST /consent-records/{id}/revoke).
  */
@@ -125,6 +130,7 @@ export async function hasGivenTermsConsents(db: Db | Tx, userId: string): Promis
         eq(schema.termsAcceptances.userId, userId),
         eq(schema.termsAcceptances.locationConsent, true),
         eq(schema.termsAcceptances.audioConsent, true),
+        eq(schema.termsAcceptances.voiceConsent, true),
       ),
     )
     .limit(1);

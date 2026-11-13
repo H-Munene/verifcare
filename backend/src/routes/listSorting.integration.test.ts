@@ -8,6 +8,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser } from '../auth/verifier.js';
+import { createFakeVoiceService } from '../voiceService.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -41,7 +42,10 @@ function buildTestApp(): Express {
   };
   // The list routes never call Cognito.
   const cognitoAdmin = {} as CognitoAdmin;
-  app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
+  app.use(
+    '/dependants',
+    createDependantsRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
+  );
   app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
   app.use('/visit-schedules', createVisitSchedulesRouter({ requireAuth }));
   app.use(

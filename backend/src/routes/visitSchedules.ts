@@ -10,14 +10,7 @@
 //   caregiver; a family_member sees only visits for a dependant they're linked to (the same
 //   dependant_family_members ownership check routes/dependants.ts's findFamilyMemberLink already
 //   establishes, reused here rather than re-derived).
-// - POST /{id}/checkout (HEZ-39) is caregiver-only, own visit, no supervisor override - confirmed
-//   with the user rather than assumed, since checkout is a plain status flip (not an identity
-//   check like the rest of the check-in flow) and a supervisor override was at least plausible.
-//   Kept consistent with the rest of the check-in flow (HEZ-33/34/35: same caregiver-only-own-
-//   visit rule) rather than introducing a new authorization branch this flow doesn't otherwise
-//   need. Lives here, not routes/checkin.ts, matching openapi.yaml's own tag scoping - the
-//   "Check-in" tag covers the geofence and code-scan steps, and checkout is tagged "Visit
-//   Schedules" instead.
+// - Check-out moved to routes/checkout.ts (2026-11-13), where the family confirms it.
 // - GET /{id}/verification (HEZ-42) uses the exact same ownership rule as GET /{id} - confirmed
 //   with the user rather than assumed, since its own openapi.yaml description ("the admin web
 //   app's visit-history view") could plausibly have meant supervisor-only. A caregiver/family
@@ -41,7 +34,7 @@
 // together - validated here against the merged (existing + patch) row before writing, for the same
 // "classify it, don't let it fall through as a raw error" reason the EXCLUDE constraint is.
 
-import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -54,7 +47,6 @@ import { subjectsWithActiveConsent } from '../db/consents.js';
 import { getPostgresConstraintName, isPostgresExclusionViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
-import { haversineDistanceMeters } from '../geo.js';
 import {
   decodeCursor,
   keysetCondition,
@@ -80,18 +72,47 @@ interface VerificationEventResponse {
   // Who showed the code that was scanned, and how far their phone was from the home.
   qrFamilyMemberName: string | null;
   familyDistanceFromGeofenceMeters: number | null;
-  // The recording's facts or why there isn't one. Never its location: see routes/visitAudio.ts.
+  // The dependant's recording's facts or why there isn't one. Never its location: see
+  // routes/visitAudio.ts.
   audioRecordedAt: string | null;
   audioDurationSeconds: number | null;
   audioSkipReason: schema.AudioSkipReason | null;
   audioSkipNote: string | null;
+  // Both recordings (2026-11-13). The voice check is shown to supervisors only.
+  recordings: RecordingResponse[];
+  // How check-out was confirmed: the family's code, or the caregiver's override and its reason.
+  checkoutRequestedAt: string | null;
+  checkoutMethod: schema.CheckoutMethod | null;
+  checkoutFamilyMemberName: string | null;
+  checkoutOverrideReason: schema.CheckoutOverrideReason | null;
+  checkoutOverrideNote: string | null;
 }
+
+interface RecordingResponse {
+  role: schema.RecordingRole;
+  recordedAt: string;
+  durationSeconds: number;
+  voiceCheck?: {
+    result: schema.VoiceCheckResult;
+    score: number | null;
+    speechSeconds: number | null;
+    threshold: number | null;
+    checkedAt: string;
+  } | null;
+}
+
+type RecordingWithCheck = {
+  recording: typeof schema.audioRecords.$inferSelect;
+  check: typeof schema.voiceChecks.$inferSelect | null;
+};
 
 function toVerificationEventResponse(
   row: typeof schema.verificationEvents.$inferSelect,
-  qrFamilyMemberName: string | null,
-  recording: typeof schema.audioRecords.$inferSelect | undefined,
+  names: { qrFamilyMember: string | null; checkoutFamilyMember: string | null },
+  recordings: RecordingWithCheck[],
+  showVoiceChecks: boolean,
 ): VerificationEventResponse {
+  const recording = recordings.find((r) => r.recording.role === 'dependant')?.recording;
   return {
     visitScheduleId: row.visitScheduleId,
     checkinAt: row.checkinAt ? row.checkinAt.toISOString() : null,
@@ -103,12 +124,35 @@ function toVerificationEventResponse(
     checkoutGpsLng: row.checkoutGpsLng,
     checkoutDistanceFromGeofenceMeters: row.checkoutDistanceFromGeofenceMeters,
     checkinMethod: row.checkinMethod,
-    qrFamilyMemberName,
+    qrFamilyMemberName: names.qrFamilyMember,
     familyDistanceFromGeofenceMeters: row.familyDistanceFromGeofenceMeters,
     audioRecordedAt: recording ? recording.uploadedAt.toISOString() : null,
     audioDurationSeconds: recording ? recording.durationSeconds : null,
     audioSkipReason: row.audioSkipReason,
     audioSkipNote: row.audioSkipNote,
+    recordings: recordings.map(({ recording: r, check }) => ({
+      role: r.role,
+      recordedAt: r.uploadedAt.toISOString(),
+      durationSeconds: r.durationSeconds,
+      ...(showVoiceChecks
+        ? {
+            voiceCheck: check
+              ? {
+                  result: check.result,
+                  score: check.score,
+                  speechSeconds: check.speechSeconds,
+                  threshold: check.threshold,
+                  checkedAt: check.checkedAt.toISOString(),
+                }
+              : null,
+          }
+        : {}),
+    })),
+    checkoutRequestedAt: row.checkoutRequestedAt ? row.checkoutRequestedAt.toISOString() : null,
+    checkoutMethod: row.checkoutMethod,
+    checkoutFamilyMemberName: names.checkoutFamilyMember,
+    checkoutOverrideReason: row.checkoutOverrideReason,
+    checkoutOverrideNote: row.checkoutOverrideNote,
   };
 }
 
@@ -288,18 +332,6 @@ const visitScheduleIdParamSchema = z.string().uuid();
 // The caregiver's GPS fix at checkout. Named and bounded exactly like check-in's geofence request
 // (routes/checkin.ts), so the app sends the same shape for both ends of a visit.
 // The skip reason is how a caregiver accounts for a visit with no recording.
-const checkoutRequestSchema = z
-  .object({
-    gpsLat: z.number().min(-90).max(90),
-    gpsLng: z.number().min(-180).max(180),
-    audioSkipReason: z.enum(schema.AUDIO_SKIP_REASONS).optional(),
-    audioSkipNote: z.string().trim().max(500).optional(),
-  })
-  .refine((body) => body.audioSkipReason !== 'other' || (body.audioSkipNote?.length ?? 0) > 0, {
-    message: "A note is required when the reason is 'other'.",
-    path: ['audioSkipNote'],
-  });
-
 // Consent guardrail (2026-09-27, user request): a visit can't be scheduled or rescheduled until
 // both the caregiver and the dependant have an active (unrevoked) location_verification consent -
 // check-in checks phones' positions against the home, so a visit without that consent could only
@@ -691,10 +723,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         .select()
         .from(schema.verificationEvents)
         .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
-      const [recording] = await db
-        .select()
+      const recordings = await db
+        .select({ recording: schema.audioRecords, check: schema.voiceChecks })
         .from(schema.audioRecords)
-        .where(eq(schema.audioRecords.verificationEventId, visitScheduleId));
+        .leftJoin(schema.voiceChecks, eq(schema.voiceChecks.audioRecordId, schema.audioRecords.id))
+        .where(eq(schema.audioRecords.verificationEventId, visitScheduleId))
+        .orderBy(asc(schema.audioRecords.role));
       const attempts = await db
         .select()
         .from(schema.verificationAttempts)
@@ -729,8 +763,12 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         event: event
           ? toVerificationEventResponse(
               event,
-              await userNameOf(db, event.qrFamilyMemberUserId),
-              recording,
+              {
+                qrFamilyMember: await userNameOf(db, event.qrFamilyMemberUserId),
+                checkoutFamilyMember: await userNameOf(db, event.checkoutFamilyMemberUserId),
+              },
+              recordings,
+              caller.role === 'supervisor',
             )
           : null,
         attempts: attempts.map(toVerificationAttemptResponse),
@@ -917,201 +955,6 @@ export function createVisitSchedulesRouter(dependencies: VisitSchedulesRouterDep
         });
         return;
       }
-      next(err);
-    }
-  });
-
-  // POST /{id}/checkout (HEZ-39): the final step of the check-in flow (architecture.md step 5) -
-  // sets verification_events.checkout_at and flips visit_schedules.status to 'completed'.
-  //
-  // Checkout must happen inside the dependant's geofence radius (2026-09-27, user request), measured
-  // with the same distance function and radius check-in uses: otherwise a caregiver could check in,
-  // leave, and check out later from anywhere, and the recorded visit length would say nothing about
-  // time actually spent at the home. The fix and its distance are stored on verification_events
-  // as the record of where checkout happened. Accuracy and mock-location aren't checked here
-  // (check-in checks them); only the position was asked for.
-  //
-  // A visit whose dependant has consented to visit audio needs a recording or a stated reason for
-  // not having one (2026-11-09). A dependant is never made to speak, so the rule is that its
-  // absence has to be explained, and the reason is kept for the family and the reports.
-  router.post('/:visitScheduleId/checkout', async (req, res, next) => {
-    const visitScheduleId = parseOrSendProblem(
-      visitScheduleIdParamSchema,
-      req.params.visitScheduleId,
-      res,
-    );
-    if (!visitScheduleId) {
-      return;
-    }
-    const body = parseOrSendProblem(checkoutRequestSchema, req.body, res);
-    if (!body) {
-      return;
-    }
-    const db = getDb(res);
-    if (!db) {
-      return;
-    }
-    const caller = req.auth;
-    if (!caller) {
-      sendProblem(res, { type: 'about:blank', title: 'Unauthorized', status: 401 });
-      return;
-    }
-    if (caller.role !== 'caregiver') {
-      sendProblem(res, {
-        type: 'about:blank',
-        title: 'Forbidden',
-        status: 403,
-        detail: 'Only the assigned caregiver may check out of a visit.',
-      });
-      return;
-    }
-
-    try {
-      const callerRow = await getUserByCognitoSub(db, caller.sub);
-      if (!callerRow) {
-        throw new Error(`No users row found for authenticated caller sub ${caller.sub}.`);
-      }
-
-      const [visit] = await db
-        .select()
-        .from(schema.visitSchedules)
-        .where(eq(schema.visitSchedules.id, visitScheduleId));
-      if (!visit) {
-        sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
-        return;
-      }
-      if (visit.caregiverId !== callerRow.id) {
-        sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
-        return;
-      }
-      if (visit.status !== 'in_progress') {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Conflict',
-          status: 409,
-          detail: `This visit hasn't been checked in yet, or is already completed/cancelled (current status: ${visit.status}).`,
-        });
-        return;
-      }
-
-      const [dependant] = await db
-        .select({
-          geofenceLat: schema.dependants.geofenceLat,
-          geofenceLng: schema.dependants.geofenceLng,
-          geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
-        })
-        .from(schema.dependants)
-        .where(eq(schema.dependants.id, visit.dependantId));
-      if (!dependant) {
-        throw new Error(`visit_schedules ${visitScheduleId} references a nonexistent dependant.`);
-      }
-      const distanceMeters = haversineDistanceMeters(
-        body.gpsLat,
-        body.gpsLng,
-        dependant.geofenceLat,
-        dependant.geofenceLng,
-      );
-      if (distanceMeters > dependant.geofenceRadiusMeters) {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Unprocessable Entity',
-          status: 422,
-          detail: `You're ${Math.round(distanceMeters)} m from the dependant's home, outside its ${dependant.geofenceRadiusMeters} m check-out radius. Check out from the home.`,
-        });
-        return;
-      }
-
-      // Visit task checklist (docs/visit-task-checklist-plan.md): a required, active task with no
-      // visit_task_completions row for this visit blocks checkout outright, per the user's own
-      // explicit choice (not just a warning) - "addressed" means any status was recorded
-      // (including not_completed/not_applicable), not that every task must be marked done.
-      const missingRequiredTasks = await db
-        .select({ id: schema.dependantCareTasks.id, title: schema.dependantCareTasks.title })
-        .from(schema.dependantCareTasks)
-        .leftJoin(
-          schema.visitTaskCompletions,
-          and(
-            eq(schema.visitTaskCompletions.careTaskId, schema.dependantCareTasks.id),
-            eq(schema.visitTaskCompletions.visitScheduleId, visitScheduleId),
-          ),
-        )
-        .where(
-          and(
-            eq(schema.dependantCareTasks.dependantId, visit.dependantId),
-            eq(schema.dependantCareTasks.active, true),
-            eq(schema.dependantCareTasks.required, true),
-            isNull(schema.visitTaskCompletions.visitScheduleId),
-          ),
-        );
-      if (missingRequiredTasks.length > 0) {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Conflict',
-          status: 409,
-          detail: `The following required tasks must be addressed before checkout: ${missingRequiredTasks.map((t) => t.title).join(', ')}.`,
-        });
-        return;
-      }
-
-      const [recording] = await db
-        .select({ id: schema.audioRecords.id })
-        .from(schema.audioRecords)
-        .where(eq(schema.audioRecords.verificationEventId, visitScheduleId));
-      const audioConsent = await subjectsWithActiveConsent(
-        db,
-        [{ subjectType: 'dependant', id: visit.dependantId }],
-        'visit_audio',
-      );
-      if (audioConsent.has(visit.dependantId) && !recording && !body.audioSkipReason) {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Conflict',
-          status: 409,
-          detail: 'Add the visit recording, or give a reason for not having one, to check out.',
-          failureReason: 'audio_required',
-        });
-        return;
-      }
-      // A reason only means something when there's no recording to explain.
-      const skip = recording ? undefined : body.audioSkipReason;
-
-      const now = new Date();
-      const [updated] = await db.transaction(async (tx) => {
-        await tx
-          .update(schema.verificationEvents)
-          .set({
-            checkoutAt: now,
-            checkoutGpsLat: body.gpsLat,
-            checkoutGpsLng: body.gpsLng,
-            checkoutDistanceFromGeofenceMeters: distanceMeters,
-            audioSkipReason: skip ?? null,
-            audioSkipNote: skip ? body.audioSkipNote || null : null,
-          })
-          .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
-        const rows = await tx
-          .update(schema.visitSchedules)
-          .set({ status: 'completed', updatedAt: now })
-          .where(eq(schema.visitSchedules.id, visitScheduleId))
-          .returning();
-        // Distance, not the raw GPS fix itself, which is never copied into the log verbatim.
-        await recordAudit(tx, {
-          actorUserId: callerRow.id,
-          action: 'visit.checkout',
-          entityType: 'visit_schedule',
-          entityId: visitScheduleId,
-          metadata: {
-            distanceMeters: Math.round(distanceMeters),
-            audio: recording ? 'recorded' : (skip ?? null),
-          },
-        });
-        return rows;
-      });
-      if (!updated) {
-        throw new Error('Update to visit_schedules returned no row.');
-      }
-      const [response] = await attachDisplayNames(db, [updated]);
-      res.status(200).json(response);
-    } catch (err) {
       next(err);
     }
   });

@@ -431,14 +431,14 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
   it('reports who has accepted the current terms', async () => {
     const db = getDb();
     await db.insert(schema.termsAcceptances).values([
-      { userId: ids.amina!, document: 'caregiver', version: '3' },
+      { userId: ids.amina!, document: 'caregiver', version: '4' },
       { userId: ids.brian!, document: 'caregiver', version: '1' },
     ]);
     const response = await request(app).get('/compliance/terms').set('x-test-auth', supervisorAuth);
     const caregiverDoc = (response.body as TermsBody).documents.find(
       (d) => d.document === 'caregiver',
     );
-    expect(caregiverDoc).toMatchObject({ currentVersion: '3', activeUsers: 2, acceptedCurrent: 1 });
+    expect(caregiverDoc).toMatchObject({ currentVersion: '4', activeUsers: 2, acceptedCurrent: 1 });
     expect(caregiverDoc?.users[0]).toMatchObject({
       name: 'Brian Otieno',
       acceptedCurrent: false,

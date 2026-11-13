@@ -398,7 +398,7 @@ export function createCheckinRouter(dependencies: CheckinRouterDependencies): Ro
         .where(eq(schema.checkinQrTokens.tokenHash, hashSessionToken(body.token)));
       // A code for another visit is reported the same as a meaningless one, so a scan reveals
       // nothing about other visits.
-      if (!code || code.visitScheduleId !== visitScheduleId) {
+      if (!code || code.visitScheduleId !== visitScheduleId || code.purpose !== 'checkin') {
         await refuse('invalid_qr');
         return;
       }

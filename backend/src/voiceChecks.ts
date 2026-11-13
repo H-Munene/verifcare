@@ -29,6 +29,31 @@ export async function activeEnrollment(db: Db | Tx, subject: ConsentSubject) {
   return row;
 }
 
+/**
+ * Ends a person's enrolment and deletes their voiceprint, when they're deactivated (terms v4
+ * promises it). The row is marked first, so a failed delete leaves an orphan object, logged, rather
+ * than a voiceprint still in use.
+ */
+export async function removeEnrollment(
+  db: Db,
+  voice: VoiceService,
+  subject: ConsentSubject,
+): Promise<void> {
+  const current = await activeEnrollment(db, subject);
+  if (!current) {
+    return;
+  }
+  await db
+    .update(schema.voiceEnrollments)
+    .set({ removedAt: new Date() })
+    .where(eq(schema.voiceEnrollments.id, current.id));
+  await voice
+    .remove({ voiceprintKey: current.voiceprintKey })
+    .catch((err: unknown) =>
+      logger.warn({ err, enrollmentId: current.id }, 'voiceprint not deleted'),
+    );
+}
+
 export async function checkRecording(
   db: Db,
   voice: VoiceService,

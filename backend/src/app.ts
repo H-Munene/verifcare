@@ -11,6 +11,7 @@ import { createCaregiversRouter } from './routes/caregivers.js';
 import { createCheckinRouter } from './routes/checkin.js';
 import { createCheckinCodeRouter } from './routes/checkinCode.js';
 import { createCheckinOverridesRouter } from './routes/checkinOverrides.js';
+import { createCheckoutRouter } from './routes/checkout.js';
 import { createConsentRecordsRouter } from './routes/consentRecords.js';
 import { createComplianceRouter } from './routes/compliance.js';
 import { createDashboardRouter } from './routes/dashboard.js';
@@ -128,10 +129,14 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   // /auth/whoami diagnostic routes from the two prior issues are now superseded and removed
   // (both were explicitly documented as temporary, pending exactly this).
   const { requireAuth, requireVerifiedIdentity, cognitoAdmin, visitAudioStorage } = dependencies;
+  const voice = dependencies.voiceService ?? createFakeVoiceService();
   if (requireAuth && requireVerifiedIdentity && cognitoAdmin) {
-    app.use('/users', createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity }));
+    app.use(
+      '/users',
+      createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity, voice }),
+    );
     app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
-    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth }));
+    app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth, voice }));
   }
   // HEZ-32's visit-scheduling endpoints - unlike the routers above, this needs only requireAuth
   // (no cognitoAdmin/requireVerifiedIdentity - nothing here touches Cognito), so it's wired
@@ -149,7 +154,6 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       }),
     );
     if (visitAudioStorage) {
-      const voice = dependencies.voiceService ?? createFakeVoiceService();
       app.use(
         '/visit-schedules',
         createVisitAudioRouter({ requireAuth, storage: visitAudioStorage, voice }),
@@ -159,6 +163,8 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         createVoiceEnrollmentsRouter({ requireAuth, storage: visitAudioStorage, voice }),
       );
     }
+    // Check-out's caregiver steps (routes/checkout.ts).
+    app.use('/visit-schedules', createCheckoutRouter({ requireAuth }));
     // Check-in's caregiver steps - a separate router at the same prefix (see routes/checkin.ts).
     app.use(
       '/visit-schedules',

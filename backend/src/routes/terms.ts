@@ -28,7 +28,7 @@ import { z } from 'zod';
 import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
-import { grantConsents, type ConsentSubject } from '../db/consents.js';
+import { grantConsents, TERMS_CONSENT_TYPES, type ConsentSubject } from '../db/consents.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { CURRENT_TERMS, type TermsDocument, type TermsDocumentType } from '../terms.js';
@@ -49,6 +49,10 @@ const acceptTermsRequestSchema = z.object({
   }),
   audioConsent: z.literal(true, {
     error: 'Consent to audio recording during visits is required to accept the terms.',
+  }),
+  // Terms v4 (2026-11-13): the third required box.
+  voiceConsent: z.literal(true, {
+    error: 'Consent to voice checks at visits is required to accept the terms.',
   }),
 });
 
@@ -216,6 +220,7 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             version: terms.version,
             locationConsent: body.locationConsent,
             audioConsent: body.audioConsent,
+            voiceConsent: body.voiceConsent,
           })
           .onConflictDoNothing()
           .returning();
@@ -231,7 +236,7 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             metadata: {
               document: terms.document,
               version: terms.version,
-              consentTypesGranted: ['location_verification', 'visit_audio'],
+              consentTypesGranted: TERMS_CONSENT_TYPES,
             },
           });
         }

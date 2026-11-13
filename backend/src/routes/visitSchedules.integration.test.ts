@@ -168,10 +168,6 @@ async function linkFamilyMember(dependantId: string, familyMemberUserId: string)
   });
 }
 
-// A GPS fix at the test dependant's geofence centre (createTestDependant), for checkout, which must
-// happen inside the home's radius.
-const atHome = { gpsLat: -1.2921, gpsLng: 36.8219 };
-
 function visitPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     scheduledStart: '2026-10-01T09:00:00Z',
@@ -664,344 +660,6 @@ describe.skipIf(!hasTestDb)(
       });
     });
 
-    describe('POST /visit-schedules/{visitScheduleId}/checkout (HEZ-39)', () => {
-      it('checks the assigned caregiver out: sets checkout_at, flips status to completed', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(200);
-        expect(visitBody(response).status).toBe('completed');
-
-        const db = getDb();
-        const [event] = await db
-          .select()
-          .from(schema.verificationEvents)
-          .where(eq(schema.verificationEvents.visitScheduleId, visit.id));
-        expect(event?.checkoutAt).not.toBeNull();
-        expect(event).toMatchObject({
-          checkoutGpsLat: atHome.gpsLat,
-          checkoutGpsLng: atHome.gpsLng,
-        });
-        expect(event?.checkoutDistanceFromGeofenceMeters).toBe(0);
-
-        const [audit] = await db
-          .select()
-          .from(schema.auditLog)
-          .where(eq(schema.auditLog.action, 'visit.checkout'));
-        expect(audit).toMatchObject({
-          entityType: 'visit_schedule',
-          entityId: visit.id,
-          actorUserId: caregiver.userId,
-          metadata: { distanceMeters: 0 },
-        });
-      });
-
-      it('checks out from inside the radius, short of its edge', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-        // ~89 m north of the centre (0.0008 degrees of latitude), inside the 100 m radius.
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send({ gpsLat: atHome.gpsLat + 0.0008, gpsLng: atHome.gpsLng });
-
-        expect(response.status).toBe(200);
-        const [event] = await getDb()
-          .select()
-          .from(schema.verificationEvents)
-          .where(eq(schema.verificationEvents.visitScheduleId, visit.id));
-        expect(event?.checkoutDistanceFromGeofenceMeters).toBeGreaterThan(85);
-        expect(event?.checkoutDistanceFromGeofenceMeters).toBeLessThan(100);
-      });
-
-      it("refuses a checkout from outside the home's radius (422), naming the distance and radius", async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-        // ~222 m north of the centre, outside the 100 m radius.
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send({ gpsLat: atHome.gpsLat + 0.002, gpsLng: atHome.gpsLng });
-
-        expect(response.status).toBe(422);
-        expect(problemBody(response).detail).toContain("You're 222 m from the dependant's home");
-        expect(problemBody(response).detail).toContain('100 m check-out radius');
-
-        // Nothing changed: still in progress, no checkout recorded.
-        const db = getDb();
-        const [row] = await db
-          .select()
-          .from(schema.visitSchedules)
-          .where(eq(schema.visitSchedules.id, visit.id));
-        expect(row?.status).toBe('in_progress');
-        const [event] = await db
-          .select()
-          .from(schema.verificationEvents)
-          .where(eq(schema.verificationEvents.visitScheduleId, visit.id));
-        expect(event).toMatchObject({ checkoutAt: null, checkoutGpsLat: null });
-      });
-
-      it('requires a valid location to check out (400)', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-        for (const body of [
-          {},
-          { gpsLat: atHome.gpsLat },
-          { gpsLat: 91, gpsLng: 0 },
-          { gpsLat: '1', gpsLng: '2' },
-        ]) {
-          const response = await request(app)
-            .post(`/visit-schedules/${visit.id}/checkout`)
-            .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-            .send(body);
-          expect(response.status).toBe(400);
-        }
-        const [row] = await getDb()
-          .select()
-          .from(schema.visitSchedules)
-          .where(eq(schema.visitSchedules.id, visit.id));
-        expect(row?.status).toBe('in_progress');
-      });
-
-      it('rejects a supervisor caller with 403 - no supervisor override', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-          .send(atHome);
-
-        expect(response.status).toBe(403);
-      });
-
-      it('rejects a caregiver checking out a visit assigned to someone else with 403', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiverA = await createTestCaregiver('cg-a', '+254700000002');
-        await createTestCaregiver('cg-b', '+254700000003');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiverA.userId, dependant.id, supervisor.id);
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-b', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(403);
-      });
-
-      it('rejects a visit that has not been checked in yet with 409', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const created = await request(app)
-          .post('/visit-schedules')
-          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'))
-          .send(visitPayload({ caregiverId: caregiver.userId, dependantId: dependant.id }));
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visitBody(created).id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(409);
-      });
-
-      it('rejects checking out a visit that is already completed with 409', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-        const first = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-        expect(first.status).toBe(200);
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(409);
-      });
-
-      it('returns 404 for a nonexistent visit', async () => {
-        await createTestCaregiver('cg-1', '+254700000002');
-        const response = await request(app)
-          .post('/visit-schedules/01a0bfb1-61b8-7260-b9e3-2d549e1bda49/checkout')
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(404);
-      });
-
-      describe('the visit recording', () => {
-        async function inProgressWithAudioConsent() {
-          const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-          const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-          const dependant = await createTestDependant(supervisor.id);
-          await getDb().insert(schema.consentRecords).values({
-            subjectType: 'dependant',
-            dependantId: dependant.id,
-            consentType: 'visit_audio',
-            grantedBy: supervisor.id,
-          });
-          return createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-        }
-        const checkout = (visitId: string, extra: Record<string, unknown> = {}) =>
-          request(app)
-            .post(`/visit-schedules/${visitId}/checkout`)
-            .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-            .send({ ...atHome, ...extra });
-        const eventOf = async (visitId: string) => {
-          const [event] = await getDb()
-            .select()
-            .from(schema.verificationEvents)
-            .where(eq(schema.verificationEvents.visitScheduleId, visitId));
-          return event;
-        };
-
-        it('refuses checkout with neither a recording nor a reason (409)', async () => {
-          const visit = await inProgressWithAudioConsent();
-
-          const response = await checkout(visit.id);
-
-          expect(response.status).toBe(409);
-          expect(response.body).toMatchObject({ failureReason: 'audio_required' });
-          expect((await eventOf(visit.id))?.checkoutAt).toBeNull();
-        });
-
-        it('accepts a stated reason and keeps it for the family and the reports', async () => {
-          const visit = await inProgressWithAudioConsent();
-
-          const response = await checkout(visit.id, { audioSkipReason: 'dependant_declined' });
-
-          expect(response.status).toBe(200);
-          expect(await eventOf(visit.id)).toMatchObject({
-            audioSkipReason: 'dependant_declined',
-            audioSkipNote: null,
-          });
-        });
-
-        it("needs a note when the reason is 'other'", async () => {
-          const visit = await inProgressWithAudioConsent();
-
-          expect((await checkout(visit.id, { audioSkipReason: 'other' })).status).toBe(400);
-          expect(
-            (await checkout(visit.id, { audioSkipReason: 'other', audioSkipNote: 'Fire alarm' }))
-              .status,
-          ).toBe(200);
-        });
-
-        it('accepts a recording, and ignores a reason sent alongside one', async () => {
-          const visit = await inProgressWithAudioConsent();
-          await getDb()
-            .insert(schema.audioRecords)
-            .values({
-              verificationEventId: visit.id,
-              role: 'dependant',
-              s3Key: `${visit.id}/clip.m4a`,
-              durationSeconds: 30,
-            });
-
-          const response = await checkout(visit.id, { audioSkipReason: 'dependant_declined' });
-
-          expect(response.status).toBe(200);
-          expect((await eventOf(visit.id))?.audioSkipReason).toBeNull();
-        });
-
-        it("doesn't ask for anything when the family hasn't consented to audio", async () => {
-          const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-          const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-          const dependant = await createTestDependant(supervisor.id);
-          const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-          expect((await checkout(visit.id)).status).toBe(200);
-        });
-      });
-
-      it('blocks checkout with a 409 naming the task when a required care task is unaddressed', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        await createTestCareTask(dependant.id, supervisor.id, {
-          title: 'Assist with bathing',
-          required: true,
-        });
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(409);
-        expect(problemBody(response).detail).toMatch(/Assist with bathing/);
-
-        const db = getDb();
-        const [unchanged] = await db
-          .select()
-          .from(schema.visitSchedules)
-          .where(eq(schema.visitSchedules.id, visit.id));
-        expect(unchanged?.status).toBe('in_progress');
-      });
-
-      it('allows checkout once every required task has any status recorded, and ignores non-required/retired tasks', async () => {
-        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
-        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
-        const dependant = await createTestDependant(supervisor.id);
-        const required = await createTestCareTask(dependant.id, supervisor.id, {
-          title: 'Assist with bathing',
-          required: true,
-        });
-        await createTestCareTask(dependant.id, supervisor.id, {
-          title: 'Optional task',
-          required: false,
-        });
-        await createTestCareTask(dependant.id, supervisor.id, {
-          title: 'Retired required task',
-          required: true,
-          active: false,
-        });
-        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
-        const db = getDb();
-        // "Addressed" means any status was recorded, not necessarily 'completed' - matches the
-        // real-world "Required task alert" semantics this blocking mirrors.
-        await db.insert(schema.visitTaskCompletions).values({
-          visitScheduleId: visit.id,
-          careTaskId: required.id,
-          status: 'not_applicable',
-        });
-
-        const response = await request(app)
-          .post(`/visit-schedules/${visit.id}/checkout`)
-          .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
-          .send(atHome);
-
-        expect(response.status).toBe(200);
-        expect(visitBody(response).status).toBe('completed');
-      });
-    });
-
     describe('GET /visit-schedules/{visitScheduleId}/verification (HEZ-42)', () => {
       it('returns a null event and empty attempts for a visit that has never checked in', async () => {
         const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
@@ -1044,6 +702,67 @@ describe.skipIf(!hasTestDb)(
           entityId: visitBody(created).id,
           actorUserId: supervisor.id,
         });
+      });
+
+      it("shows both recordings, but each voice check's score only to supervisors", async () => {
+        const supervisor = await createTestUser('sup-1', 'supervisor', '+254700000001');
+        const caregiver = await createTestCaregiver('cg-1', '+254700000002');
+        const familyMember = await createTestUser('fam-1', 'family_member', '+254700000003');
+        const dependant = await createTestDependant(supervisor.id);
+        await linkFamilyMember(dependant.id, familyMember.id);
+        const visit = await createInProgressVisit(caregiver.userId, dependant.id, supervisor.id);
+        const [recording] = await getDb()
+          .insert(schema.audioRecords)
+          .values([
+            { verificationEventId: visit.id, role: 'dependant', s3Key: 'a', durationSeconds: 20 },
+            { verificationEventId: visit.id, role: 'caregiver', s3Key: 'b', durationSeconds: 15 },
+          ])
+          .returning();
+        await getDb().insert(schema.voiceChecks).values({
+          audioRecordId: recording!.id,
+          result: 'mismatch',
+          score: 0.31,
+          threshold: 0.5,
+        });
+        await getDb()
+          .update(schema.verificationEvents)
+          .set({ checkoutMethod: 'override', checkoutOverrideReason: 'family_phone_unavailable' });
+
+        const asSupervisor = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('sup-1', 'supervisor'));
+        const asFamily = await request(app)
+          .get(`/visit-schedules/${visit.id}/verification`)
+          .set('x-test-auth', testAuthHeader('fam-1', 'family_member'));
+
+        type Body = {
+          event: {
+            recordings: { role: string; voiceCheck?: { result: string; score: number } | null }[];
+            checkoutMethod: string;
+            checkoutOverrideReason: string;
+            audioDurationSeconds: number;
+          };
+        };
+        const supervisorEvent = (asSupervisor.body as Body).event;
+        expect(supervisorEvent).toMatchObject({
+          checkoutMethod: 'override',
+          checkoutOverrideReason: 'family_phone_unavailable',
+          audioDurationSeconds: 20,
+        });
+        expect(
+          supervisorEvent.recordings.map((r) => [
+            r.role,
+            r.voiceCheck?.result,
+            r.voiceCheck?.score,
+          ]),
+        ).toEqual([
+          ['caregiver', undefined, undefined],
+          ['dependant', 'mismatch', 0.31],
+        ]);
+        expect(supervisorEvent.recordings[0]!.voiceCheck).toBeNull();
+        const familyRecordings = (asFamily.body as Body).event.recordings;
+        expect(familyRecordings).toHaveLength(2);
+        expect(familyRecordings.every((r) => !('voiceCheck' in r))).toBe(true);
       });
 
       it('returns the event and its attempts for an in-progress visit', async () => {
