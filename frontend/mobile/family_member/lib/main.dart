@@ -53,7 +53,7 @@ class MzaziCareFamilyMemberApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Mzazi Care - Family Member',
+      title: 'VerifCare - Family Member',
       theme: buildAppTheme(),
       home: _RootScreen(
         authService: authService,

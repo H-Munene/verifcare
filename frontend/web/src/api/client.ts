@@ -27,7 +27,7 @@ export function errorMessage(error: unknown): string {
   }
   // fetch rejects with a TypeError when the request never reached the API.
   if (error instanceof TypeError) {
-    return "Couldn't reach Mzazi Care. Check your connection and try again.";
+    return "Couldn't reach VerifCare. Check your connection and try again.";
   }
   return 'Something went wrong. Try again.';
 }

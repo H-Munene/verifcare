@@ -45,6 +45,6 @@ loadConfig().then(
     ),
   (err: unknown) => {
     console.error(err);
-    root.render(<p role="alert">Mzazi Care couldn't start. Please reload the page.</p>);
+    root.render(<p role="alert">VerifCare couldn't start. Please reload the page.</p>);
   },
 );

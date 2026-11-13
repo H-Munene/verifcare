@@ -532,7 +532,7 @@ void main() {
     for (final (status, detail) in [
       (
         404,
-        "No Mzazi Care account uses that email. They can sign up in the app and "
+        "No VerifCare account uses that email. They can sign up in the app and "
             'send you a request to link them.',
       ),
       (409, 'They are already linked to this dependant.'),

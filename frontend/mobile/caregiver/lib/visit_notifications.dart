@@ -83,7 +83,9 @@ class VisitNotifications {
     await _plugin.show(
       id: _coverOfferId,
       title: 'Can you cover a visit nearby?',
-      body: ward == null ? 'Open Mzazi Care to answer' : '$ward - open Mzazi Care to answer',
+      body: ward == null
+          ? 'Open VerifCare to answer'
+          : '$ward - open VerifCare to answer',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           'cover_offers',

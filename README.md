@@ -1,6 +1,6 @@
-# Mzazi Care
+# VerifCare
 
-Mzazi Care is a geo-verified visit tracking system for home caregivers in Kenya.
+VerifCare is a geo-verified visit tracking system for home caregivers in Kenya.
 It lets a care agency prove that a scheduled visit happened at the right place, at the right time, with the right people present.
 At check-in, the caregiver's phone checks it is within the dependant's home geofence, then scans a short-lived code shown on a family member's phone at the home.
 If nobody from the family is there, a supervisor can start the visit, and it is reported as an exception.
@@ -23,7 +23,7 @@ The supervisor web console is live at **https://mzazicare.hmunene.com/**.
 
 ## Architecture
 
-![Mzazi Care AWS architecture](assets/aws_architecture.png)
+![VerifCare AWS architecture](assets/aws_architecture.png)
 
 Everything runs in one AWS CDK stack in `eu-west-1` (Ireland), defined in `infra/lib/`.
 The backend is serverless: three Node.js Lambda functions and one Python container Lambda for the voice check, so compute costs scale with use rather than running around the clock.
@@ -60,7 +60,7 @@ The care alerts SNS topic is planned; alerts are in-app today.
 
 ## Cost estimate
 
-![Mzazi Care AWS cost estimate](assets/mzazi_care_cost_estimate.PNG)
+![VerifCare AWS cost estimate](assets/mzazi_care_cost_estimate.PNG)
 
 Because the backend is serverless, the main fixed cost is the NAT gateway, which is billed hourly whether or not it carries traffic.
 The estimate predates the web console hosting; at this project's traffic, its S3 storage and CloudFront requests add very little.

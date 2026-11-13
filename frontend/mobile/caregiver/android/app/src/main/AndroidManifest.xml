@@ -15,7 +15,7 @@
          an intent, which needs no permission - but once CAMERA is declared in the manifest,
          Android refuses that intent unless the permission is also granted at runtime. -->
     <application
-        android:label="caregiver"
+        android:label="VerifCare Caregiver"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- Google Maps SDK for Android key - platform-restricted (package name + SHA-1 signing

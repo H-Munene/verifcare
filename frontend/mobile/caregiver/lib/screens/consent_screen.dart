@@ -158,7 +158,7 @@ class _ConsentGateState extends State<ConsentGate> {
             ),
             _Stage.declined => _Message(
               text:
-                  "Mzazi Care can't be used without accepting its terms of use and privacy "
+                  "VerifCare can't be used without accepting its terms of use and privacy "
                   'notice. You can close the app, or read the terms again.',
               actionLabel: 'Read the terms again',
               onAction: () => setState(() => _stage = _Stage.asking),
@@ -262,7 +262,7 @@ class _TermsView extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Please read and accept to continue using Mzazi Care.',
+                      'Please read and accept to continue using VerifCare.',
                       style: TextStyle(fontSize: 14, color: inkSecondary),
                     ),
                     if (notice case final notice?) ...[

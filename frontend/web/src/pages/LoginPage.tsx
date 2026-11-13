@@ -43,7 +43,7 @@ export function LoginPage() {
     // illustration becomes a short band above the form.
     <div className="login-page">
       <main className="login-page__main">
-        <div className="login-page__wordmark">MZAZI CARE</div>
+        <div className="login-page__wordmark">VERIFCARE</div>
         <div className="login-page__card">
           <h1 className="login-page__title">
             {view.kind === 'reset'

@@ -85,7 +85,7 @@ class _FamilyLinkPanelState extends State<FamilyLinkPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'Link someone who already has a Mzazi Care account, using the email they signed up '
+          'Link someone who already has a VerifCare account, using the email they signed up '
           "with. If they don't have an account yet, they can create one in the app and send you "
           'a request to link them, which you can approve from the bell on your home screen.',
           style: TextStyle(fontSize: 13, color: inkSecondary),

@@ -93,7 +93,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       const Text(
         "To be linked to a dependant someone else registered, ask their primary contact - "
         'usually the family member who registered them. Enter the email or phone number they '
-        'use for Mzazi Care, and they can approve your request in their app.',
+        'use for VerifCare, and they can approve your request in their app.',
         style: TextStyle(fontSize: 14, color: inkSecondary),
       ),
       const SizedBox(height: 16),
