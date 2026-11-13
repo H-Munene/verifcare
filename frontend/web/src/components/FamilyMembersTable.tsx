@@ -1,7 +1,6 @@
 import { Call02Icon, Link01Icon, UserIcon } from '@hugeicons/core-free-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ApiError } from '../api/client';
 import type { DependantFamilyMember } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
@@ -12,6 +11,7 @@ import { TableSkeleton } from '../design-system/Skeleton';
 import { TableFrame, Th } from '../design-system/Table';
 import { Tag } from '../design-system/Tag';
 import './FamilyMembersTable.css';
+import { LoadError } from '../design-system/LoadError';
 
 // The dependant page's Family tab (2026-09-27, user request): members in a table - name,
 // relationship, then whether they're the primary or a secondary contact - and a member's full
@@ -38,12 +38,14 @@ export function FamilyMembersTable({
   members,
   isLoading,
   isError,
+  onRetry,
 }: {
   dependantId: string;
   dependantName: string;
   members: DependantFamilyMember[] | undefined;
   isLoading: boolean;
   isError: boolean;
+  onRetry: () => void;
 }) {
   // By id, not a copy of the row, so the panel shows the list's latest data after a change.
   const [openMemberId, setOpenMemberId] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function FamilyMembersTable({
     return <TableSkeleton columns={3} rows={2} />;
   }
   if (isError || !members) {
-    return <p className="family-members__empty">Family members couldn&rsquo;t be loaded.</p>;
+    return <LoadError what="the family members" onRetry={onRetry} />;
   }
 
   return (
@@ -224,13 +226,6 @@ function FamilyMemberPanel({
           confirmLabel="Make primary contact"
           pendingLabel="Changing..."
           pending={makePrimary.isPending}
-          error={
-            makePrimary.error
-              ? makePrimary.error instanceof ApiError
-                ? (makePrimary.error.problem.detail ?? makePrimary.error.problem.title)
-                : 'Something went wrong. Try again.'
-              : undefined
-          }
           onConfirm={() => makePrimary.mutate()}
           onCancel={() => {
             setConfirming(false);

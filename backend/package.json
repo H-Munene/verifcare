@@ -21,6 +21,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
+    "db:seed:planning": "tsx src/db/seedPlanning.ts",
+    "db:seed:compliance": "tsx src/db/seedCompliance.ts",
     "plan:evaluate": "tsx src/planning/evaluate.ts",
     "openapi:lint": "redocly lint openapi.yaml --config .redocly.yaml"
   },

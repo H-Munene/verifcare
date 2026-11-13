@@ -17,6 +17,7 @@ import { useCursorPages } from '../hooks/useCursorPages';
 import { useListParams } from '../hooks/useListParams';
 import './DependantsListPage.css';
 import { TableSkeleton } from '../design-system/Skeleton';
+import { LoadError } from '../design-system/LoadError';
 
 type DependantSort = NonNullable<ListDependantsParams['sort']>;
 
@@ -77,7 +78,9 @@ export function DependantsListPage() {
       </FilterBar>
 
       {query.isLoading ? <TableSkeleton columns={5} /> : null}
-      {query.isError ? <p>Failed to load dependants.</p> : null}
+      {query.isError ? (
+        <LoadError what="the dependants" onRetry={() => void query.refetch()} />
+      ) : null}
 
       {query.data ? (
         <>

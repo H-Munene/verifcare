@@ -10,7 +10,6 @@
 import { ArrowLeft01Icon, ArrowRight01Icon, Download04Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useMutation } from '@tanstack/react-query';
-import { ApiError } from '../api/client';
 import type { ExportReport } from '../api/compliance';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
@@ -163,13 +162,6 @@ export function CompliancePage() {
         )}
 
         <div className="compliance__exports">
-          {exportMutation.error ? (
-            <span className="compliance__export-error" role="alert">
-              {exportMutation.error instanceof ApiError
-                ? (exportMutation.error.problem.detail ?? exportMutation.error.problem.title)
-                : "The export couldn't be downloaded."}
-            </span>
-          ) : null}
           {EXPORTS[tab].map(({ report, label }) => (
             <Button
               key={report}

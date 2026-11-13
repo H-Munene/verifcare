@@ -187,6 +187,19 @@ describe.skipIf(!hasTestDb)(
         });
       });
 
+      it('returns 400 for a phone number not in E.164 format, before calling Cognito', async () => {
+        const response = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({ email: 'local.phone@example.com', phoneNumber: '0712345678' }),
+          );
+
+        expect(response.status).toBe(400);
+        expect((response.body as { detail: string }).detail).toContain('E.164');
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
+      });
+
       it('returns 403 for a non-supervisor caller', async () => {
         const response = await request(app)
           .post('/caregivers')

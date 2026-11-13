@@ -22,7 +22,11 @@ import { and, eq, sql } from 'drizzle-orm';
 import { Router, type RequestHandler } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
-import { isCognitoUserAlreadyExistsError, type CognitoAdmin } from '../auth/cognitoAdmin.js';
+import {
+  isCognitoInvalidParameterError,
+  isCognitoUserAlreadyExistsError,
+  type CognitoAdmin,
+} from '../auth/cognitoAdmin.js';
 import { requireRole } from '../auth/middleware.js';
 import { changedFields, recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
@@ -39,7 +43,7 @@ import {
   resolveSort,
   type SortKey,
 } from '../pagination.js';
-import { parseOrSendProblem } from '../validation.js';
+import { E164_MESSAGE, E164_PHONE_NUMBER, parseOrSendProblem } from '../validation.js';
 
 export interface CaregiversRouterDependencies {
   cognitoAdmin: CognitoAdmin;
@@ -91,7 +95,7 @@ const createCaregiverRequestSchema = z
   .object({
     fullName: z.string().min(1),
     email: z.string().email(),
-    phoneNumber: z.string().min(1),
+    phoneNumber: z.string().regex(E164_PHONE_NUMBER, E164_MESSAGE),
     idType: z.enum(['national_id', 'passport']),
     idNumber: z.string().min(1),
     dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD'),
@@ -105,7 +109,7 @@ const updateCaregiverRequestSchema = z
   .object({
     fullName: z.string().min(1).optional(),
     email: z.string().email().optional(),
-    phoneNumber: z.string().min(1).optional(),
+    phoneNumber: z.string().regex(E164_PHONE_NUMBER, E164_MESSAGE).optional(),
     idType: z.enum(['national_id', 'passport']).optional(),
     idNumber: z.string().min(1).optional(),
     dob: z.string().regex(DATE_ONLY, 'dob must be YYYY-MM-DD').optional(),
@@ -330,6 +334,18 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
           title: 'Conflict',
           status: 409,
           detail: 'A Cognito identity with this email already exists.',
+        });
+        return;
+      }
+      // Anything Cognito rejects that the schema above didn't catch, as a 400 rather than a 500.
+      if (isCognitoInvalidParameterError(err)) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail:
+            (err as { message?: string }).message ??
+            'Cognito rejected one of the submitted fields.',
         });
         return;
       }
