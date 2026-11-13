@@ -266,7 +266,7 @@ class _CodeScanScreenState extends State<CodeScanScreen> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Ask a family member at the home to open "Show check-in code" in their Mzazi Care '
+          'Ask a family member at the home to open "Show check-in code" in their VerifCare '
           'app, then point your camera at it.',
           style: TextStyle(fontSize: 14, height: 1.4, color: inkSecondary),
         ),

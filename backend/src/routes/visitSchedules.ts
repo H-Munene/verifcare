@@ -358,7 +358,7 @@ async function missingConsentDetail(
   if (missing.length === 0) {
     return null;
   }
-  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to location checks at visits. Consent is given by accepting the terms in the Mzazi Care app.`;
+  return `A visit can't be scheduled until ${missing.join(' and ')} ${missing.length === 1 ? 'has' : 'have'} consented to location checks at visits. Consent is given by accepting the terms in the VerifCare app.`;
 }
 
 // The guardrail means "this visit can't go ahead as scheduled", not a malformed request.

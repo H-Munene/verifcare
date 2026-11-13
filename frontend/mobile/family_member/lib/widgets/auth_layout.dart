@@ -13,10 +13,10 @@ class Wordmark extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     // Read as a name, not spelled out letter by letter.
-    label: 'Mzazi Care',
+    label: 'VerifCare',
     child: ExcludeSemantics(
       child: const Text(
-        'MZAZI CARE',
+        'VERIFCARE',
         style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w800,

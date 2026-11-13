@@ -10,7 +10,7 @@
          an intent, which needs no permission - but once CAMERA is declared, Android refuses that
          intent unless the permission is also granted at runtime. -->
     <application
-        android:label="family_member"
+        android:label="VerifCare Family"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- Google Maps SDK for Android key - per architecture.md, a separate key for this app,

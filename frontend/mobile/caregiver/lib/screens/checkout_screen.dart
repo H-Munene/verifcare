@@ -395,7 +395,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           const Padding(
             padding: EdgeInsets.all(16),
             child: Text(
-              'Ask the family member who showed the check-in code to open Mzazi Care. Their '
+              'Ask the family member who showed the check-in code to open VerifCare. Their '
               'phone shows a check-out code to scan, with 6 digits underneath.',
               style: TextStyle(fontSize: 14, height: 1.45, color: inkSecondary),
             ),

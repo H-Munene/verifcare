@@ -1184,7 +1184,7 @@ export function createDependantsRouter(dependencies: DependantsRouterDependencie
           title: 'Not Found',
           status: 404,
           detail:
-            'No Mzazi Care account uses that email. They can create an account in the app and ask you to link them.',
+            'No VerifCare account uses that email. They can create an account in the app and ask you to link them.',
         });
         return;
       }

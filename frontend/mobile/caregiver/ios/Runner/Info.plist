@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Caregiver</string>
+	<string>VerifCare Caregiver</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -31,7 +31,7 @@
 	     fails silently without this. Foreground-only (WhenInUse), matching the plan: check-in only
 	     happens while the app is open, no background location tracking. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Mzazi Care uses your location to confirm you're at the dependant's home when you check in and check out.</string>
+	<string>VerifCare uses your location to confirm you're at the dependant's home when you check in and check out.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used to scan the check-in code on a family member's phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
