@@ -15,6 +15,7 @@ import './VisitHistoryList.css';
 import { TableSkeleton } from '../design-system/Skeleton';
 import { statusLabel, statusTone } from './visitStatus';
 import { VisitPanel } from './VisitPanel';
+import { LoadError } from '../design-system/LoadError';
 
 // Shared by DependantDetailPage's and CaregiverDetailPage's own Visit History tab (2026-09-23,
 // user request) - GET /visit-schedules already supports filtering by exactly one of
@@ -47,7 +48,7 @@ export function VisitHistoryList({ caregiverId, dependantId }: VisitHistoryListP
     return <TableSkeleton columns={4} rows={4} />;
   }
   if (query.isError) {
-    return <p>Failed to load visit history.</p>;
+    return <LoadError what="the visit history" onRetry={() => void query.refetch()} />;
   }
 
   const rows = [...(query.data?.items ?? [])].sort(

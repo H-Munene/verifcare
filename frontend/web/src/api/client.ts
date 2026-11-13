@@ -20,6 +20,18 @@ export class ApiError extends Error {
   }
 }
 
+/** What a failed request shows the user: the API's own explanation when it gave one. */
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.problem.detail ?? error.problem.title;
+  }
+  // fetch rejects with a TypeError when the request never reached the API.
+  if (error instanceof TypeError) {
+    return "Couldn't reach Mzazi Care. Check your connection and try again.";
+  }
+  return 'Something went wrong. Try again.';
+}
+
 export interface ApiClient {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;

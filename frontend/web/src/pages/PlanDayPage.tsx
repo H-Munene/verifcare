@@ -9,7 +9,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { latLngBounds } from 'leaflet';
 import { useEffect, useState, type FormEvent } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
-import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
 import type {
   ExcludedReason,
@@ -57,12 +56,6 @@ const TIME: Intl.DateTimeFormatOptions = {
 };
 const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-KE', TIME);
 const km = (meters: number) => `${(meters / 1000).toFixed(1)} km`;
-
-function errorText(error: unknown): string {
-  return error instanceof ApiError
-    ? (error.problem.detail ?? error.problem.title)
-    : 'Something went wrong. Try again.';
-}
 
 function arrangementOf(plan: VisitPlan): PlanArrangement {
   return plan.clusters.map((cluster) => ({
@@ -286,7 +279,6 @@ export function PlanDayPage() {
     rearrange.mutate(next);
   }
 
-  const error = create.error ?? rearrange.error;
   const totalVisits = plan?.clusters.reduce((sum, c) => sum + c.stops.length, 0) ?? 0;
   const totalDistance = plan?.clusters.reduce((sum, c) => sum + c.totalDistanceMeters, 0) ?? 0;
 
@@ -333,16 +325,6 @@ export function PlanDayPage() {
           {create.isPending ? 'Planning...' : plan ? 'Make a new plan' : 'Make a plan'}
         </Button>
       </form>
-      {error ? (
-        <p className="plan-day__error" role="alert">
-          {errorText(error)}
-        </p>
-      ) : null}
-      {plans.isError ? (
-        <p className="plan-day__error" role="alert">
-          The day&rsquo;s plan couldn&rsquo;t be loaded.
-        </p>
-      ) : null}
 
       {!plan && plans.isSuccess ? (
         <p className="plan-day__intro">
@@ -438,7 +420,6 @@ export function PlanDayPage() {
           confirmLabel="Publish"
           pending={publish.isPending}
           pendingLabel="Publishing..."
-          error={publish.error ? errorText(publish.error) : undefined}
           onConfirm={() => publish.mutate()}
           onCancel={() => setConfirming(false)}
         />

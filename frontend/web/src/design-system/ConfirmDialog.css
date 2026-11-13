@@ -44,15 +44,6 @@
   margin-top: 8px;
 }
 
-.ds-confirm__error {
-  margin-top: 14px;
-  padding: 8px 10px;
-  border-radius: var(--radius-default);
-  background: var(--color-danger-tint);
-  font-size: 13px;
-  color: var(--color-danger-text);
-}
-
 .ds-confirm__actions {
   display: flex;
   justify-content: flex-end;

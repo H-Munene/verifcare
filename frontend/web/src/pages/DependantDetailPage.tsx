@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
 import { FamilyMembersTable } from '../components/FamilyMembersTable';
 import {
@@ -20,6 +19,7 @@ import './DependantDetailPage.css';
 import { DetailSkeleton } from '../design-system/Skeleton';
 import { BirthdayCakeIcon, Location01Icon, UserIcon } from '@hugeicons/core-free-icons';
 import { MetaList } from '../design-system/MetaList';
+import { LoadError } from '../design-system/LoadError';
 
 type DetailTab = 'family' | 'visits';
 
@@ -76,7 +76,7 @@ export function DependantDetailPage() {
     return <DetailSkeleton />;
   }
   if (dependantQuery.isError || !dependantQuery.data) {
-    return <p>Failed to load this dependant.</p>;
+    return <LoadError what="this dependant" onRetry={() => void dependantQuery.refetch()} />;
   }
   const dependant = dependantQuery.data;
 
@@ -133,6 +133,7 @@ export function DependantDetailPage() {
         stats={statsQuery.data}
         isLoading={statsQuery.isLoading}
         isError={statsQuery.isError}
+        onRetry={() => void statsQuery.refetch()}
         perspective="dependant"
       />
 
@@ -151,6 +152,7 @@ export function DependantDetailPage() {
               members={familyMembersQuery.data}
               isLoading={familyMembersQuery.isLoading}
               isError={familyMembersQuery.isError}
+              onRetry={() => void familyMembersQuery.refetch()}
             />
           </section>
         ) : null}
@@ -217,13 +219,6 @@ function AddFamilyMemberModal({
           onChange={setIsPrimaryContact}
           label="Make this the primary contact"
         />
-        {mutation.error ? (
-          <div className="dependant-detail__modal-error">
-            {mutation.error instanceof ApiError
-              ? (mutation.error.problem.detail ?? mutation.error.problem.title)
-              : 'Something went wrong.'}
-          </div>
-        ) : null}
         <div className="dependant-detail__modal-actions">
           <Button type="button" onClick={onClose}>
             Cancel

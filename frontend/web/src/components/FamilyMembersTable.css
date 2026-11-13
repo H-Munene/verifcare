@@ -24,11 +24,6 @@
   color: var(--color-ink-muted);
 }
 
-.family-members__empty {
-  font-size: 13px;
-  color: var(--color-ink-muted);
-}
-
 .family-members__panel-tag {
   margin-bottom: 18px;
 }

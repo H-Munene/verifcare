@@ -23,8 +23,6 @@ export interface ConfirmDialogProps {
   /** The action is running: buttons are disabled and the dialog can't be dismissed. */
   pending?: boolean;
   pendingLabel?: string;
-  /** Why the action failed, shown in the dialog so the person can retry or cancel. */
-  error?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -37,7 +35,6 @@ export function ConfirmDialog({
   destructive = false,
   pending = false,
   pendingLabel,
-  error,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -69,11 +66,6 @@ export function ConfirmDialog({
         <div id={messageId} className="ds-confirm__message">
           {message}
         </div>
-        {error ? (
-          <div className="ds-confirm__error" role="alert">
-            {error}
-          </div>
-        ) : null}
         <div className="ds-confirm__actions">
           <Button ref={cancelRef} type="button" onClick={onCancel} disabled={pending}>
             {cancelLabel}

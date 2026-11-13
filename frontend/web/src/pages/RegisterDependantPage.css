@@ -110,14 +110,6 @@
   gap: 12px;
 }
 
-.register-dependant-page__error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
-}
-
 .register-dependant-page__step-hint {
   margin: 0;
   font-size: 12px;

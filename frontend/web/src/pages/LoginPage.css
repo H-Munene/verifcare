@@ -102,14 +102,6 @@
   margin: 0;
 }
 
-.login-page__error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
-}
-
 .login-page__notice {
   font-size: 13px;
   color: var(--color-ink-primary);

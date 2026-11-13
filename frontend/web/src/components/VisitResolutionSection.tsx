@@ -5,7 +5,6 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { ApiError } from '../api/client';
 import {
   RESOLUTION_OUTCOMES,
   RESOLUTION_OUTCOME_LABELS,
@@ -123,13 +122,6 @@ export function VisitResolutionSection({
               required
             />
           </div>
-          {mutation.error ? (
-            <p className="visit-resolution__error" role="alert">
-              {mutation.error instanceof ApiError
-                ? (mutation.error.problem.detail ?? mutation.error.problem.title)
-                : "The resolution couldn't be saved."}
-            </p>
-          ) : null}
           <div className="visit-resolution__actions">
             <Button
               type="button"

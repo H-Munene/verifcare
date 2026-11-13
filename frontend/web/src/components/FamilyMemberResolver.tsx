@@ -3,8 +3,10 @@ import { useState } from 'react';
 import type { FamilyMemberIdType } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { Button } from '../design-system/Button';
+import { showErrorToast } from '../design-system/toastStore';
 import { Input, Label } from '../design-system/Input';
 import { RadioGroup } from '../design-system/RadioGroup';
+import { PHONE_HINT, toE164, toLocalPhone } from '../phone';
 import './FamilyMemberResolver.css';
 
 // Exactly one of cognitoSub/email is set - mirrors api/dependants.ts's AddFamilyMemberRequest
@@ -80,30 +82,31 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
   const [mode, setMode] = useState<Mode>('existing');
   const [query, setQuery] = useState('');
   const [notFound, setNotFound] = useState(false);
-  const [roleMismatch, setRoleMismatch] = useState<string | null>(null);
   const [newFields, setNewFields] = useState<NewFamilyMemberFields>(EMPTY_NEW_FIELDS);
 
   const searchMutation = useMutation({
     mutationFn: () => {
       const isEmail = query.includes('@');
-      return users.searchUsers(isEmail ? { email: query } : { phoneNumber: query });
+      return users.searchUsers(
+        isEmail ? { email: query.trim() } : { phoneNumber: toE164(query) ?? query.trim() },
+      );
     },
     onSuccess: (page) => {
       const found = page.items[0];
       if (!found) {
         setNotFound(true);
-        setRoleMismatch(null);
         onSelect(null);
         return;
       }
       if (found.role !== 'family_member') {
-        setRoleMismatch(found.role);
+        showErrorToast(
+          `This user is registered as ${found.role.replace('_', ' ')}, so they can't be a family contact.`,
+        );
         setNotFound(false);
         onSelect(null);
         return;
       }
       setNotFound(false);
-      setRoleMismatch(null);
       onSelect({
         cognitoSub: found.cognitoSub,
         phoneNumber: found.phoneNumber ?? '',
@@ -117,14 +120,12 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
     setMode('existing');
     setQuery('');
     setNotFound(false);
-    setRoleMismatch(null);
     setNewFields(EMPTY_NEW_FIELDS);
   }
 
   function changeMode(next: Mode) {
     setMode(next);
     setNotFound(false);
-    setRoleMismatch(null);
     setNewFields(EMPTY_NEW_FIELDS);
     // The previous mode's selection (an existing-user match, or a completed new-user draft) no
     // longer matches what's now on screen - clearing it here, rather than only on the fields
@@ -136,10 +137,11 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
   function updateNewFields(patch: Partial<NewFamilyMemberFields>) {
     const next = { ...newFields, ...patch };
     setNewFields(next);
+    const phoneNumber = toE164(next.phoneNumber);
     const complete =
       next.firstName.trim() !== '' &&
       next.lastName.trim() !== '' &&
-      next.phoneNumber.trim() !== '' &&
+      phoneNumber !== null &&
       next.email.trim() !== '' &&
       next.idType !== '' &&
       next.idNumber.trim() !== '';
@@ -147,7 +149,7 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
       complete
         ? {
             email: next.email,
-            phoneNumber: next.phoneNumber,
+            phoneNumber,
             fullName: `${next.firstName.trim()} ${next.lastName.trim()}`.trim(),
             idType: next.idType || undefined,
             idNumber: next.idNumber,
@@ -160,7 +162,8 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
     return (
       <div className="family-member-resolver">
         <div className="family-member-resolver__confirmed">
-          Linking existing user: <strong>{selection.fullName}</strong> ({selection.phoneNumber})
+          Linking existing user: <strong>{selection.fullName}</strong> (
+          {toLocalPhone(selection.phoneNumber)})
         </div>
         <Button type="button" onClick={reset}>
           Change
@@ -191,7 +194,6 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
               onChange={(e) => {
                 setQuery(e.target.value);
                 setNotFound(false);
-                setRoleMismatch(null);
               }}
             />
             <Button
@@ -206,12 +208,6 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
             <p className="family-member-resolver__hint">
               No user found matching &ldquo;{query}&rdquo;. Switch to &ldquo;New user&rdquo; above
               to register them.
-            </p>
-          ) : null}
-          {roleMismatch ? (
-            <p className="family-member-resolver__error">
-              This user is already registered as <strong>{roleMismatch}</strong>, not family_member,
-              and can&rsquo;t be used as a family contact.
             </p>
           ) : null}
         </>
@@ -263,8 +259,13 @@ export function FamilyMemberResolver({ selection, onSelect }: FamilyMemberResolv
               id="newFamilyMemberPhone"
               label="Phone Number"
               type="tel"
-              placeholder="+254712345678"
-              hint="E.164 format, e.g. +254712345678"
+              placeholder="0712345678"
+              hint={PHONE_HINT}
+              error={
+                newFields.phoneNumber.trim() !== '' && !toE164(newFields.phoneNumber)
+                  ? 'Enter a Kenyan mobile number like 0712345678.'
+                  : undefined
+              }
               value={newFields.phoneNumber}
               onChange={(e) => updateNewFields({ phoneNumber: e.target.value })}
               required

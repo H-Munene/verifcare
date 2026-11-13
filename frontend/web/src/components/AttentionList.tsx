@@ -97,11 +97,6 @@ function OverrideItem({
           </Button>
           <Link to={`/visits?visit=${override.visitScheduleId}`}>Open visit</Link>
         </div>
-        {decide.isError ? (
-          <p className="attention__error" role="alert">
-            That couldn&rsquo;t be saved. The visit may have moved on. Try again.
-          </p>
-        ) : null}
       </div>
     </li>
   );
@@ -126,7 +121,6 @@ export function AttentionList({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard-overview'] }),
   });
   const acknowledging = acknowledge.isPending ? acknowledge.variables : undefined;
-  const acknowledgeFailed = acknowledge.isError;
   const onAcknowledge = (notificationId: string) => acknowledge.mutate(notificationId);
   const { missedVisitAlerts, pendingCheckinOverrides, visitsNeedingCover } = attention;
   // Every entry, in a list that scrolls within the panel (user request, 2026-09-26). The server
@@ -234,11 +228,6 @@ export function AttentionList({
                       'more missed visits',
                     )}{' '}
                     to acknowledge.
-                  </li>
-                ) : null}
-                {acknowledgeFailed ? (
-                  <li className="attention__error" role="alert">
-                    That alert couldn't be acknowledged. Try again.
                   </li>
                 ) : null}
               </ul>

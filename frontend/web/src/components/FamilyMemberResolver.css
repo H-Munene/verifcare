@@ -64,12 +64,3 @@
   justify-content: flex-end;
   gap: 8px;
 }
-
-.family-member-resolver__error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
-  margin: 0;
-}

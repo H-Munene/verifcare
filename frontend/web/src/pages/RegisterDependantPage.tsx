@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ApiError } from '../api/client';
 import type { Dependant, DependantGender, DependantStatus } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
@@ -17,8 +16,10 @@ import { Button } from '../design-system/Button';
 import { Card } from '../design-system/Card';
 import { Input } from '../design-system/Input';
 import { Stepper } from '../design-system/Stepper';
+import { showErrorToast } from '../design-system/toastStore';
 import './RegisterDependantPage.css';
 import { DetailSkeleton } from '../design-system/Skeleton';
+import { LoadError } from '../design-system/LoadError';
 
 // Handles both registration (no :dependantId in the route) and editing (wireframe page 5 combines
 // both into one form, and PATCH /dependants/{id} already existed from HEZ-30, so this costs
@@ -56,7 +57,7 @@ export function RegisterDependantPage() {
     return <DetailSkeleton />;
   }
   if (isEdit && (existing.isError || !existing.data)) {
-    return <p>Failed to load this dependant.</p>;
+    return <LoadError what="this dependant" onRetry={() => void existing.refetch()} />;
   }
 
   return <DependantForm dependantId={dependantId} initial={existing.data} />;
@@ -186,7 +187,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
   // these is sent as its own POST /dependants/{id}/family-members call after the dependant itself
   // is created (see submitForm below), not folded into the create request.
   const [additionalContacts, setAdditionalContacts] = useState<AdditionalContactDraft[]>([]);
-  const [additionalContactError, setAdditionalContactError] = useState<string | null>(null);
+  const [contactLinkFailed, setContactLinkFailed] = useState(false);
 
   // Set once the dependant has been created, so saving again after a failed contact link can't
   // create a second one.
@@ -282,7 +283,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       return true;
     }
     let allLinked = true;
-    setAdditionalContactError(null);
+    setContactLinkFailed(false);
     for (const contact of drafts) {
       try {
         await dependants.addFamilyMember(id, {
@@ -291,7 +292,8 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         });
       } catch {
         allLinked = false;
-        setAdditionalContactError(
+        setContactLinkFailed(true);
+        showErrorToast(
           "The dependant was saved, but one or more additional family contacts could not be added. Add them from the dependant's detail page instead.",
         );
       }
@@ -330,8 +332,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
       // supervisor on the edit form with no sign it had worked).
       void navigate(`/dependants/${dependantId}`);
     } catch {
-      // updateMutation's own `error` state (surfaced via mutationError below) already reports this
-      // - nothing further to do here.
+      // the failure already shows as a toast (main.tsx) - nothing further to do here.
     }
   }
 
@@ -379,13 +380,11 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
         void navigate(`/dependants/${id}`);
       }
     } catch {
-      // createMutation's own `error` state (surfaced via mutationError below) already reports
-      // this - nothing further to do here.
+      // the failure already shows as a toast (main.tsx) - nothing further to do here.
     }
   }
 
   const pending = createMutation.isPending || updateMutation.isPending;
-  const mutationError = createMutation.error ?? updateMutation.error;
 
   return (
     <div className="register-dependant-page">
@@ -598,18 +597,6 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
           </div>
         ) : null}
 
-        {mutationError ? (
-          <div className="register-dependant-page__error">
-            {mutationError instanceof ApiError
-              ? (mutationError.problem.detail ?? mutationError.problem.title)
-              : 'Something went wrong.'}
-          </div>
-        ) : null}
-
-        {additionalContactError ? (
-          <div className="register-dependant-page__error">{additionalContactError}</div>
-        ) : null}
-
         {currentStepHint ? (
           <p className="register-dependant-page__step-hint">{currentStepHint}</p>
         ) : null}
@@ -620,7 +607,7 @@ function DependantForm({ dependantId, initial }: { dependantId?: string; initial
               Back
             </Button>
           ) : null}
-          {createdDependantId && additionalContactError ? (
+          {createdDependantId && contactLinkFailed ? (
             <Button
               type="button"
               variant="primary"

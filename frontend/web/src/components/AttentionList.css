@@ -110,12 +110,6 @@
   color: var(--color-ink-subtle);
 }
 
-.attention__error {
-  padding: 8px 0;
-  font-size: 12px;
-  color: var(--color-danger-text);
-}
-
 .attention__override {
   align-items: stretch;
 }

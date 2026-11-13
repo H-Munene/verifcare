@@ -1,0 +1,8 @@
+.ds-load-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}

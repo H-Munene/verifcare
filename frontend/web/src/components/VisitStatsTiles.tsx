@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import type { VisitStats } from '../api/visitStats';
 import { Skeleton, SkeletonRegion } from '../design-system/Skeleton';
 import './VisitStatsTiles.css';
+import { LoadError } from '../design-system/LoadError';
 
 // A person's visits at a glance on their detail page (2026-09-27, user request): the Overview's
 // hairline grid of tiles (label, big figure, one line of detail), fed by the per-person stats
@@ -64,10 +65,17 @@ export interface VisitStatsTilesProps {
   stats: VisitStats | undefined;
   isLoading: boolean;
   isError: boolean;
+  onRetry: () => void;
   perspective: 'dependant' | 'caregiver';
 }
 
-export function VisitStatsTiles({ stats, isLoading, isError, perspective }: VisitStatsTilesProps) {
+export function VisitStatsTiles({
+  stats,
+  isLoading,
+  isError,
+  onRetry,
+  perspective,
+}: VisitStatsTilesProps) {
   if (isLoading) {
     return (
       <SkeletonRegion label="Loading visit statistics" className="visit-stats">
@@ -86,7 +94,7 @@ export function VisitStatsTiles({ stats, isLoading, isError, perspective }: Visi
     );
   }
   if (isError || !stats) {
-    return <p className="visit-stats__error">Visit statistics couldn&rsquo;t be loaded.</p>;
+    return <LoadError what="the visit statistics" onRetry={onRetry} />;
   }
 
   const { visits, windowDays } = stats;
