@@ -1,0 +1,17 @@
+# Speaker verification only (SPEAKER_VERIFICATION_PLAN.md). A separate environment, venv-speaker,
+# so the pinned venv behind the cognitive model's v2 and v3 results is not changed.
+numpy==2.5.3
+scipy==1.18.1
+pandas==3.0.5
+scikit-learn==1.9.1
+librosa==1.0.0
+soundfile==0.14.0
+torch==2.14.1
+torchaudio==2.11.1
+speechbrain==1.1.2
+silero-vad==6.2.3
+tabulate==0.10.0
+# AfriVoices-KE download (scripts/sv_01_collect_afrivoices.py): gated Hugging Face parquet files.
+huggingface_hub==2.4.0
+pyarrow==25.0.1
+pytest==9.1.1
