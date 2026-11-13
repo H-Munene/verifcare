@@ -70,10 +70,11 @@ Finder get _acceptButton => find.widgetWithText(ElevatedButton, 'Accept');
 bool _acceptEnabled(WidgetTester tester) =>
     tester.widget<ElevatedButton>(_acceptButton).onPressed != null;
 
-/// Ticks both consent checkboxes, which Accept needs.
+/// Ticks every consent checkbox, which Accept needs.
 Future<void> _consentToBoth(WidgetTester tester) async {
-  await tester.tap(find.byType(CheckboxListTile).at(0));
-  await tester.tap(find.byType(CheckboxListTile).at(1));
+  for (var i = 0; i < 3; i++) {
+    await tester.tap(find.byType(CheckboxListTile).at(i));
+  }
   await tester.pumpAndSettle();
 }
 
@@ -216,22 +217,23 @@ void main() {
     }, () => backend.client);
   });
 
-  testWidgets('Accept needs both consent boxes ticked, and sends both', (
+  testWidgets('Accept needs every consent box ticked, and sends them all', (
     tester,
   ) async {
     final backend = _Backend();
     await http.runWithClient(() async {
       await _pumpGate(tester, backend);
       final boxes = find.byType(CheckboxListTile);
-      expect(boxes, findsNWidgets(2));
+      expect(boxes, findsNWidgets(3));
       expect(_acceptEnabled(tester), isFalse);
 
-      // One box alone isn't enough, whichever it is.
+      // Any two boxes aren't enough, whichever they are.
       await tester.tap(boxes.at(0));
+      await tester.tap(boxes.at(1));
       await tester.pumpAndSettle();
       expect(_acceptEnabled(tester), isFalse);
       await tester.tap(boxes.at(0));
-      await tester.tap(boxes.at(1));
+      await tester.tap(boxes.at(2));
       await tester.pumpAndSettle();
       expect(_acceptEnabled(tester), isFalse);
 
@@ -254,6 +256,7 @@ void main() {
         'version': '1',
         'locationConsent': true,
         'audioConsent': true,
+        'voiceConsent': true,
       });
       expect(find.text('HOME'), findsOneWidget);
     }, () => backend.client);

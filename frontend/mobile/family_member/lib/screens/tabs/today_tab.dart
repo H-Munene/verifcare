@@ -52,7 +52,8 @@ class _TodayData {
   const _TodayData(this.now, this.feed, this.checkedInAt);
 }
 
-class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin {
+class _TodayTabState extends State<TodayTab>
+    with AutomaticKeepAliveClientMixin {
   _TodayData? _data;
   String? _error;
 
@@ -95,7 +96,13 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
                 ?.checkinAt
           : null;
       if (mounted) {
-        setState(() => _data = _TodayData(nowState, buildFeed(details, now), checkedInAt));
+        setState(
+          () => _data = _TodayData(
+            nowState,
+            buildFeed(details, now),
+            checkedInAt,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) setState(() => _error = errorText(e));
@@ -117,8 +124,13 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
             dependant: widget.dependant,
             dependantsApi: widget.dependantsApi,
           )
-        : VisitTimelineScreen(visit: visit, visitSchedulesApi: widget.visitSchedulesApi);
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
+        : VisitTimelineScreen(
+            visit: visit,
+            visitSchedulesApi: widget.visitSchedulesApi,
+          );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => screen));
     if (mounted) _load();
   }
 
@@ -126,16 +138,19 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
   // early).
   VisitSchedule? _codeVisit(NowState state) => switch (state) {
     NowAwaitingCheckin(:final visit) => visit,
-    NowNext(:final visit) when DateUtils.isSameDay(visit.scheduledStart, DateTime.now()) => visit,
+    NowNext(:final visit)
+        when DateUtils.isSameDay(visit.scheduledStart, DateTime.now()) =>
+      visit,
     _ => null,
   };
 
-  Future<void> _showCode(VisitSchedule visit) async {
+  Future<void> _showCode(VisitSchedule visit, {bool checkout = false}) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CheckInCodeScreen(
           visit: visit,
           visitSchedulesApi: widget.visitSchedulesApi,
+          checkout: checkout,
         ),
       ),
     );
@@ -182,6 +197,16 @@ class _TodayTabState extends State<TodayTab> with AutomaticKeepAliveClientMixin 
                   label: const Text('Show check-in code'),
                 ),
               ],
+              // The caregiver confirms leaving with a code from this phone; the screen waits until
+              // they ask to check out, so it can be opened early.
+              if (data.now case NowInProgress(:final visit)) ...[
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () => _showCode(visit, checkout: true),
+                  icon: const Icon(Icons.qr_code_2),
+                  label: const Text('Show check-out code'),
+                ),
+              ],
               const SizedBox(height: 8),
               const SectionTitle('Recent activity'),
               if (data.feed.isEmpty)
@@ -217,7 +242,11 @@ class _Greeting extends StatelessWidget {
       children: [
         Text(
           name == null ? 'Good $part' : 'Good $part, $name',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: inkDefault),
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: inkDefault,
+          ),
         ),
         const SizedBox(height: 4),
         Text(
@@ -265,7 +294,8 @@ class _NowCard extends StatelessWidget {
         primaryTint,
         '${firstName(visit.caregiverDisplayName)} is visiting',
         [
-          if (checkedInAt case final at?) 'Checked in ${formatTime(context, at)}',
+          if (checkedInAt case final at?)
+            'Checked in ${formatTime(context, at)}',
           'until ${formatTime(context, visit.scheduledEnd)}',
         ].join(' · '),
         visit,
@@ -292,7 +322,8 @@ class _NowCard extends StatelessWidget {
       return EmptyState(
         icon: Icons.event_busy_outlined,
         title: 'No visits scheduled',
-        message: "The agency hasn't scheduled $dependantFirst's next visit yet.",
+        message:
+            "The agency hasn't scheduled $dependantFirst's next visit yet.",
       );
     }
     return Material(
@@ -312,7 +343,10 @@ class _NowCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         color: tint,
                         child: Text(
                           eyebrow!,
@@ -334,7 +368,13 @@ class _NowCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(detail!, style: const TextStyle(fontSize: 14, color: inkSecondary)),
+                      Text(
+                        detail!,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: inkSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -367,7 +407,11 @@ class _Feed extends StatelessWidget {
         day = label;
         children.add(
           Padding(
-            padding: EdgeInsets.only(top: children.isEmpty ? 0 : 14, bottom: 6, left: 2),
+            padding: EdgeInsets.only(
+              top: children.isEmpty ? 0 : 14,
+              bottom: 6,
+              left: 2,
+            ),
             child: Text(
               label.toUpperCase(),
               style: const TextStyle(
@@ -382,7 +426,10 @@ class _Feed extends StatelessWidget {
       }
       children.add(_FeedRow(event: event, onTap: () => onOpen(event.visit)));
     }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: children);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
   }
 }
 
@@ -412,7 +459,8 @@ class _FeedRow extends StatelessWidget {
         event.startedBySupervisor
             ? 'Started by a supervisor, as nobody from the family could show the code.'
             : switch (event.confirmedBy) {
-                final name? => '${firstName(name)} confirmed $caregiver with the check-in code.',
+                final name? =>
+                  '${firstName(name)} confirmed $caregiver with the check-in code.',
                 null => '$caregiver checked in.',
               },
       ),
@@ -440,7 +488,9 @@ class _FeedRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: Colors.white,
-        shape: const RoundedRectangleBorder(side: BorderSide(color: borderColor)),
+        shape: const RoundedRectangleBorder(
+          side: BorderSide(color: borderColor),
+        ),
         child: InkWell(
           onTap: onTap,
           child: Padding(
@@ -468,7 +518,13 @@ class _FeedRow extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Text(detail, style: const TextStyle(fontSize: 13, color: inkSecondary)),
+                      Text(
+                        detail,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: inkSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 ),

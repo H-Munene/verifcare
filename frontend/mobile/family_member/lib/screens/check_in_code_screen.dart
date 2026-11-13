@@ -9,7 +9,12 @@ import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
 /// The phone's position for one code request.
-typedef DevicePosition = ({double lat, double lng, double accuracyMeters, bool isMocked});
+typedef DevicePosition = ({
+  double lat,
+  double lng,
+  double accuracyMeters,
+  bool isMocked,
+});
 
 /// Thrown when the phone's location can't be read, with wording for the family member.
 class LocationUnavailable implements Exception {
@@ -19,13 +24,14 @@ class LocationUnavailable implements Exception {
 
 Future<DevicePosition> currentDevicePosition() async {
   if (!await Geolocator.isLocationServiceEnabled()) {
-    throw const LocationUnavailable('Turn on location to show the check-in code.');
+    throw const LocationUnavailable('Turn on location to show the code.');
   }
   var permission = await Geolocator.checkPermission();
   if (permission == LocationPermission.denied) {
     permission = await Geolocator.requestPermission();
   }
-  if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+  if (permission == LocationPermission.denied ||
+      permission == LocationPermission.deniedForever) {
     throw const LocationUnavailable(
       'Location permission is needed to confirm you are at the home.',
     );
@@ -44,20 +50,22 @@ Future<DevicePosition> currentDevicePosition() async {
   );
 }
 
-/// The code a caregiver scans to start a visit. The phone has to be at the home, which is checked
-/// each time a code is issued. A code lasts about a minute, so a new one is fetched well before it
-/// runs out: the caregiver never ends up holding an expired one, and a screenshot goes stale
-/// almost at once.
+/// The code a caregiver scans to start a visit, or (with [checkout]) to finish it, with 6 digits
+/// to type if their camera won't scan. The phone has to be at the home, which is checked each time
+/// a code is issued. A code lasts about a minute, so a new one is fetched well before it runs out:
+/// the caregiver never ends up holding an expired one, and a screenshot goes stale almost at once.
 class CheckInCodeScreen extends StatefulWidget {
   final VisitSchedule visit;
   final VisitSchedulesApi visitSchedulesApi;
   final Future<DevicePosition> Function() locate;
+  final bool checkout;
 
   const CheckInCodeScreen({
     super.key,
     required this.visit,
     required this.visitSchedulesApi,
     this.locate = currentDevicePosition,
+    this.checkout = false,
   });
 
   @override
@@ -67,6 +75,8 @@ class CheckInCodeScreen extends StatefulWidget {
 class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
   CheckinCode? _code;
   String? _error;
+  // Check-out only: the caregiver hasn't asked to check out yet, so there's no code to show.
+  bool _waiting = false;
   bool _started = false;
   Timer? _refresh;
   Timer? _watch;
@@ -98,6 +108,7 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
       final position = await widget.locate();
       final code = await widget.visitSchedulesApi.issueCheckinCode(
         widget.visit.id,
+        purpose: widget.checkout ? 'checkout' : 'checkin',
         gpsLat: position.lat,
         gpsLng: position.lng,
         accuracyMeters: position.accuracyMeters,
@@ -107,19 +118,30 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
         setState(() {
           _code = code;
           _error = null;
+          _waiting = false;
         });
       }
     } on LocationUnavailable catch (e) {
       _fail(e.message);
     } on ApiException catch (e) {
-      if (e.problem.status == 409) {
+      if (e.problem.status == 409 && !widget.checkout) {
         // The visit has moved on, which at this point almost always means the code was scanned.
         _markStarted();
         return;
       }
+      if (e.problem.status == 409 && mounted) {
+        setState(() {
+          _code = null;
+          _error = null;
+          _waiting = true;
+        });
+        return;
+      }
       _fail(e.problem.detail ?? e.problem.title);
     } catch (_) {
-      _fail("Couldn't get a code. Check your connection and location, then try again.");
+      _fail(
+        "Couldn't get a code. Check your connection and location, then try again.",
+      );
     }
   }
 
@@ -135,7 +157,12 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
   Future<void> _checkStarted() async {
     try {
       final visit = await widget.visitSchedulesApi.getVisit(widget.visit.id);
-      if (visit.status != 'scheduled') _markStarted();
+      if (visit.status != (widget.checkout ? 'in_progress' : 'scheduled')) {
+        _markStarted();
+      } else if (_waiting) {
+        // Ask again often while waiting, so the code appears soon after the caregiver asks.
+        await _issue();
+      }
     } catch (_) {
       // Only an early heads-up; the next code request will notice too.
     }
@@ -148,13 +175,17 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final caregiver = _code?.caregiverDisplayName ?? widget.visit.caregiverDisplayName;
+    final caregiver =
+        _code?.caregiverDisplayName ?? widget.visit.caregiverDisplayName;
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
-        title: const Text('Check-in code', style: TextStyle(fontSize: 16)),
+        title: Text(
+          widget.checkout ? 'Check-out code' : 'Check-in code',
+          style: const TextStyle(fontSize: 16),
+        ),
       ),
       body: constrainedContent(
         ListView(
@@ -165,7 +196,9 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
               const Icon(Icons.check_circle, color: successGreen, size: 64),
               const SizedBox(height: 16),
               Text(
-                'Visit started with $caregiver',
+                widget.checkout
+                    ? 'Visit with $caregiver finished'
+                    : 'Visit started with $caregiver',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 18,
@@ -190,11 +223,18 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Only show this code to your caregiver, once they are at the home. '
-                'Scanning it starts the visit.',
+              Text(
+                widget.checkout
+                    ? 'Show this code to your caregiver as they leave. Scanning it, or typing the '
+                          'numbers below it, confirms the visit is finished.'
+                    : 'Only show this code to your caregiver, once they are at the home. '
+                          'Scanning it starts the visit.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, height: 1.4, color: inkSecondary),
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: inkSecondary,
+                ),
               ),
               const SizedBox(height: 24),
               if (_error case final message?) ...[
@@ -203,20 +243,68 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
                   color: dangerTint,
                   child: Text(
                     message,
-                    style: const TextStyle(fontSize: 14, height: 1.35, color: inkDefault),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.35,
+                      color: inkDefault,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton(onPressed: _issue, child: const Text('Try again')),
-              ] else if (_code case final code?)
-                Center(
-                  child: Semantics(
-                    label: 'Check-in code for the caregiver to scan',
-                    child: QrImageView(data: code.token, size: 260),
+                OutlinedButton(
+                  onPressed: _issue,
+                  child: const Text('Try again'),
+                ),
+              ] else if (_waiting)
+                SizedBox(
+                  height: 260,
+                  child: Center(
+                    child: Text(
+                      'Waiting for $caregiver to start check-out. The code appears here by itself.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.4,
+                        color: inkSecondary,
+                      ),
+                    ),
                   ),
                 )
+              else if (_code case final code?)
+                Column(
+                  children: [
+                    Center(
+                      child: Semantics(
+                        label: widget.checkout
+                            ? 'Check-out code for the caregiver to scan'
+                            : 'Check-in code for the caregiver to scan',
+                        child: QrImageView(data: code.token, size: 260),
+                      ),
+                    ),
+                    if (code.digits case final digits?) ...[
+                      const SizedBox(height: 12),
+                      Semantics(
+                        label: 'Or type ${digits.split('').join(' ')}',
+                        child: Text(
+                          '${digits.substring(0, 3)} ${digits.substring(3)}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 4,
+                            color: inkDefault,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                )
               else
-                const SizedBox(height: 260, child: Center(child: CircularProgressIndicator())),
+                const SizedBox(
+                  height: 260,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
               const SizedBox(height: 16),
               const Text(
                 'This code refreshes by itself.',

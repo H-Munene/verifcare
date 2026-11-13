@@ -93,7 +93,9 @@ class VerificationAudit {
         arrivedAt: parse(
           attempts
               .map((a) => a as Map<String, dynamic>)
-              .where((a) => a['attemptType'] == 'geofence' && a['passed'] == true)
+              .where(
+                (a) => a['attemptType'] == 'geofence' && a['passed'] == true,
+              )
               .firstOrNull?['attemptedAt'],
         ),
         checkinAt: parse(event?['checkinAt']),
@@ -110,17 +112,27 @@ class VerificationAudit {
   }
 }
 
-/// A code for the caregiver to scan (POST .../checkin/qr).
+/// A code for the caregiver to scan (POST .../checkin/qr or .../checkout/qr). A check-out code
+/// also has 6 [digits] the caregiver can type when their camera won't scan.
 class CheckinCode {
   final String token;
+  final String? digits;
   final String caregiverDisplayName;
 
-  CheckinCode({required this.token, required this.caregiverDisplayName});
+  CheckinCode({
+    required this.token,
+    this.digits,
+    required this.caregiverDisplayName,
+  });
 
   factory CheckinCode.fromJson(Map<String, dynamic> json) => switch (json) {
     {'token': String token, 'caregiverDisplayName': String caregiver} =>
-      CheckinCode(token: token, caregiverDisplayName: caregiver),
-    _ => throw FormatException('Unexpected check-in code: $json'),
+      CheckinCode(
+        token: token,
+        digits: json['code'] as String?,
+        caregiverDisplayName: caregiver,
+      ),
+    _ => throw FormatException('Unexpected code: $json'),
   };
 }
 
@@ -202,18 +214,23 @@ class VisitSchedulesApi {
   }
 
   Future<VisitSchedule> getVisit(String visitScheduleId) async =>
-      VisitSchedule.fromJson(await _client.get('/visit-schedules/$visitScheduleId'));
+      VisitSchedule.fromJson(
+        await _client.get('/visit-schedules/$visitScheduleId'),
+      );
 
   /// Asks for a code to show the caregiver. The server refuses (422) if this phone isn't at the
   /// home, and answers 409 once the visit is no longer waiting for check-in.
+  /// [purpose] is 'checkin' or 'checkout'. A check-out code is only issued once the caregiver has
+  /// asked to check out, and only to the family member who showed the check-in code.
   Future<CheckinCode> issueCheckinCode(
     String visitScheduleId, {
+    String purpose = 'checkin',
     required double gpsLat,
     required double gpsLng,
     required double accuracyMeters,
     required bool isMockLocation,
   }) async => CheckinCode.fromJson(
-    await _client.post('/visit-schedules/$visitScheduleId/checkin/qr', {
+    await _client.post('/visit-schedules/$visitScheduleId/$purpose/qr', {
       'gpsLat': gpsLat,
       'gpsLng': gpsLng,
       'accuracyMeters': accuracyMeters,
@@ -223,7 +240,8 @@ class VisitSchedulesApi {
 
   /// A short-lived link to the visit's recording. Each call is logged as someone listening.
   Future<String> getRecordingUrl(String visitScheduleId) async =>
-      (await _client.get('/visit-schedules/$visitScheduleId/audio'))['url'] as String;
+      (await _client.get('/visit-schedules/$visitScheduleId/audio'))['url']
+          as String;
 
   Future<VerificationAudit> getVerification(String visitScheduleId) async =>
       VerificationAudit.fromJson(

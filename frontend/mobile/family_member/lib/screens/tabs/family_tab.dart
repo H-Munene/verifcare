@@ -5,6 +5,7 @@ import '../../app_ui.dart';
 import '../../widgets/family_link_panel.dart';
 import '../../widgets/states.dart';
 import '../../widgets/visit_widgets.dart';
+import '../dependant_voice_screen.dart';
 
 /// The dependant's details and everyone linked to them (2026-10-12 redesign: the old dependant
 /// page's header and Family tab, together). The primary contact can edit the details and link
@@ -31,9 +32,12 @@ class FamilyTab extends StatefulWidget {
   State<FamilyTab> createState() => _FamilyTabState();
 }
 
-class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixin {
+class _FamilyTabState extends State<FamilyTab>
+    with AutomaticKeepAliveClientMixin {
   List<FamilyMemberLink>? _members;
   String? _error;
+  // null until loaded; a failed lookup just leaves the voice card saying nothing yet.
+  ({DateTime? at})? _voiceEnrolment;
 
   @override
   bool get wantKeepAlive => true;
@@ -47,7 +51,9 @@ class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixi
   Future<void> _load() async {
     setState(() => _error = null);
     try {
-      final members = await widget.dependantsApi.listFamilyMembers(widget.dependant.id);
+      final members = await widget.dependantsApi.listFamilyMembers(
+        widget.dependant.id,
+      );
       // Primary contact first, then alphabetical.
       members.sort(
         (a, b) => a.isPrimaryContact != b.isPrimaryContact
@@ -58,6 +64,24 @@ class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixi
     } catch (e) {
       if (mounted) setState(() => _error = errorText(e));
     }
+    try {
+      final at = await widget.dependantsApi.voiceEnrolledAt(
+        widget.dependant.id,
+      );
+      if (mounted) setState(() => _voiceEnrolment = (at: at));
+    } catch (_) {}
+  }
+
+  Future<void> _recordVoice() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => DependantVoiceScreen(
+          dependant: widget.dependant,
+          dependantsApi: widget.dependantsApi,
+        ),
+      ),
+    );
+    if (saved == true) _load();
   }
 
   Future<void> _linkMember() async {
@@ -80,7 +104,11 @@ class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixi
             children: [
               const Text(
                 'Link a family member',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: inkDefault),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: inkDefault,
+                ),
               ),
               const SizedBox(height: 12),
               FamilyLinkPanel(
@@ -112,6 +140,34 @@ class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixi
               onEdit: widget.isPrimaryContact ? widget.onEdit : null,
             ),
             const SizedBox(height: 8),
+            SectionTitle(
+              "${widget.dependant.fullName.split(' ').first}'s voice",
+            ),
+            SectionCard(
+              // Its own transparent Material, so the tap ripple isn't hidden by the card's colour.
+              child: Material(
+                type: MaterialType.transparency,
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.record_voice_over_outlined,
+                    color: inkSecondary,
+                  ),
+                  title: Text(switch (_voiceEnrolment) {
+                    null => 'Voice',
+                    (at: null) => 'Not recorded yet',
+                    (at: final DateTime at) =>
+                      'Recorded ${MaterialLocalizations.of(context).formatMediumDate(at)}',
+                  }, style: const TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    'Recorded once at home, so the voice recorded at each visit can be checked.',
+                    style: TextStyle(fontSize: 12, color: inkTertiary),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: inkTertiary),
+                  onTap: _recordVoice,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             const SectionTitle('Family'),
             if (_error case final message?)
               ErrorState(message: message, onRetry: _load)
@@ -123,7 +179,10 @@ class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixi
                   children: [
                     for (final (i, member) in members.indexed) ...[
                       if (i > 0) const Divider(height: 1, color: borderColor),
-                      _FamilyMemberTile(member: member, isMe: member.userId == widget.myUserId),
+                      _FamilyMemberTile(
+                        member: member,
+                        isMe: member.userId == widget.myUserId,
+                      ),
                     ],
                   ],
                 ),
@@ -132,7 +191,9 @@ class _FamilyTabState extends State<FamilyTab> with AutomaticKeepAliveClientMixi
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
                   onPressed: _linkMember,
                   icon: const Icon(Icons.person_add_alt_1_outlined),
                   label: const Text('Link a family member'),
@@ -162,7 +223,8 @@ class _AboutCard extends StatelessWidget {
     ].join(' · ');
     final rows = [
       ('Home', [?dependant.homeAddressText, ?dependant.areaText].join('\n')),
-      if (dependant.primaryConditionSummary case final condition?) ('Health', condition),
+      if (dependant.primaryConditionSummary case final condition?)
+        ('Health', condition),
     ].where((row) => row.$2.isNotEmpty);
     return SectionCard(
       padding: const EdgeInsets.all(16),
@@ -184,7 +246,10 @@ class _AboutCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(facts, style: const TextStyle(fontSize: 13, color: inkSecondary)),
+                    Text(
+                      facts,
+                      style: const TextStyle(fontSize: 13, color: inkSecondary),
+                    ),
                   ],
                 ),
               ),
@@ -194,9 +259,15 @@ class _AboutCard extends StatelessWidget {
           ),
           for (final (label, value) in rows) ...[
             const SizedBox(height: 12),
-            Text(label, style: const TextStyle(fontSize: 12, color: inkTertiary)),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, color: inkTertiary),
+            ),
             const SizedBox(height: 2),
-            Text(value, style: const TextStyle(fontSize: 14, color: inkDefault)),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 14, color: inkDefault),
+            ),
           ],
         ],
       ),
@@ -228,7 +299,10 @@ class _FamilyMemberTile extends StatelessWidget {
       ('Relationship', member.relationship ?? 'Not set'),
       ('Added by', member.addedByName ?? 'Unknown'),
       if (linkedAt != null)
-        ('Linked on', MaterialLocalizations.of(context).formatMediumDate(linkedAt)),
+        (
+          'Linked on',
+          MaterialLocalizations.of(context).formatMediumDate(linkedAt),
+        ),
     ];
     // Its own transparent Material, so the tap ripple isn't hidden behind the card's background.
     return Material(
@@ -247,7 +321,10 @@ class _FamilyMemberTile extends StatelessWidget {
             color: primaryTint,
             child: Text(
               _initials(member.fullName),
-              style: const TextStyle(fontWeight: FontWeight.w600, color: primaryGreen),
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                color: primaryGreen,
+              ),
             ),
           ),
           title: Text(
@@ -265,7 +342,10 @@ class _FamilyMemberTile extends StatelessWidget {
                   const TextSpan(text: ' · '),
                   const TextSpan(
                     text: 'Primary contact',
-                    style: TextStyle(fontWeight: FontWeight.w500, color: primaryGreen),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: primaryGreen,
+                    ),
                   ),
                 ],
               ],
@@ -280,7 +360,10 @@ class _FamilyMemberTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label, style: const TextStyle(fontSize: 12, color: inkTertiary)),
+                    Text(
+                      label,
+                      style: const TextStyle(fontSize: 12, color: inkTertiary),
+                    ),
                     SelectableText(
                       value,
                       style: const TextStyle(fontSize: 13, color: inkDefault),

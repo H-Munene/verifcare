@@ -15,7 +15,6 @@ class Dependant {
   final double geofenceLng;
   final bool active;
 
-
   Dependant({
     required this.id,
     required this.fullName,
@@ -58,7 +57,6 @@ class Dependant {
   };
 
   int ageOn(DateTime today) => ageOnDate(dob, today);
-
 
   /// "Ward, Constituency, County", skipping any that are missing.
   String? get areaText {
@@ -139,6 +137,32 @@ class FamilyMemberLink {
 class DependantsApi {
   final ApiClient _client;
   DependantsApi(this._client);
+
+  /// When the dependant's voice was recorded for the voice check, or null if it hasn't been.
+  Future<DateTime?> voiceEnrolledAt(String dependantId) async {
+    final json = await _client.get(
+      '/voice-enrollments/dependants/$dependantId',
+    );
+    final at = json['enrolledAt'] as String?;
+    return at == null ? null : DateTime.parse(at).toLocal();
+  }
+
+  /// Presign, upload straight to S3, then confirm, which makes the voiceprint and deletes the
+  /// audio. The server answers 422 when it heard too little speech.
+  Future<void> enrolVoice(String dependantId, List<int> bytes) async {
+    final presign = await _client.post(
+      '/voice-enrollments/dependants/$dependantId/upload-url',
+      const {},
+    );
+    await ApiClient.uploadToPresignedUrl(
+      presign['uploadUrl'] as String,
+      bytes,
+      'audio/mp4',
+    );
+    await _client.post('/voice-enrollments/dependants/$dependantId', {
+      's3Key': presign['s3Key'],
+    });
+  }
 
   /// Every linked dependant, active and deactivated, following nextCursor through all pages.
   Future<List<Dependant>> listDependants() async {
