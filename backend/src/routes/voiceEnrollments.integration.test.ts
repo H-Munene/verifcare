@@ -169,6 +169,17 @@ describe.skipIf(!hasTestDb)('voice enrolment (real Postgres)', () => {
     expect(await enrolments()).toHaveLength(0);
   });
 
+  it('asks for the new voiceprint to be deleted when enrolment fails part way', async () => {
+    await grantVoiceConsent({ caregiverId });
+    enrol.mockRejectedValueOnce(new Error('timed out'));
+
+    expect((await enrolSelf()).status).toBe(500);
+
+    const [input] = enrol.mock.calls[0]!;
+    expect(remove).toHaveBeenCalledWith({ voiceprintKey: input.voiceprintKey });
+    expect(await enrolments()).toHaveLength(0);
+  });
+
   it('replaces a voiceprint on re-enrolment and deletes the old one', async () => {
     await grantVoiceConsent({ caregiverId });
     await enrolSelf();

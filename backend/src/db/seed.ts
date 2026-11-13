@@ -52,6 +52,8 @@ const ALL_TABLES = [
   'checkin_qr_tokens',
   'checkin_override_requests',
   'visit_resolutions',
+  'voice_checks',
+  'voice_enrollments',
   'audio_records',
   'consent_records',
   'terms_acceptances',
@@ -184,24 +186,26 @@ async function main() {
   }
 
   // --- Consent records ---------------------------------------------------------------------
-  // Location for everyone; visit audio for all but the second dependant, so that visit shows the
-  // no-consent path (no recorder, nothing required at checkout).
+  // Location for everyone; visit audio and voice checks for all but the second dependant, so that
+  // visit shows the no-consent path (no recorder for them, nothing of theirs required at checkout).
 
   for (const [i, caregiver] of caregivers.entries()) {
     await db.insert(schema.consentRecords).values(
-      (['location_verification', 'visit_audio'] as const).map((consentType) => ({
-        subjectType: 'caregiver' as const,
-        caregiverId: caregiver.userId,
-        consentType,
-        grantedBy: caregiverUsers[i]!.id,
-      })),
+      (['location_verification', 'visit_audio', 'voice_verification'] as const).map(
+        (consentType) => ({
+          subjectType: 'caregiver' as const,
+          caregiverId: caregiver.userId,
+          consentType,
+          grantedBy: caregiverUsers[i]!.id,
+        }),
+      ),
     );
   }
   for (const [i, dependant] of dependants.entries()) {
     const consentTypes =
       i === 1
         ? (['location_verification'] as const)
-        : (['location_verification', 'visit_audio'] as const);
+        : (['location_verification', 'visit_audio', 'voice_verification'] as const);
     await db.insert(schema.consentRecords).values(
       consentTypes.map((consentType) => ({
         subjectType: 'dependant' as const,
@@ -258,15 +262,54 @@ async function main() {
     checkinMethod: 'qr',
     qrFamilyMemberUserId: familyMemberUsers[0]!.id,
     familyDistanceFromGeofenceMeters: 9.3,
+    checkoutRequestedAt: daysFromNow(-3, 9, 56),
+    checkoutMethod: 'qr',
+    checkoutFamilyMemberUserId: familyMemberUsers[0]!.id,
+    checkoutFamilyDistanceMeters: 7.5,
   });
 
-  await db.insert(schema.audioRecords).values({
-    verificationEventId: completedVisit!.id,
-    role: 'dependant',
-    s3Key: placeholderS3Key(`visit-audio/${completedVisit!.id}`),
-    durationSeconds: 30,
-    uploadedAt: daysFromNow(-3, 9, 58),
-  });
+  // Both voices recorded and checked against the enrolments below (placeholder voiceprints: the
+  // local seed never calls the voice Lambda).
+  await db.insert(schema.voiceEnrollments).values([
+    {
+      subjectType: 'caregiver',
+      caregiverId: caregivers[0]!.userId,
+      voiceprintKey: `caregiver/${caregivers[0]!.userId}/${randomUUID()}.npy`,
+      speechSeconds: 29.4,
+      modelRevision: 'seed',
+      enrolledBy: caregiverUsers[0]!.id,
+    },
+    {
+      subjectType: 'dependant',
+      dependantId: dependants[0]!.id,
+      voiceprintKey: `dependant/${dependants[0]!.id}/${randomUUID()}.npy`,
+      speechSeconds: 27.8,
+      modelRevision: 'seed',
+      enrolledBy: familyMemberUsers[0]!.id,
+    },
+  ]);
+  const recordings = await db
+    .insert(schema.audioRecords)
+    .values(
+      (['caregiver', 'dependant'] as const).map((role) => ({
+        verificationEventId: completedVisit!.id,
+        role,
+        s3Key: placeholderS3Key(`${completedVisit!.id}/${role}`),
+        durationSeconds: role === 'caregiver' ? 15 : 22,
+        uploadedAt: daysFromNow(-3, 9, 50),
+      })),
+    )
+    .returning();
+  await db.insert(schema.voiceChecks).values(
+    recordings.map((recording, i) => ({
+      audioRecordId: recording.id,
+      result: 'match' as const,
+      score: i === 0 ? 0.74 : 0.66,
+      speechSeconds: i === 0 ? 12.1 : 17.3,
+      threshold: 0.5,
+      modelRevision: 'seed',
+    })),
+  );
 
   // Completed, 2 days ago: caregiver[1] + dependant[1] (no audio consent -> no recording).
   const [completedVisit2] = await db
@@ -312,6 +355,10 @@ async function main() {
     checkinMethod: 'qr',
     qrFamilyMemberUserId: familyMemberUsers[1]!.id,
     familyDistanceFromGeofenceMeters: 6.2,
+    // Checked out without the family's code, so Compliance has a check-out override to show.
+    checkoutRequestedAt: daysFromNow(-2, 14, 50),
+    checkoutMethod: 'override',
+    checkoutOverrideReason: 'family_phone_unavailable',
   });
 
   // Missed, yesterday: caregiver[2] + dependant[2] - the caregiver never attempted check-in.

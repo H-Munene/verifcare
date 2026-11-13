@@ -51,7 +51,10 @@ function buildTestApp(): Express {
     '/dependants',
     createDependantsRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
   );
-  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+  app.use(
+    '/caregivers',
+    createCaregiversRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
+  );
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });

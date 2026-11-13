@@ -40,7 +40,7 @@ export interface VisitAudioRouterDependencies {
 
 // Mirrors infra/lib/storage.ts's lifecycle rule, which is what actually deletes the object.
 export const AUDIO_RETENTION_DAYS = 90;
-export const MIN_RECORDING_SECONDS = 10;
+const MIN_RECORDING_SECONDS = 10;
 // One over the 30-second limit, since a recording stopped at 30 s can encode a fraction longer.
 const MAX_DURATION_SECONDS = 31;
 // 30 seconds of AAC is well under 1 MB. A presigned PUT can't enforce a size, so it's checked here.

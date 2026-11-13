@@ -9,7 +9,7 @@
 //
 // Each completing step re-checks the caregiver's position, since time can pass between the steps.
 
-import { and, eq, gt, gte, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -562,7 +562,8 @@ export function createCheckoutRouter(dependencies: CheckoutRouterDependencies): 
             eq(schema.checkinQrTokens.codeHash, checkoutCodeHash(visitScheduleId, body.code)),
           ),
         )
-        .orderBy(schema.checkinQrTokens.issuedAt)
+        // Newest first: should the same digits ever recur, an old expired code mustn't hide a live one.
+        .orderBy(desc(schema.checkinQrTokens.issuedAt))
         .limit(1);
       if (!code) {
         await refuse('invalid_code');

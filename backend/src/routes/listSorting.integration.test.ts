@@ -46,7 +46,10 @@ function buildTestApp(): Express {
     '/dependants',
     createDependantsRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
   );
-  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+  app.use(
+    '/caregivers',
+    createCaregiversRouter({ cognitoAdmin, requireAuth, voice: createFakeVoiceService() }),
+  );
   app.use('/visit-schedules', createVisitSchedulesRouter({ requireAuth }));
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

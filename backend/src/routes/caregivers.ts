@@ -40,10 +40,14 @@ import {
   type SortKey,
 } from '../pagination.js';
 import { parseOrSendProblem } from '../validation.js';
+import { removeEnrollment } from '../voiceChecks.js';
+import type { VoiceService } from '../voiceService.js';
 
 export interface CaregiversRouterDependencies {
   cognitoAdmin: CognitoAdmin;
   requireAuth: RequestHandler;
+  // Deactivating a caregiver deletes their voiceprint.
+  voice: VoiceService;
 }
 
 interface CaregiverResponse {
@@ -547,12 +551,18 @@ export function createCaregiversRouter(dependencies: CaregiversRouterDependencie
             ]),
           },
         });
-        return { caregiverRow, userRow };
+        return { caregiverRow, userRow, wasActive: beforeCaregiver.active };
       });
 
       if (!result) {
         sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
         return;
+      }
+      if (result.wasActive && !result.caregiverRow.active) {
+        await removeEnrollment(db, dependencies.voice, {
+          subjectType: 'caregiver',
+          id: caregiverId,
+        });
       }
 
       res.status(200).json(

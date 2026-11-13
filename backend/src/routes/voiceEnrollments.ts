@@ -170,7 +170,16 @@ export function createVoiceEnrollmentsRouter(
           return;
         }
         const voiceprintKey = newVoiceprintKey(subject);
-        const made = await voice.enrol({ audioKey: body.s3Key, voiceprintKey });
+        const made = await voice
+          .enrol({ audioKey: body.s3Key, voiceprintKey })
+          .catch(async (err: unknown) => {
+            // A timed-out call may still finish in the voice Lambda and leave a voiceprint no row
+            // points to, so ask for it to be deleted too.
+            // ponytail: best effort, it can lose the race with a still-running enrol; a sweep of
+            // unreferenced keys in the voiceprint bucket is the upgrade.
+            await voice.remove({ voiceprintKey }).catch(() => {});
+            throw err;
+          });
         if (!made.enrolled) {
           sendProblem(res, {
             type: 'about:blank',

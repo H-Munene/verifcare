@@ -136,7 +136,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       '/users',
       createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity, voice }),
     );
-    app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+    app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth, voice }));
     app.use('/dependants', createDependantsRouter({ cognitoAdmin, requireAuth, voice }));
   }
   // HEZ-32's visit-scheduling endpoints - unlike the routers above, this needs only requireAuth
