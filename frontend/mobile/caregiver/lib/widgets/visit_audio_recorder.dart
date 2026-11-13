@@ -96,6 +96,10 @@ class VisitAudioRecorder extends StatefulWidget {
   final String hint;
   final Duration minDuration;
   final Duration maxDuration;
+
+  /// Tap to start and tap to stop, instead of holding: for recordings too long to hold a finger
+  /// down for, like the 30-second enrolment.
+  final bool tapToRecord;
   final ValueChanged<bool> onRecordingChanged;
 
   const VisitAudioRecorder({
@@ -106,6 +110,7 @@ class VisitAudioRecorder extends StatefulWidget {
     required this.onRecordingChanged,
     this.minDuration = visitRecordingMinDuration,
     this.maxDuration = maxRecordingDuration,
+    this.tapToRecord = false,
   });
 
   @override
@@ -185,6 +190,8 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
     // The first call shows the OS permission prompt - the caregiver has let go by the time it's
     // answered, so a first-ever press only asks, it doesn't start recording.
     if (!await _recorder.hasPermission()) {
+      // Reset, or tap mode would ignore every later tap as a start still in flight.
+      _pointerDown = false;
       if (mounted) showSnack(context, 'Microphone access is needed to record.');
       return;
     }
@@ -353,9 +360,14 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
         ),
         const SizedBox(height: 16),
         Listener(
-          onPointerDown: (_) => _startRecording(),
-          onPointerUp: (_) => _stopRecording(),
-          onPointerCancel: (_) => _stopRecording(),
+          // In tap mode a tap while a start is still in flight is ignored, so it can't start twice.
+          onPointerDown: (_) => widget.tapToRecord
+              ? (recording
+                    ? _stopRecording()
+                    : (_pointerDown ? null : _startRecording()))
+              : _startRecording(),
+          onPointerUp: (_) => widget.tapToRecord ? null : _stopRecording(),
+          onPointerCancel: (_) => widget.tapToRecord ? null : _stopRecording(),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             width: recording ? 80 : 72,
@@ -380,7 +392,9 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
         ),
         const SizedBox(height: 8),
         Text(
-          recording ? 'Release to stop' : 'Hold to record',
+          widget.tapToRecord
+              ? (recording ? 'Tap to stop' : 'Tap to record')
+              : (recording ? 'Release to stop' : 'Hold to record'),
           style: const TextStyle(fontSize: 12, color: inkSecondary),
         ),
       ],

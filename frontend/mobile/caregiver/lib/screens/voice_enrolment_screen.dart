@@ -92,9 +92,11 @@ class _VoiceEnrolmentScreenState extends State<VoiceEnrolmentScreen> {
             VisitAudioRecorder(
               storageKey: _storageKey,
               label: 'Your voice',
-              hint: 'Press and hold, and speak for about 30 seconds.',
+              hint:
+                  'Tap the button, speak for about 30 seconds, then tap it again.',
               minDuration: const Duration(seconds: 25),
               maxDuration: const Duration(seconds: 40),
+              tapToRecord: true,
               onRecordingChanged: (has) => setState(() => _hasRecording = has),
             ),
           ],
