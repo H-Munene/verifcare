@@ -52,11 +52,6 @@
   gap: 6px;
 }
 
-.compliance__export-error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-}
-
 .compliance__subbar {
   display: flex;
   margin-bottom: 16px;

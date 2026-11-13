@@ -26,18 +26,16 @@
   margin-bottom: 24px;
 }
 
-.caregiver-detail__error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
-  margin-bottom: 16px;
-}
-
 .caregiver-detail__actions {
   display: flex;
   justify-content: flex-end;
   border-top: 1px solid var(--color-border-divider);
   padding-top: 16px;
+}
+
+.caregiver-detail__section-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
 }

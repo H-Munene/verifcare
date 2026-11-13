@@ -1,16 +1,24 @@
 // Must be the first import.
 import './polyfills.ts';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App.tsx';
+import { errorMessage } from './api/client.ts';
 import { AuthProvider } from './auth/AuthContext.tsx';
 import { loadConfig } from './config.ts';
+import { Toaster } from './design-system/Toast.tsx';
+import { showErrorToast } from './design-system/toastStore.ts';
 import './index.css';
 
-const queryClient = new QueryClient();
+// Every failed request reports as a toast from here, so pages don't render their own error text.
+const reportError = (error: unknown) => showErrorToast(errorMessage(error));
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: reportError }),
+  mutationCache: new MutationCache({ onError: reportError }),
+});
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -30,6 +38,7 @@ loadConfig().then(
             <AuthProvider>
               <App />
             </AuthProvider>
+            <Toaster />
           </BrowserRouter>
         </QueryClientProvider>
       </StrictMode>,

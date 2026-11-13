@@ -15,7 +15,11 @@ import {
   teardownTestDb,
   truncateAllTables,
 } from '../db/testSupport.js';
+import { createFakeVoiceService, type VoiceService } from '../voiceService.js';
 import { createCaregiversRouter } from './caregivers.js';
+
+// Deactivating a caregiver deletes their voiceprint through the voice service.
+const removeVoiceprint = vi.fn<VoiceService['remove']>().mockResolvedValue();
 
 const hasTestDb = Boolean(getTestDatabaseUrl());
 
@@ -84,7 +88,14 @@ function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
     next();
   };
 
-  app.use('/caregivers', createCaregiversRouter({ cognitoAdmin, requireAuth }));
+  app.use(
+    '/caregivers',
+    createCaregiversRouter({
+      cognitoAdmin,
+      requireAuth,
+      voice: createFakeVoiceService({ remove: removeVoiceprint }),
+    }),
+  );
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });
@@ -185,6 +196,19 @@ describe.skipIf(!hasTestDb)(
           entityType: 'caregiver',
           entityId: caregiverBody(response).userId,
         });
+      });
+
+      it('returns 400 for a phone number not in E.164 format, before calling Cognito', async () => {
+        const response = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({ email: 'local.phone@example.com', phoneNumber: '0712345678' }),
+          );
+
+        expect(response.status).toBe(400);
+        expect((response.body as { detail: string }).detail).toContain('E.164');
+        expect(cognitoAdmin.createUser).not.toHaveBeenCalled();
       });
 
       it('returns 403 for a non-supervisor caller', async () => {
@@ -464,6 +488,47 @@ describe.skipIf(!hasTestDb)(
           .send({ employeeNumber: caregiverBody(first).employeeNumber });
 
         expect(response.status).toBe(409);
+      });
+
+      it("deletes a caregiver's voiceprint when they're deactivated, and only then", async () => {
+        const created = await request(app)
+          .post('/caregivers')
+          .set('x-test-auth', supervisorAuth)
+          .send(
+            validCaregiverBody({
+              email: 'voice@example.com',
+              phoneNumber: '+254700000070',
+              fullName: 'Voice',
+            }),
+          );
+        const caregiverId = caregiverBody(created).userId;
+        const [supervisor] = await getDb().select().from(schema.users).limit(1);
+        await getDb()
+          .insert(schema.voiceEnrollments)
+          .values({
+            subjectType: 'caregiver',
+            caregiverId,
+            voiceprintKey: `caregiver/${caregiverId}/v.npy`,
+            speechSeconds: 30,
+            modelRevision: 'test',
+            enrolledBy: supervisor!.id,
+          });
+        removeVoiceprint.mockClear();
+        const patch = (body: object) =>
+          request(app)
+            .patch(`/caregivers/${caregiverId}`)
+            .set('x-test-auth', supervisorAuth)
+            .send(body);
+
+        await patch({ fullName: 'Renamed' });
+        expect(removeVoiceprint).not.toHaveBeenCalled();
+        await patch({ active: false });
+
+        expect(removeVoiceprint).toHaveBeenCalledWith({
+          voiceprintKey: `caregiver/${caregiverId}/v.npy`,
+        });
+        const [enrolment] = await getDb().select().from(schema.voiceEnrollments);
+        expect(enrolment?.removedAt).not.toBeNull();
       });
 
       it('returns 404 for a nonexistent caregiver', async () => {

@@ -1,5 +1,5 @@
-// The visit's 30-second recording against a real Postgres, with S3 faked: who may upload, who may
-// listen, and the audit trail of listening.
+// The visit's two recordings against a real Postgres, with S3 and the voice Lambda faked: who may
+// upload, the voice check on each, who may listen, and the audit trail of listening.
 
 import { eq } from 'drizzle-orm';
 import express, { type Express } from 'express';
@@ -15,6 +15,7 @@ import {
   truncateAllTables,
 } from '../db/testSupport.js';
 import type { VisitAudioStorage } from '../db/visitAudioStorage.js';
+import { createFakeVoiceService, type VoiceService } from '../voiceService.js';
 import { createVisitAudioRouter } from './visitAudio.js';
 
 const hasTestDb = Boolean(getTestDatabaseUrl());
@@ -31,8 +32,10 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
     objectSize: ReturnType<typeof vi.fn<VisitAudioStorage['objectSize']>>;
     createPlaybackUrl: ReturnType<typeof vi.fn<VisitAudioStorage['createPlaybackUrl']>>;
   };
+  let verify: ReturnType<typeof vi.fn<VoiceService['verify']>>;
   let visitId: string;
   let dependantId: string;
+  let caregiverId: string;
   let supervisorId: string;
   let now: Date;
   const caregiver = auth('cg-1', 'caregiver');
@@ -54,23 +57,49 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
     return row!;
   }
 
+  async function grant(
+    who: 'caregiver' | 'dependant',
+    consentType: 'visit_audio' | 'voice_verification' = 'visit_audio',
+  ) {
+    await getDb()
+      .insert(schema.consentRecords)
+      .values({
+        subjectType: who,
+        caregiverId: who === 'caregiver' ? caregiverId : null,
+        dependantId: who === 'dependant' ? dependantId : null,
+        consentType,
+        grantedBy: supervisorId,
+      });
+  }
+
   async function grantAudioConsent() {
-    await getDb().insert(schema.consentRecords).values({
-      subjectType: 'dependant',
-      dependantId,
-      consentType: 'visit_audio',
-      grantedBy: supervisorId,
-    });
+    await grant('caregiver');
+    await grant('dependant');
+  }
+
+  async function enrol(who: 'caregiver' | 'dependant') {
+    await grant(who, 'voice_verification');
+    await getDb()
+      .insert(schema.voiceEnrollments)
+      .values({
+        subjectType: who,
+        caregiverId: who === 'caregiver' ? caregiverId : null,
+        dependantId: who === 'dependant' ? dependantId : null,
+        voiceprintKey: `${who}/voiceprint.npy`,
+        speechSeconds: 30,
+        modelRevision: 'test',
+        enrolledBy: supervisorId,
+      });
   }
 
   beforeEach(async () => {
     await truncateAllTables();
     now = new Date('2026-11-09T09:30:00Z');
     storage = {
-      createUploadUrl: vi.fn<VisitAudioStorage['createUploadUrl']>().mockImplementation((id) =>
+      createUploadUrl: vi.fn<VisitAudioStorage['createUploadUrl']>().mockImplementation((prefix) =>
         Promise.resolve({
           uploadUrl: 'https://s3.example/upload',
-          s3Key: `${id}/clip.m4a`,
+          s3Key: `${prefix}clip.m4a`,
           expiresAt: new Date('2026-11-09T09:35:00Z'),
         }),
       ),
@@ -80,6 +109,13 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
         expiresAt: new Date('2026-11-09T09:35:00Z'),
       }),
     };
+    verify = vi.fn<VoiceService['verify']>().mockResolvedValue({
+      result: 'match',
+      score: 0.71,
+      speechSeconds: 9,
+      threshold: 0.5,
+      modelRevision: 'test',
+    });
     app = express();
     app.use(express.json());
     app.locals.db = getDb();
@@ -89,12 +125,21 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
       ) as AuthenticatedUser;
       next();
     };
-    app.use('/visit-schedules', createVisitAudioRouter({ requireAuth, storage, now: () => now }));
+    app.use(
+      '/visit-schedules',
+      createVisitAudioRouter({
+        requireAuth,
+        storage,
+        voice: createFakeVoiceService({ verify }),
+        now: () => now,
+      }),
+    );
 
     const supervisor = await addUser('sup-1', 'supervisor', '+254700000001');
     supervisorId = supervisor.id;
     const caregiverUser = await addUser('cg-1', 'caregiver', '+254700000002');
     await getDb().insert(schema.caregivers).values({ userId: caregiverUser.id });
+    caregiverId = caregiverUser.id;
     const familyUser = await addUser('fam-1', 'family_member', '+254700000003');
     await addUser('fam-2', 'family_member', '+254700000004');
     const [dependant] = await getDb()
@@ -132,43 +177,70 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
       .values({ visitScheduleId: visitId, checkinAt: new Date('2026-11-09T09:05:00Z') });
   });
 
-  const upload = (who = caregiver) =>
-    request(app).post(`/visit-schedules/${visitId}/audio/upload-url`).set('x-test-auth', who);
-  const confirm = (body: Record<string, unknown> = {}, who = caregiver) =>
+  const upload = (who = caregiver, role = 'dependant') =>
     request(app)
-      .post(`/visit-schedules/${visitId}/audio`)
+      .post(`/visit-schedules/${visitId}/audio/${role}/upload-url`)
+      .set('x-test-auth', who);
+  const confirm = (body: Record<string, unknown> = {}, who = caregiver, role = 'dependant') =>
+    request(app)
+      .post(`/visit-schedules/${visitId}/audio/${role}`)
       .set('x-test-auth', who)
-      .send({ s3Key: `${visitId}/clip.m4a`, durationSeconds: 30, ...body });
+      .send({ s3Key: `${visitId}/${role}/clip.m4a`, durationSeconds: 30, ...body });
   const listen = (who = family) =>
     request(app).get(`/visit-schedules/${visitId}/audio`).set('x-test-auth', who);
   const requirement = () =>
     request(app).get(`/visit-schedules/${visitId}/audio/requirement`).set('x-test-auth', caregiver);
+  const checks = async () =>
+    (
+      await getDb()
+        .select({
+          role: schema.audioRecords.role,
+          result: schema.voiceChecks.result,
+          score: schema.voiceChecks.score,
+        })
+        .from(schema.voiceChecks)
+        .innerJoin(
+          schema.audioRecords,
+          eq(schema.audioRecords.id, schema.voiceChecks.audioRecordId),
+        )
+    ).sort((a, b) => a.role.localeCompare(b.role));
 
   describe('recording', () => {
-    it('reports whether a recording is needed, following consent', async () => {
-      expect((await requirement()).body).toEqual({ required: false, recorded: false });
+    it("reports which recordings are needed, following each person's consent", async () => {
+      const none = { required: false, recorded: false };
+      expect((await requirement()).body).toEqual({ caregiver: none, dependant: none });
 
       await grantAudioConsent();
-      expect((await requirement()).body).toEqual({ required: true, recorded: false });
-
-      await confirm();
-      expect((await requirement()).body).toEqual({ required: true, recorded: true });
+      await confirm({}, caregiver, 'caregiver');
+      expect((await requirement()).body).toEqual({
+        caregiver: { required: true, recorded: true },
+        dependant: { required: true, recorded: false },
+      });
     });
 
-    it('refuses to take a recording without consent', async () => {
-      expect((await upload()).status).toBe(403);
-      expect((await confirm()).status).toBe(403);
-      expect(await getDb().select().from(schema.audioRecords)).toHaveLength(0);
+    it("refuses a person's recording without their consent", async () => {
+      await grant('dependant');
+
+      expect((await upload(caregiver, 'caregiver')).status).toBe(403);
+      expect((await confirm({}, caregiver, 'caregiver')).status).toBe(403);
+      expect((await confirm()).status).toBe(201);
+      expect(await getDb().select().from(schema.audioRecords)).toMatchObject([
+        { role: 'dependant' },
+      ]);
     });
 
-    it('stores one recording per visit, even if the caregiver retries', async () => {
+    it('stores one recording per person, even if the caregiver retries', async () => {
       await grantAudioConsent();
 
+      expect((await confirm({}, caregiver, 'caregiver')).status).toBe(201);
       expect((await confirm()).status).toBe(201);
       expect((await confirm({ durationSeconds: 28 })).status).toBe(201);
 
       const rows = await getDb().select().from(schema.audioRecords);
-      expect(rows).toMatchObject([{ durationSeconds: 28 }]);
+      expect(rows.map((r) => [r.role, r.durationSeconds]).sort()).toEqual([
+        ['caregiver', 30],
+        ['dependant', 28],
+      ]);
     });
 
     it('only accepts a recording during the visit', async () => {
@@ -189,10 +261,12 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
       expect((await upload(auth('sup-1', 'supervisor'))).status).toBe(403);
     });
 
-    it("refuses a key that isn't this visit's", async () => {
+    it("refuses a key that isn't this visit's or this person's, and an unknown role", async () => {
       await grantAudioConsent();
 
       expect((await confirm({ s3Key: 'someone-else/clip.m4a' })).status).toBe(400);
+      expect((await confirm({ s3Key: `${visitId}/caregiver/clip.m4a` })).status).toBe(400);
+      expect((await upload(caregiver, 'family')).status).toBe(400);
     });
 
     it('refuses a recording that was never uploaded, is empty, or is far too big', async () => {
@@ -206,29 +280,83 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
       expect((await confirm()).status).toBe(422);
     });
 
-    it('refuses a length outside 5 to 31 seconds', async () => {
+    it('refuses a length outside 10 to 31 seconds', async () => {
       await grantAudioConsent();
 
-      expect((await confirm({ durationSeconds: 4 })).status).toBe(400);
+      expect((await confirm({ durationSeconds: 9 })).status).toBe(400);
       expect((await confirm({ durationSeconds: 32 })).status).toBe(400);
-      expect((await confirm({ durationSeconds: 31 })).status).toBe(201);
+      expect((await confirm({ durationSeconds: 10 })).status).toBe(201);
+    });
+  });
+
+  describe('voice check', () => {
+    beforeEach(grantAudioConsent);
+
+    it('checks each recording against the voiceprint of the person it claims to be', async () => {
+      await enrol('caregiver');
+      await enrol('dependant');
+      await confirm({}, caregiver, 'caregiver');
+      await confirm();
+
+      expect(verify.mock.calls.map(([input]) => input)).toEqual([
+        { audioKey: `${visitId}/caregiver/clip.m4a`, voiceprintKey: 'caregiver/voiceprint.npy' },
+        { audioKey: `${visitId}/dependant/clip.m4a`, voiceprintKey: 'dependant/voiceprint.npy' },
+      ]);
+      expect(await checks()).toEqual([
+        { role: 'caregiver', result: 'match', score: 0.71 },
+        { role: 'dependant', result: 'match', score: 0.71 },
+      ]);
+    });
+
+    it('does not analyse anyone without voice consent, or who is not enrolled', async () => {
+      await grant('dependant', 'voice_verification');
+      await confirm({}, caregiver, 'caregiver');
+      await confirm();
+
+      expect(verify).not.toHaveBeenCalled();
+      expect(await checks()).toEqual([
+        { role: 'caregiver', result: 'no_consent', score: null },
+        { role: 'dependant', result: 'not_enrolled', score: null },
+      ]);
+    });
+
+    it('keeps the recording and marks the check unavailable when the voice service fails', async () => {
+      await enrol('dependant');
+      verify.mockRejectedValueOnce(new Error('timed out'));
+
+      expect((await confirm()).status).toBe(201);
+      expect(await checks()).toEqual([{ role: 'dependant', result: 'unavailable', score: null }]);
+    });
+
+    it('replaces the check when the caregiver re-records', async () => {
+      await enrol('dependant');
+      verify.mockResolvedValueOnce({
+        result: 'mismatch',
+        score: 0.2,
+        speechSeconds: 9,
+        threshold: 0.5,
+        modelRevision: 'test',
+      });
+      await confirm();
+      await confirm({ durationSeconds: 25 });
+
+      expect(await checks()).toEqual([{ role: 'dependant', result: 'match', score: 0.71 }]);
     });
   });
 
   describe('listening', () => {
     beforeEach(async () => {
       await grantAudioConsent();
+      await confirm({ durationSeconds: 20 }, caregiver, 'caregiver');
       await confirm();
     });
 
-    it('gives a linked family member a playback URL and logs that they listened', async () => {
+    it("gives a linked family member the dependant's recording and logs that they listened", async () => {
       const response = await listen();
 
       expect(response.status).toBe(200);
-      expect(response.body).toMatchObject({
-        url: 'https://s3.example/play',
-        durationSeconds: 30,
-      });
+      expect(response.body).toMatchObject({ url: 'https://s3.example/play', durationSeconds: 30 });
+      expect(storage.createPlaybackUrl).toHaveBeenCalledWith(`${visitId}/dependant/clip.m4a`);
       const entries = await getDb()
         .select()
         .from(schema.auditLog)
@@ -253,8 +381,9 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
       expect(storage.createPlaybackUrl).not.toHaveBeenCalled();
     });
 
-    it('returns 404 when the visit has no recording', async () => {
-      await getDb().delete(schema.audioRecords);
+    it('returns 404 when the dependant has no recording', async () => {
+      await getDb().delete(schema.voiceChecks);
+      await getDb().delete(schema.audioRecords).where(eq(schema.audioRecords.role, 'dependant'));
 
       expect((await listen()).status).toBe(404);
     });

@@ -27,6 +27,8 @@ const allTableNames = [
   'checkin_qr_tokens',
   'checkin_override_requests',
   'visit_resolutions',
+  'voice_checks',
+  'voice_enrollments',
   'audio_records',
   'consent_records',
   'terms_acceptances',

@@ -95,7 +95,15 @@ const visitsQuerySchema = periodSchema.extend({
 const EXCEPTION_SORT = '-scheduledStart';
 
 const exceptionsQuerySchema = periodSchema.extend({
-  kind: z.enum(['missed', 'missing_checkout', 'failed_check', 'supervisor_override']).optional(),
+  kind: z
+    .enum([
+      'missed',
+      'missing_checkout',
+      'failed_check',
+      'supervisor_override',
+      'checkout_override',
+    ])
+    .optional(),
   resolved: z
     .enum(['true', 'false'])
     .optional()
@@ -180,6 +188,10 @@ function exceptionOf(visit: VisitRecord, kinds: ExceptionKind[]) {
     checkoutAt: visit.checkoutAt,
     kinds,
     failedChecks: visit.failedChecks,
+    // Why the caregiver checked out without the family's code (2026-11-13).
+    checkoutOverride: visit.checkoutOverrideReason
+      ? { reason: visit.checkoutOverrideReason, note: visit.checkoutOverrideNote }
+      : null,
     latestResolution: visit.latestResolution,
   };
 }

@@ -9,6 +9,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CognitoAdmin } from '../auth/cognitoAdmin.js';
 import type { AuthenticatedUser, VerifiedIdentity } from '../auth/verifier.js';
+import { createFakeVoiceService } from '../voiceService.js';
 import * as schema from '../db/schema.js';
 import {
   getDb,
@@ -70,7 +71,15 @@ function buildTestApp(cognitoAdmin: CognitoAdmin): Express {
     next();
   };
 
-  app.use('/users', createUsersRouter({ cognitoAdmin, requireAuth, requireVerifiedIdentity }));
+  app.use(
+    '/users',
+    createUsersRouter({
+      cognitoAdmin,
+      requireAuth,
+      requireVerifiedIdentity,
+      voice: createFakeVoiceService(),
+    }),
+  );
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       res.status(500).json({ title: 'Internal Server Error', message: String(err) });

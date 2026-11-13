@@ -1,6 +1,11 @@
 // POST /visit-schedules/{id}/checkin/qr (2026-11-09): a family member's phone asks for the code the
 // caregiver will scan to start the visit (routes/checkin.ts's qr-scan consumes it).
 //
+// POST /visit-schedules/{id}/checkout/qr (2026-11-13): the same, to confirm check-out once the
+// caregiver has requested it (routes/checkout.ts consumes it). Only the family member whose code
+// started the visit may confirm it, or any linked one when a supervisor override started it. A
+// check-out code also carries 6 digits, for when the caregiver's camera can't scan.
+//
 // The family phone's own position is checked, by the same rule as the caregiver's, before a code is
 // issued. Without that, a relative anywhere could forward a live code to a caregiver who never
 // reached the home's front door. Only the pass result and distance are kept, because the only
@@ -9,6 +14,7 @@
 // Mounted before routes/checkin.ts, whose router-wide requireRole('caregiver') would otherwise
 // reject family members.
 
+import { randomInt } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
@@ -21,6 +27,7 @@ import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { parseOrSendProblem } from '../validation.js';
+import { checkoutCodeHash } from './checkout.js';
 import { findFamilyMemberLink } from './dependants.js';
 
 export interface CheckinCodeRouterDependencies {
@@ -48,10 +55,8 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
   const router = Router();
   const { requireAuth, geofenceAccuracyThresholdMeters, qrTokenTtlSeconds } = dependencies;
 
-  router.post(
-    '/:visitScheduleId/checkin/qr',
-    requireAuth,
-    requireRole('family_member'),
+  const issueCode =
+    (purpose: 'checkin' | 'checkout'): RequestHandler =>
     async (req, res, next) => {
       const visitScheduleId = parseOrSendProblem(
         visitScheduleIdParamSchema,
@@ -85,10 +90,18 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
               geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
             },
             caregiverName: schema.users.fullName,
+            // Flat, not a nested object: as a nested left-joined object, drizzle returned it as null
+            // when the facilitator was null, hiding a set checkoutRequestedAt.
+            facilitator: schema.verificationEvents.qrFamilyMemberUserId,
+            checkoutRequestedAt: schema.verificationEvents.checkoutRequestedAt,
           })
           .from(schema.visitSchedules)
           .innerJoin(schema.dependants, eq(schema.dependants.id, schema.visitSchedules.dependantId))
           .innerJoin(schema.users, eq(schema.users.id, schema.visitSchedules.caregiverId))
+          .leftJoin(
+            schema.verificationEvents,
+            eq(schema.verificationEvents.visitScheduleId, schema.visitSchedules.id),
+          )
           .where(eq(schema.visitSchedules.id, visitScheduleId));
         if (!row) {
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
@@ -100,12 +113,29 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
           sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
           return;
         }
-        if (row.visit.status !== 'scheduled') {
+        const facilitator = row.facilitator;
+        if (purpose === 'checkout' && facilitator && facilitator !== link.callerRow.id) {
+          sendProblem(res, {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'The family member who showed the check-in code confirms this check-out.',
+          });
+          return;
+        }
+        const awaiting =
+          purpose === 'checkin'
+            ? row.visit.status === 'scheduled'
+            : row.visit.status === 'in_progress' && row.checkoutRequestedAt !== null;
+        if (!awaiting) {
           sendProblem(res, {
             type: 'about:blank',
             title: 'Conflict',
             status: 409,
-            detail: `This visit is not awaiting check-in (current status: ${row.visit.status}).`,
+            detail:
+              purpose === 'checkin'
+                ? `This visit is not awaiting check-in (current status: ${row.visit.status}).`
+                : 'The caregiver has not asked to check out of this visit yet.',
           });
           return;
         }
@@ -143,6 +173,8 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
         }
 
         const { token, hash } = generateSessionToken();
+        const digits =
+          purpose === 'checkout' ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
         const expiresAt = new Date(now.getTime() + qrTokenTtlSeconds * 1000);
         await db.transaction(async (tx) => {
           const [code] = await tx
@@ -154,11 +186,13 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
               distanceFromGeofenceMeters: distanceMeters,
               issuedAt: now,
               expiresAt,
+              purpose,
+              codeHash: digits ? checkoutCodeHash(visitScheduleId, digits) : null,
             })
             .returning({ id: schema.checkinQrTokens.id });
           await recordAudit(tx, {
             actorUserId: link.callerRow.id,
-            action: 'checkin_code.issue',
+            action: purpose === 'checkin' ? 'checkin_code.issue' : 'checkout_code.issue',
             entityType: 'visit_schedule',
             entityId: visitScheduleId,
             metadata: { codeId: code?.id, distanceMeters: Math.round(distanceMeters) },
@@ -167,13 +201,26 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
 
         res.status(201).json({
           token,
+          ...(digits ? { code: digits } : {}),
           expiresAt: expiresAt.toISOString(),
           caregiverDisplayName: row.caregiverName,
         });
       } catch (err) {
         next(err);
       }
-    },
+    };
+
+  router.post(
+    '/:visitScheduleId/checkin/qr',
+    requireAuth,
+    requireRole('family_member'),
+    issueCode('checkin'),
+  );
+  router.post(
+    '/:visitScheduleId/checkout/qr',
+    requireAuth,
+    requireRole('family_member'),
+    issueCode('checkout'),
   );
 
   return router;

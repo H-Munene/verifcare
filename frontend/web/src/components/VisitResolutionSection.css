@@ -56,12 +56,6 @@
   line-height: 1.45;
 }
 
-.visit-resolution__error {
-  margin: 0;
-  font-size: 13px;
-  color: var(--color-danger-text);
-}
-
 .visit-resolution__actions {
   display: flex;
   justify-content: flex-end;

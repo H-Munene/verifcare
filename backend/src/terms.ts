@@ -18,6 +18,10 @@
 // uses location and a code on a family member's phone, and visit audio is for the family to listen
 // to. The two checkboxes become location and visit audio. The bump matters: earlier acceptances
 // consented to purposes that no longer exist, so everyone is asked again.
+//
+// Version 4 (2026-11-13) adds voice verification: two recordings at each visit, each checked
+// against an enrolled voiceprint, with a third required checkbox. Version 3 promised recordings
+// were "not analysed by any automated system", so everyone must agree again before any is.
 
 export type TermsDocumentType = 'caregiver' | 'family_member';
 
@@ -56,16 +60,24 @@ const contact: TermsSection = {
   ],
 };
 
+const voiceChecks = (whose: string): TermsSection => ({
+  heading: 'Voice checks',
+  paragraphs: [
+    `Each visit recording is compared automatically with the voiceprint of the person it should be, to help confirm that ${whose} were at the visit. A voiceprint is a set of numbers describing how a voice sounds, made once from about 30 seconds of speech. It is biometric data, and is kept encrypted where only the voice check can read it.`,
+    'The result for each recording (a match, a mismatch, or too little speech to judge) and its similarity score are shown to Mzazi Care supervisors. The check can be wrong, for example with background noise or a cold, so it is advisory only: it never stops a visit from counting and is never used on its own to decide anything about anyone.',
+  ],
+});
+
 const caregiverTerms: TermsDocument = {
   document: 'caregiver',
-  version: '3',
+  version: '4',
   title: 'Terms of Use and Privacy Notice',
-  effectiveDate: '2026-11-09',
+  effectiveDate: '2026-11-13',
   sections: [
     {
       heading: 'About this app',
       paragraphs: [
-        'Mzazi Care connects caregivers with the families of older people who need care at home. As a caregiver you use this app to see your visits, check in and out, record the care you give, and make a short audio recording at each visit.',
+        "Mzazi Care connects caregivers with the families of older people who need care at home. As a caregiver you use this app to see your visits, check in and out, record the care you give, and record your own voice and the dependant's voice at each visit.",
       ],
     },
     {
@@ -73,8 +85,9 @@ const caregiverTerms: TermsDocument = {
       paragraphs: [
         'Your account details: your name, email address and phone number.',
         "Your location when you check in and check out, to confirm you are at the dependant's home. We do not track your location between visits.",
-        "What happens on each visit: check-in and check-out times, how you checked in, the care tasks you record, and your notes. To check in you scan a code on a family member's phone, or ask a supervisor if nobody from the family is there.",
-        "A recording of up to 30 seconds that you make during each visit, where the dependant's family has agreed. The dependant's family can listen to it, as added assurance that the visit took place. It is not analysed by any automated system.",
+        "What happens on each visit: check-in and check-out times, how you checked in and out, the care tasks you record, and your notes. To check in you scan a code on a family member's phone, or ask a supervisor if nobody from the family is there. To check out you scan or type a code from a family member's phone, or give a reason if you can't.",
+        "Two recordings of 10 to 30 seconds at each visit: your voice, then the dependant's. The dependant's family can listen to the dependant's recording, as added assurance that the visit took place.",
+        'A voiceprint of your voice, made from about 30 seconds of speech that you record once in the app.',
       ],
     },
     {
@@ -86,20 +99,21 @@ const caregiverTerms: TermsDocument = {
     {
       heading: 'Who can see it',
       paragraphs: [
-        "Mzazi Care supervisors can see your details and visit records, and whether each visit has a recording, but they cannot listen to it. A dependant's family members can see your name, your visit times and the care recorded on their dependant's visits, and can listen to that visit's recording. They cannot see your phone number or your email address.",
+        "Mzazi Care supervisors can see your details, your visit records and each visit's voice check results, but they cannot listen to the recordings. A dependant's family members can see your name, your visit times and the care recorded on their dependant's visits, and can listen to the dependant's recording, not yours. They cannot see your phone number or your email address.",
       ],
     },
     {
       heading: 'How long we keep it',
       paragraphs: [
-        'Visit recordings are deleted after 90 days. Visit records are kept as part of the care history.',
+        'Visit recordings are deleted after 90 days. Voice check results are kept with the visit records, as part of the care history. Your voiceprint is kept while you work with Mzazi Care, replaced if you record it again, and deleted when your account is closed.',
       ],
     },
+    voiceChecks('you and the dependant'),
     {
-      heading: 'Your consent to location checks and audio',
+      heading: 'Your consent to location checks, audio and voice checks',
       paragraphs: [
-        "Below these terms we ask for two separate consents, each with its own checkbox: to your location being checked against the dependant's home when you check in and out, and to audio being recorded during your visits. You need to give both to use the app.",
-        'Visits can only be scheduled for a caregiver who has consented to location checks. To withdraw either consent later, ask your supervisor.',
+        "Below these terms we ask for three separate consents, each with its own checkbox: to your location being checked against the dependant's home when you check in and out, to audio being recorded during your visits, and to your voice being checked against your voiceprint. You need to give all three to use the app.",
+        'Visits can only be scheduled for a caregiver who has consented to location checks. To withdraw any consent later, ask your supervisor.',
       ],
     },
     hosting,
@@ -108,7 +122,7 @@ const caregiverTerms: TermsDocument = {
     {
       heading: 'Accepting these terms',
       paragraphs: [
-        'By ticking both boxes and tapping Accept you confirm that you have read this notice and agree to these terms, including the use of your location and visit audio described above. If you decline, the app will close and you will be asked again the next time you open it.',
+        'By ticking all three boxes and tapping Accept you confirm that you have read this notice and agree to these terms, including the use of your location, visit audio and voice described above. If you decline, the app will close and you will be asked again the next time you open it.',
       ],
     },
   ],
@@ -116,14 +130,14 @@ const caregiverTerms: TermsDocument = {
 
 const familyMemberTerms: TermsDocument = {
   document: 'family_member',
-  version: '3',
+  version: '4',
   title: 'Terms of Use and Privacy Notice',
-  effectiveDate: '2026-11-09',
+  effectiveDate: '2026-11-13',
   sections: [
     {
       heading: 'About this app',
       paragraphs: [
-        'Mzazi Care connects the families of older people who need care at home with trained caregivers. As a family member you use this app to register a dependant, follow their visits and the care given, show a check-in code when a caregiver arrives, and stay in touch with the rest of their family on Mzazi Care.',
+        "Mzazi Care connects the families of older people who need care at home with trained caregivers. As a family member you use this app to register a dependant, follow their visits and the care given, record your dependant's voice once, show a code when a caregiver arrives and leaves, and stay in touch with the rest of their family on Mzazi Care.",
       ],
     },
     {
@@ -131,15 +145,16 @@ const familyMemberTerms: TermsDocument = {
       paragraphs: [
         'Your account details: your name, email address and phone number, and your identity document where one was recorded when you were registered.',
         'Details you give us about a dependant: their name, date of birth, gender, home address and the exact location of their home, and their main health condition.',
-        "Your phone's location at the moment you show a check-in code, to confirm you are at the dependant's home. We keep only how far you were from the home, and we do not track your location at any other time.",
-        "Visit records for your dependants: check-in and check-out times, how the caregiver checked in, the care tasks recorded, and caregivers' notes.",
-        'A recording of up to 30 seconds made by the caregiver during each visit, for you and the other family members linked to the dependant to listen to. It is not analysed by any automated system.',
+        "Your phone's location at the moment you show a check-in or check-out code, to confirm you are at the dependant's home. We keep only how far you were from the home, and we do not track your location at any other time.",
+        "Visit records for your dependants: check-in and check-out times, how the caregiver checked in and out (and their reason if they checked out without your code), the care tasks recorded, and caregivers' notes.",
+        "Two recordings of 10 to 30 seconds made by the caregiver at each visit: the caregiver's voice, then the dependant's. You and the other family members linked to the dependant can listen to the dependant's recording.",
+        "A voiceprint of your dependant's voice, made from about 30 seconds of their speech that you record once in the app.",
       ],
     },
     {
       heading: "Your dependant's consent",
       paragraphs: [
-        'By registering or managing a dependant you confirm that you are authorised to share their details with Mzazi Care and, where they cannot give consent themselves, to consent on their behalf to location checks at their home and to audio being recorded during their visits.',
+        'By registering or managing a dependant you confirm that you are authorised to share their details with Mzazi Care and, where they cannot give consent themselves, to consent on their behalf to location checks at their home, to audio being recorded during their visits, and to their voice being checked against their voiceprint.',
       ],
     },
     {
@@ -151,20 +166,21 @@ const familyMemberTerms: TermsDocument = {
     {
       heading: 'Who can see it',
       paragraphs: [
-        "Mzazi Care supervisors can see everything described above, except that they can only see whether a visit has a recording and cannot listen to it. A caregiver assigned to a dependant can see what they need for the visit: the dependant's name, home location and care plan. The other family members linked to the same dependant can see your name, relationship, phone number and email address, so you can coordinate care. They cannot see your identity document.",
+        "Mzazi Care supervisors can see everything described above, including each visit's voice check results, except that they cannot listen to the recordings. A caregiver assigned to a dependant can see what they need for the visit: the dependant's name, home location and care plan. The other family members linked to the same dependant can see your name, relationship, phone number and email address, so you can coordinate care. They cannot see your identity document.",
       ],
     },
     {
       heading: 'How long we keep it',
       paragraphs: [
-        'Visit recordings are deleted after 90 days. Visit records are kept as part of the care history.',
+        "Visit recordings are deleted after 90 days. Voice check results are kept with the visit records, as part of the care history. A dependant's voiceprint is kept while they receive care from Mzazi Care, replaced if it is recorded again, and deleted when they leave.",
       ],
     },
+    voiceChecks('the caregiver and your dependant'),
     {
-      heading: 'Your consent for location checks and audio',
+      heading: 'Your consent for location checks, audio and voice checks',
       paragraphs: [
-        'Below these terms we ask for two separate consents, each with its own checkbox, given for yourself and on behalf of every dependant you register or are the primary contact for: to location being checked at check-in and check-out at their home, and to audio being recorded during their visits for the family to listen to. You need to give both to use the app.',
-        'Visits can only be scheduled for a dependant whose location consent is in place. To withdraw either consent for a dependant later, contact your Mzazi Care supervisor.',
+        'Below these terms we ask for three separate consents, each with its own checkbox, given for yourself and on behalf of every dependant you register or are the primary contact for: to location being checked at check-in and check-out at their home, to audio being recorded during their visits, and to their voice being checked against their voiceprint. You need to give all three to use the app.',
+        'Visits can only be scheduled for a dependant whose location consent is in place. To withdraw any consent for a dependant later, contact your Mzazi Care supervisor.',
       ],
     },
     hosting,
@@ -173,7 +189,7 @@ const familyMemberTerms: TermsDocument = {
     {
       heading: 'Accepting these terms',
       paragraphs: [
-        'By ticking both boxes and tapping Accept you confirm that you have read this notice, agree to these terms, and give both consents above. If you decline, the app will close and you will be asked again the next time you open it.',
+        'By ticking all three boxes and tapping Accept you confirm that you have read this notice, agree to these terms, and give all three consents above. If you decline, the app will close and you will be asked again the next time you open it.',
       ],
     },
   ],

@@ -69,11 +69,13 @@ class TermsApi {
     required String version,
     required bool locationConsent,
     required bool audioConsent,
+    required bool voiceConsent,
   }) async {
     await _client.post('/terms/current/accept', {
       'version': version,
       'locationConsent': locationConsent,
       'audioConsent': audioConsent,
+      'voiceConsent': voiceConsent,
     });
     _acceptedBy.add(sub);
   }

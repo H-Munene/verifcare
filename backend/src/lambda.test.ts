@@ -20,6 +20,7 @@ describe('Lambda handler (via serverless-http)', () => {
   beforeAll(async () => {
     process.env.DATABASE_SECRET_ARN =
       'arn:aws:secretsmanager:eu-west-1:245361883778:secret:fake-abc123';
+    process.env.VOICE_FUNCTION_NAME = 'fake-voice-function';
     ({ handler } = await import('./lambda.js'));
   });
 

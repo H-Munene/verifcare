@@ -9,7 +9,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { ApiError } from '../api/client';
 import type { Caregiver } from '../api/caregivers';
 import type { Dependant } from '../api/dependants';
 import { useApi } from '../api/useApi';
@@ -239,7 +238,6 @@ export function VisitsPage() {
       </FilterBar>
 
       {schedulesQuery.isLoading ? <TableSkeleton columns={5} /> : null}
-      {schedulesQuery.isError ? <p>Failed to load visits.</p> : null}
 
       {schedulesQuery.data ? (
         <>
@@ -366,13 +364,6 @@ export function VisitsPage() {
           cancelLabel="Keep visit"
           pending={cancelMutation.isPending}
           pendingLabel="Cancelling..."
-          error={
-            cancelMutation.error
-              ? cancelMutation.error instanceof ApiError
-                ? (cancelMutation.error.problem.detail ?? cancelMutation.error.problem.title)
-                : 'Something went wrong.'
-              : undefined
-          }
           onConfirm={() => cancelMutation.mutate(cancelling.id)}
           onCancel={() => setCancelling(null)}
         />
@@ -554,13 +545,6 @@ function ScheduleVisitModal({
         {!timesValid ? (
           <div className="visits-page__modal-error" role="alert">
             Check-out must be after check-in.
-          </div>
-        ) : null}
-        {mutation.error ? (
-          <div className="visits-page__modal-error">
-            {mutation.error instanceof ApiError
-              ? (mutation.error.problem.detail ?? mutation.error.problem.title)
-              : 'Something went wrong.'}
           </div>
         ) : null}
         <div className="visits-page__modal-actions">

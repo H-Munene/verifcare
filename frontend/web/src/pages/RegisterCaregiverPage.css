@@ -3,6 +3,18 @@
   margin: 0 auto;
 }
 
+.register-caregiver-page__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.register-caregiver-page__title-row .ds-button {
+  position: absolute;
+  right: 0;
+}
+
 .register-caregiver-page__title {
   font-family: var(--font-display);
   font-size: 24px;
@@ -56,17 +68,20 @@
   margin: 0;
 }
 
-.register-caregiver-page__error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
+.register-caregiver-page__step-hint {
   margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  text-align: right;
 }
 
 .register-caregiver-page__step-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
+}
+
+/* The lone Next step on the first step sits on the right. */
+.register-caregiver-page__step-actions > .ds-button--primary:only-child {
+  margin-left: auto;
 }

@@ -8,7 +8,6 @@ import { TableFrame, Th } from '../design-system/Table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ApiError } from '../api/client';
 import type { CareTask } from '../api/dependants';
 import { useApi } from '../api/useApi';
 import { useAuth } from '../auth/AuthContext';
@@ -19,6 +18,7 @@ import { Modal } from '../design-system/Modal';
 import { Switch } from '../design-system/Switch';
 import './CarePlanPage.css';
 import { TableSkeleton } from '../design-system/Skeleton';
+import { LoadError } from '../design-system/LoadError';
 
 // docs/visit-task-checklist-plan.md section 4: a dedicated Care Plan screen, separate from
 // dependant registration, per the user's own explicit choice - supervisor-authored tasks that the
@@ -81,7 +81,9 @@ export function CarePlanPage() {
       </div>
 
       {tasksQuery.isLoading ? <TableSkeleton columns={5} /> : null}
-      {tasksQuery.isError ? <p>Failed to load this dependant's care plan.</p> : null}
+      {tasksQuery.isError ? (
+        <LoadError what="the care plan" onRetry={() => void tasksQuery.refetch()} />
+      ) : null}
 
       {tasksQuery.data ? (
         <TableFrame>
@@ -140,15 +142,6 @@ export function CarePlanPage() {
             </tbody>
           </table>
         </TableFrame>
-      ) : null}
-
-      {toggleActiveMutation.error ? (
-        <div className="care-plan-page__error">
-          {toggleActiveMutation.error instanceof ApiError
-            ? (toggleActiveMutation.error.problem.detail ??
-              toggleActiveMutation.error.problem.title)
-            : 'Something went wrong.'}
-        </div>
       ) : null}
 
       {modalState ? (
@@ -236,13 +229,6 @@ function CareTaskModal({ dependantId, mode, existing, onClose }: CareTaskModalPr
           label="Required"
           hint="A required, active task with no recorded status blocks the caregiver from checking out of a visit."
         />
-        {mutation.error ? (
-          <div className="care-plan-page__modal-error">
-            {mutation.error instanceof ApiError
-              ? (mutation.error.problem.detail ?? mutation.error.problem.title)
-              : 'Something went wrong.'}
-          </div>
-        ) : null}
         <div className="care-plan-page__modal-actions">
           <Button type="button" onClick={onClose}>
             Cancel

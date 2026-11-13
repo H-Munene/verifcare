@@ -6,8 +6,8 @@ import '../api/api_client.dart';
 import '../api/terms_api.dart';
 import '../app_ui.dart';
 
-// The consent screen's two required checkboxes (terms v3, 2026-11-09), given for the family member
-// and for every dependant they register or are the primary contact for. Accepting sends both to
+// The consent screen's three required checkboxes (terms v4, 2026-11-13), given for the family
+// member and for every dependant they register or are the primary contact for. Accepting sends them to
 // the server, which records them as consent records - a dependant without location consent can't
 // be scheduled.
 const _locationConsentLabel =
@@ -15,8 +15,11 @@ const _locationConsentLabel =
     'being checked at the home when visits start and end, including my phone when I show a '
     'check-in code.';
 const _audioConsentLabel =
-    'For the same dependants, I agree to audio being recorded during their visits for the family '
-    'to listen to.';
+    "For the same dependants, I agree to their voice and the caregiver's being recorded during "
+    'their visits.';
+const _voiceConsentLabel =
+    "For the same dependants, I agree to each recording being checked against a voiceprint of the "
+    'person speaking.';
 
 /// Shows [child] only once the signed-in user has accepted the current terms of use and privacy
 /// notice (2026-09-26, user request). Until then the terms fill the screen and can't be dismissed:
@@ -24,7 +27,7 @@ const _audioConsentLabel =
 /// once per terms version. Declining closes the app, and the terms come back the next time it's
 /// opened.
 ///
-/// Accept stays disabled until both consent checkboxes are ticked, since the server refuses an
+/// Accept stays disabled until every consent checkbox is ticked, since the server refuses an
 /// acceptance without them; Decline is always available, so nobody is pushed into consenting.
 ///
 /// On iOS an app isn't allowed to close itself (Apple's guidelines treat that as a crash), so a
@@ -60,6 +63,7 @@ class _ConsentGateState extends State<ConsentGate> {
   bool _accepting = false;
   bool _locationConsent = false;
   bool _audioConsent = false;
+  bool _voiceConsent = false;
 
   @override
   void initState() {
@@ -83,6 +87,7 @@ class _ConsentGateState extends State<ConsentGate> {
         // against wording that has since changed don't carry over.
         _locationConsent = false;
         _audioConsent = false;
+        _voiceConsent = false;
         _stage = terms.accepted ? _Stage.accepted : _Stage.asking;
       });
     } catch (e) {
@@ -107,6 +112,7 @@ class _ConsentGateState extends State<ConsentGate> {
         version: terms.version,
         locationConsent: _locationConsent,
         audioConsent: _audioConsent,
+        voiceConsent: _voiceConsent,
       );
       if (mounted) setState(() => _stage = _Stage.accepted);
     } on ApiException catch (e) {
@@ -169,10 +175,13 @@ class _ConsentGateState extends State<ConsentGate> {
               accepting: _accepting,
               locationConsent: _locationConsent,
               audioConsent: _audioConsent,
+              voiceConsent: _voiceConsent,
               onLocationConsentChanged: (value) =>
                   setState(() => _locationConsent = value),
               onAudioConsentChanged: (value) =>
                   setState(() => _audioConsent = value),
+              onVoiceConsentChanged: (value) =>
+                  setState(() => _voiceConsent = value),
               onAccept: _accept,
               onDecline: _decline,
             ),
@@ -190,8 +199,10 @@ class _TermsView extends StatelessWidget {
   final bool accepting;
   final bool locationConsent;
   final bool audioConsent;
+  final bool voiceConsent;
   final ValueChanged<bool> onLocationConsentChanged;
   final ValueChanged<bool> onAudioConsentChanged;
+  final ValueChanged<bool> onVoiceConsentChanged;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
@@ -202,8 +213,10 @@ class _TermsView extends StatelessWidget {
     required this.accepting,
     required this.locationConsent,
     required this.audioConsent,
+    required this.voiceConsent,
     required this.onLocationConsentChanged,
     required this.onAudioConsentChanged,
+    required this.onVoiceConsentChanged,
     required this.onAccept,
     required this.onDecline,
   });
@@ -317,6 +330,11 @@ class _TermsView extends StatelessWidget {
                   audioConsent,
                   onAudioConsentChanged,
                 ),
+                _consentBox(
+                  _voiceConsentLabel,
+                  voiceConsent,
+                  onVoiceConsentChanged,
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -338,7 +356,10 @@ class _TermsView extends StatelessWidget {
                     Expanded(
                       child: ElevatedButton(
                         onPressed:
-                            accepting || !locationConsent || !audioConsent
+                            accepting ||
+                                !locationConsent ||
+                                !audioConsent ||
+                                !voiceConsent
                             ? null
                             : onAccept,
                         style: pillButtonStyle,

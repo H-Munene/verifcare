@@ -104,12 +104,6 @@ a.visit-stats__when:focus-visible {
   text-overflow: ellipsis;
 }
 
-.visit-stats__error {
-  margin: 0 0 24px;
-  font-size: 13px;
-  color: var(--color-ink-muted);
-}
-
 /* Narrower: the three counts on one row and the two dates on the next, every cell filled so no
    grey gap shows through the grid. */
 @media (max-width: 1100px) {

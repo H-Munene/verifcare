@@ -48,6 +48,10 @@ tags:
     description: Scheduling, rescheduling, and querying visits, including the live-visits and visit-history views.
   - name: Check-in
     description: The geofence, code-scan and supervisor-override steps of the check-in verification flow.
+  - name: Check-out
+    description: Requesting check-out, then confirming it with the family's code or overriding with a reason.
+  - name: Voice
+    description: Voice enrolment and the advisory checks of each visit recording against a voiceprint.
   - name: Visit Plans
     description: Clustering dependants and ordering each caregiver's day.
   - name: Visit Recovery
@@ -854,6 +858,43 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/Problem'
+  /visit-schedules/{visitScheduleId}/checkout/qr:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-out]
+      summary: Issue the check-out code shown on a family member's phone
+      description: |
+        Once the caregiver has requested check-out. Only the family member whose code started the
+        visit, or any linked family member when a supervisor override started it. The phone must
+        pass the same position checks as at check-in. The code works like the check-in code, and
+        also carries 6 digits for the caregiver to type; the digits are stored only as a hash.
+      operationId: issueCheckoutCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GeofenceCheckinRequest'
+      responses:
+        '201':
+          description: The code to display.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckinCode'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The caregiver hasn't asked to check out yet.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
   /visit-schedules/{visitScheduleId}/checkin/qr-scan:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
@@ -1037,33 +1078,36 @@ paths:
       - $ref: '#/components/parameters/VisitScheduleId'
     get:
       tags: [Audio]
-      summary: Whether this visit needs a recording, and whether it has one
-      description: The assigned caregiver only. `required` follows the dependant's visit-audio consent.
+      summary: Which of the visit's two recordings are needed, and which exist
+      description: |
+        The assigned caregiver only. A visit has a recording of the caregiver and one of the
+        dependant. Each is `required` when that person has visit-audio consent.
       operationId: getAudioRequirement
       responses:
         '200':
-          description: The requirement.
+          description: The requirement for each recording.
           content:
             application/json:
               schema:
                 type: object
-                required: [required, recorded]
+                required: [caregiver, dependant]
                 properties:
-                  required:
-                    type: boolean
-                  recorded:
-                    type: boolean
+                  caregiver:
+                    $ref: '#/components/schemas/RecordingRequirement'
+                  dependant:
+                    $ref: '#/components/schemas/RecordingRequirement'
         '403':
           $ref: '#/components/responses/Problem'
         '404':
           $ref: '#/components/responses/NotFound'
-  /visit-schedules/{visitScheduleId}/audio/upload-url:
+  /visit-schedules/{visitScheduleId}/audio/{role}/upload-url:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
+      - $ref: '#/components/parameters/RecordingRole'
     post:
       tags: [Audio]
-      summary: Get a presigned URL to upload the visit's recording
-      description: The assigned caregiver, during the visit, with the dependant's consent. Upload as `audio/mp4`.
+      summary: Get a presigned URL to upload one of the visit's recordings
+      description: The assigned caregiver, during the visit, with that person's visit-audio consent. Upload as `audio/mp4`.
       operationId: createAudioUploadUrl
       responses:
         '201':
@@ -1072,17 +1116,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PresignedUpload'
+        '400':
+          $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Conflict'
-  /visit-schedules/{visitScheduleId}/audio:
+  /visit-schedules/{visitScheduleId}/audio/{role}:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
+      - $ref: '#/components/parameters/RecordingRole'
     post:
       tags: [Audio]
-      summary: Confirm the uploaded recording
-      description: One recording per visit; confirming again replaces it, so a retry is safe. No model processes it.
+      summary: Confirm an uploaded recording, which checks the voice
+      description: |
+        One recording per person per visit; confirming again replaces it, so a retry is safe.
+        The recording is saved first, then checked against the voiceprint of the person it claims
+        to be (with voice-verification consent and an enrolment). The check is advisory: its
+        result is stored and never blocks anything, and a failed check is stored as
+        `unavailable`. The caregiver is not shown it.
       operationId: createAudioRecord
       requestBody:
         required: true
@@ -1096,7 +1148,7 @@ paths:
                   type: string
                 durationSeconds:
                   type: integer
-                  minimum: 5
+                  minimum: 10
                   maximum: 31
       responses:
         '201':
@@ -1109,9 +1161,12 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/Problem'
+  /visit-schedules/{visitScheduleId}/audio:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
     get:
       tags: [Audio]
-      summary: Get a short-lived URL to play the recording
+      summary: Get a short-lived URL to play the dependant's recording
       description: |
         Family members linked to the visit's dependant only; supervisors and caregivers get a 403.
         Every URL issued is audit-logged as `visit_audio.listen`. Recordings are deleted after 90
@@ -1359,26 +1414,20 @@ paths:
           description: Declined.
         '404':
           $ref: '#/components/responses/NotFound'
-  /visit-schedules/{visitScheduleId}/checkout:
+  /visit-schedules/{visitScheduleId}/checkout/request:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
     post:
-      tags: [Visit Schedules]
-      summary: Check out of a visit
+      tags: [Check-out]
+      summary: Ask to check out, once every requirement is met
       description: |
-        Sets `verification_events.checkout_at` and transitions `visit_schedules.status` to
-        `completed`. Blocked (docs/visit-task-checklist-plan.md) if any active, required
-        dependant_care_tasks row has no matching visit_task_completions row for this visit -
-        "addressed" means any status was recorded, not necessarily `completed`.
-
-        Must happen inside the dependant's geofence radius, measured from the caregiver's current
-        GPS fix with the same distance calculation as check-in; the fix and its distance are stored
-        on `verification_events` (`checkoutGpsLat`, `checkoutGpsLng`,
-        `checkoutDistanceFromGeofenceMeters`).
-
-        If the dependant has consented to visit audio, checkout needs a confirmed recording or an
-        `audioSkipReason`; without either it is a 409 with `failureReason: audio_required`.
-      operationId: checkoutVisit
+        The assigned caregiver, inside the dependant's geofence radius. Every active, required
+        care task must be addressed (any status recorded). The caregiver's own recording is needed
+        when they have visit-audio consent (`failureReason: caregiver_recording_required`), and the
+        dependant's, or an `audioSkipReason`, when the dependant has it
+        (`failureReason: dependant_recording_required`). The visit stays in progress until the
+        family confirms it or the caregiver overrides.
+      operationId: requestCheckout
       requestBody:
         required: true
         content:
@@ -1387,12 +1436,6 @@ paths:
               type: object
               required: [gpsLat, gpsLng]
               properties:
-                audioSkipReason:
-                  $ref: '#/components/schemas/AudioSkipReason'
-                audioSkipNote:
-                  type: string
-                  maxLength: 500
-                  description: Required when `audioSkipReason` is `other`.
                 gpsLat:
                   type: number
                   format: double
@@ -1403,15 +1446,35 @@ paths:
                   format: double
                   minimum: -180
                   maximum: 180
+                audioSkipReason:
+                  $ref: '#/components/schemas/AudioSkipReason'
+                audioSkipNote:
+                  type: string
+                  maxLength: 500
+                  description: Required when `audioSkipReason` is `other`.
       responses:
         '200':
-          description: Checked out.
+          description: The family can now show the check-out code.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VisitSchedule'
+                type: object
+                required: [status, checkoutRequestedAt]
+                properties:
+                  status:
+                    type: string
+                    enum: [awaiting_confirmation]
+                  checkoutRequestedAt:
+                    type: string
+                    format: date-time
         '400':
-          description: The location is missing or invalid.
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A required task or recording is missing, or the visit isn't in progress.
           content:
             application/problem+json:
               schema:
@@ -1422,15 +1485,212 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /visit-schedules/{visitScheduleId}/checkout/qr-scan:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-out]
+      summary: Complete check-out with the family's scanned code
+      description: Single-use and bound to this visit; a check-in code is refused. Re-checks the caregiver's position.
+      operationId: checkoutWithQr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, gpsLat, gpsLng]
+              properties:
+                gpsLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                gpsLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Checked out; the visit is completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checkoutAt, checkoutMethod]
+                properties:
+                  status:
+                    type: string
+                    enum: [completed]
+                  checkoutAt:
+                    type: string
+                    format: date-time
+                  checkoutMethod:
+                    type: string
+                    enum: [qr, code, override]
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
-          description: The visit hasn't been checked in yet, is already completed/cancelled, or a required care task is unaddressed.
+          description: Check-out hasn't been requested, or the visit isn't in progress.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
-        default:
+        '422':
+          description: The code is invalid, used or expired (`failureReason`), or the caregiver is outside the radius.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /visit-schedules/{visitScheduleId}/checkout/code:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-out]
+      summary: Complete check-out with the 6 digits under the family's code
+      description: After 5 wrong codes in 10 minutes, typing is refused with a 429 for a while; scanning still works.
+      operationId: checkoutWithCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, gpsLat, gpsLng]
+              properties:
+                gpsLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                gpsLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        '200':
+          description: Checked out; the visit is completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checkoutAt, checkoutMethod]
+                properties:
+                  status:
+                    type: string
+                    enum: [completed]
+                  checkoutAt:
+                    type: string
+                    format: date-time
+                  checkoutMethod:
+                    type: string
+                    enum: [qr, code, override]
+        '400':
           $ref: '#/components/responses/Problem'
-
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Check-out hasn't been requested, or the visit isn't in progress.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The code is wrong, used or expired (`failureReason`), or the caregiver is outside the radius.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Too many wrong codes for this visit recently.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /visit-schedules/{visitScheduleId}/checkout/override:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-out]
+      summary: Complete check-out without the family's code
+      description: |
+        Completes the visit at once, so the caregiver is never kept waiting. The reason is shown to
+        supervisors in the visit's details and as a `checkout_override` exception in Compliance.
+        Nobody approves it. Re-checks the caregiver's position.
+      operationId: checkoutWithOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, gpsLat, gpsLng]
+              properties:
+                gpsLat:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                gpsLng:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
+                reason:
+                  $ref: '#/components/schemas/CheckoutOverrideReason'
+                note:
+                  type: string
+                  maxLength: 1000
+                  description: Required when `reason` is `other`.
+      responses:
+        '200':
+          description: Checked out; the visit is completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checkoutAt, checkoutMethod]
+                properties:
+                  status:
+                    type: string
+                    enum: [completed]
+                  checkoutAt:
+                    type: string
+                    format: date-time
+                  checkoutMethod:
+                    type: string
+                    enum: [qr, code, override]
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Check-out hasn't been requested, or the visit isn't in progress.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The caregiver is outside the dependant's geofence radius.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /visit-schedules/{visitScheduleId}/tasks:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
@@ -2319,7 +2579,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [version, locationConsent, audioConsent]
+              required: [version, locationConsent, audioConsent, voiceConsent]
               properties:
                 version:
                   type: string
@@ -2328,6 +2588,10 @@ paths:
                   type: boolean
                   enum: [true]
                   description: Consent to location being checked at each visit. Must be true.
+                voiceConsent:
+                  type: boolean
+                  enum: [true]
+                  description: Terms v4's third box, consent to voice checks.
                 audioConsent:
                   type: boolean
                   enum: [true]
@@ -2364,6 +2628,214 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
+  /voice-enrollments/me/upload-url:
+    post:
+      tags: [Voice]
+      summary: Get a presigned URL to upload your enrolment recording
+      description: The caregiver themselves, with voice-verification consent. About 30 seconds of speech, as `audio/mp4`.
+      operationId: enrolOwnVoiceUploadUrl
+      responses:
+        '201':
+          description: The presigned upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUpload'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /voice-enrollments/me:
+    get:
+      tags: [Voice]
+      summary: Whether the caregiver has enrolled their voice
+      operationId: getOwnVoiceEnrolment
+      responses:
+        '200':
+          description: The enrolment status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceEnrolmentStatus'
+    post:
+      tags: [Voice]
+      summary: Confirm your enrolment recording, which makes the voiceprint
+      description: |
+        The voice Lambda makes the voiceprint and deletes the recording. Enrolling again replaces
+        the voiceprint and deletes the old one. 422 when too little speech was heard.
+      operationId: enrolOwnVoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [s3Key]
+              properties:
+                s3Key:
+                  type: string
+      responses:
+        '201':
+          description: Enrolled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceEnrolmentStatus'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /voice-enrollments/dependants/{dependantId}/upload-url:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    post:
+      tags: [Voice]
+      summary: Get a presigned URL to upload a dependant's enrolment recording
+      description: A family member linked to the dependant, with voice-verification consent. About 30 seconds of speech, as `audio/mp4`.
+      operationId: enrolDependantVoiceUploadUrl
+      responses:
+        '201':
+          description: The presigned upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUpload'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /voice-enrollments/dependants/{dependantId}:
+    parameters:
+      - $ref: '#/components/parameters/DependantId'
+    get:
+      tags: [Voice]
+      summary: Whether a dependant's voice is enrolled
+      description: Linked family members and supervisors. Never the voiceprint itself.
+      operationId: getDependantVoiceEnrolment
+      responses:
+        '200':
+          description: The enrolment status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceEnrolmentStatus'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags: [Voice]
+      summary: Confirm a dependant's enrolment recording, which makes the voiceprint
+      description: |
+        The voice Lambda makes the voiceprint and deletes the recording. Enrolling again replaces
+        the voiceprint and deletes the old one. 422 when too little speech was heard.
+      operationId: enrolDependantVoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [s3Key]
+              properties:
+                s3Key:
+                  type: string
+      responses:
+        '201':
+          description: Enrolled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceEnrolmentStatus'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /voice-enrollments/caregivers/{caregiverId}:
+    parameters:
+      - name: caregiverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Voice]
+      summary: Whether a caregiver's voice is enrolled
+      description: Supervisors only. Never the voiceprint itself.
+      operationId: getCaregiverVoiceEnrolment
+      responses:
+        '200':
+          description: The enrolment status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceEnrolmentStatus'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /voice-checks:
+    get:
+      tags: [Voice]
+      summary: A person's recordings and their advisory voice checks
+      description: |
+        Supervisors only, with exactly one of `dependantId` or `caregiverId`. The person's own
+        recordings, newest first, up to 50. Each read is audit-logged as `voice_checks.view`.
+      operationId: listVoiceChecks
+      parameters:
+        - name: dependantId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: caregiverId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The enrolment status and the recordings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enrolment, items]
+                properties:
+                  enrolment:
+                    $ref: '#/components/schemas/VoiceEnrolmentStatus'
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [visitScheduleId, scheduledStart, caregiverName, dependantName, recordedAt, durationSeconds, result, score, speechSeconds, threshold]
+                      properties:
+                        visitScheduleId:
+                          type: string
+                          format: uuid
+                        scheduledStart:
+                          type: string
+                          format: date-time
+                        caregiverName:
+                          type: string
+                        dependantName:
+                          type: string
+                        recordedAt:
+                          type: string
+                          format: date-time
+                        durationSeconds:
+                          type: integer
+                        result:
+                          oneOf:
+                            - $ref: '#/components/schemas/VoiceCheckResult'
+                            - type: 'null'
+                        score:
+                          type: [number, 'null']
+                        speechSeconds:
+                          type: [number, 'null']
+                        threshold:
+                          type: [number, 'null']
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
   /notifications:
     get:
       tags: [Notifications]
@@ -2497,6 +2969,14 @@ components:
       schema:
         type: string
         format: uuid
+    RecordingRole:
+      name: role
+      in: path
+      required: true
+      description: Whose voice the recording is.
+      schema:
+        type: string
+        enum: [caregiver, dependant]
     CareTaskId:
       name: careTaskId
       in: path
@@ -2825,10 +3305,10 @@ components:
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated, reassigned]
     VerificationAttemptType:
       type: string
-      enum: [geofence, family_location, qr_scan]
+      enum: [geofence, family_location, qr_scan, checkout_qr, checkout_code]
     ConsentType:
       type: string
-      enum: [location_verification, visit_audio]
+      enum: [location_verification, visit_audio, voice_verification]
     NotificationType:
       type: string
       enum: [missed_visit, checkin_override, no_cover_found]
@@ -2983,6 +3463,8 @@ components:
           format: email
         phoneNumber:
           type: string
+          pattern: '^\+[1-9]\d{6,14}$'
+          description: E.164, e.g. +254712345678. Cognito accepts no other format.
         idType:
           $ref: '#/components/schemas/IdType'
         idNumber:
@@ -3013,6 +3495,8 @@ components:
           format: email
         phoneNumber:
           type: string
+          pattern: '^\+[1-9]\d{6,14}$'
+          description: E.164, e.g. +254712345678. Cognito accepts no other format.
         idType:
           $ref: '#/components/schemas/IdType'
         idNumber:
@@ -3573,6 +4057,82 @@ components:
             - type: 'null'
         audioSkipNote:
           type: [string, 'null']
+        recordings:
+          type: array
+          description: Both recordings. `voiceCheck` is included for supervisors only.
+          items:
+            type: object
+            required: [role, recordedAt, durationSeconds]
+            properties:
+              role:
+                type: string
+                enum: [caregiver, dependant]
+              recordedAt:
+                type: string
+                format: date-time
+              durationSeconds:
+                type: integer
+              voiceCheck:
+                oneOf:
+                  - $ref: '#/components/schemas/VoiceCheck'
+                  - type: 'null'
+        checkoutRequestedAt:
+          type: [string, 'null']
+          format: date-time
+        checkoutMethod:
+          type: [string, 'null']
+          enum: [qr, code, override, null]
+        checkoutFamilyMemberName:
+          type: [string, 'null']
+        checkoutOverrideReason:
+          oneOf:
+            - $ref: '#/components/schemas/CheckoutOverrideReason'
+            - type: 'null'
+        checkoutOverrideNote:
+          type: [string, 'null']
+    VoiceCheck:
+      type: object
+      description: Advisory. A score exists only for match or mismatch.
+      required: [result, score, speechSeconds, threshold, checkedAt]
+      properties:
+        result:
+          $ref: '#/components/schemas/VoiceCheckResult'
+        score:
+          type: [number, 'null']
+          description: Cosine similarity to the claimed person's voiceprint; a match is at or above `threshold`.
+        speechSeconds:
+          type: [number, 'null']
+        threshold:
+          type: [number, 'null']
+        checkedAt:
+          type: string
+          format: date-time
+    VoiceCheckResult:
+      type: string
+      enum: [match, mismatch, too_short, not_enrolled, no_consent, unavailable]
+    VoiceEnrolmentStatus:
+      type: object
+      required: [enrolled, enrolledAt]
+      properties:
+        enrolled:
+          type: boolean
+        enrolledAt:
+          type: [string, 'null']
+          format: date-time
+        speechSeconds:
+          type: [number, 'null']
+    RecordingRequirement:
+      type: object
+      required: [required, recorded]
+      properties:
+        required:
+          type: boolean
+          description: That person has visit-audio consent.
+        recorded:
+          type: boolean
+    CheckoutOverrideReason:
+      type: string
+      enum: [no_family_member_present, family_phone_unavailable, camera_or_code_problem, other]
     VerificationAttempt:
       type: object
       required: [id, visitScheduleId, attemptType, passed, attemptedAt]
@@ -3714,6 +4274,10 @@ components:
         token:
           type: string
           description: The value to encode in the QR code. Opaque and holds no personal data.
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          description: Check-out codes only. The 6 digits shown under the QR code, for typing.
         expiresAt:
           type: string
           format: date-time
@@ -3948,7 +4512,7 @@ components:
           $ref: '#/components/schemas/VisitSummaryCounts'
     ExceptionKind:
       type: string
-      enum: [missed, missing_checkout, failed_check, supervisor_override]
+      enum: [missed, missing_checkout, failed_check, supervisor_override, checkout_override]
     VisitResolutionOutcome:
       type: string
       enum:

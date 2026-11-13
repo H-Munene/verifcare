@@ -20,6 +20,9 @@ function completedVisit(overrides: Partial<VisitRecord> = {}): VisitRecord {
     checkoutDistanceFromGeofenceMeters: 5,
     checkinMethod: 'qr',
     familyDistanceFromGeofenceMeters: 4,
+    checkoutMethod: 'qr',
+    checkoutOverrideReason: null,
+    checkoutOverrideNote: null,
     audioRecorded: true,
     audioSkipReason: null,
     recoveredFromVisitId: null,
@@ -43,6 +46,16 @@ describe('assessVisit', () => {
 
     expect(assessment.fullyVerified).toBe(false);
     expect(assessment.exceptionKinds).toEqual(['supervisor_override']);
+  });
+
+  it('never counts a check-out override as verified, and reports it as an exception', () => {
+    const assessment = assessVisit(
+      completedVisit({ checkoutMethod: 'override', checkoutOverrideReason: 'other' }),
+      now,
+    );
+
+    expect(assessment.fullyVerified).toBe(false);
+    expect(assessment.exceptionKinds).toEqual(['checkout_override']);
   });
 
   it('does not count a checkout outside the radius as verified', () => {

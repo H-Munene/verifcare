@@ -40,15 +40,6 @@
   gap: 8px;
 }
 
-.care-plan-page__error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
-  margin-top: 12px;
-}
-
 .care-plan-page__modal-form {
   display: flex;
   flex-direction: column;
@@ -59,14 +50,6 @@
   width: 100%;
   resize: vertical;
   font-family: inherit;
-}
-
-.care-plan-page__modal-error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
 }
 
 .care-plan-page__modal-actions {

@@ -6,6 +6,7 @@ import {
   requestPasswordReset,
   type NewPasswordRequiredResult,
 } from '../auth/cognito';
+import { showErrorToast } from '../design-system/toastStore';
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../design-system/Button';
 import { Input, PasswordInput } from '../design-system/Input';
@@ -102,12 +103,10 @@ function SignInForm({
 }) {
   const { signIn } = useAuth();
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
       const result = await signIn(email, password);
@@ -121,7 +120,7 @@ function SignInForm({
     } catch (err) {
       // Cognito's own sign-in messages are readable ("Incorrect username or password.", which with
       // user-existence errors prevented also covers an unknown email).
-      setError(err instanceof Error ? err.message : 'Sign in failed.');
+      showErrorToast(err instanceof Error ? err.message : 'Sign in failed.');
     } finally {
       setSubmitting(false);
     }
@@ -134,7 +133,7 @@ function SignInForm({
         void handleSubmit(event);
       }}
     >
-      {notice && !error ? <div className="login-page__notice">{notice}</div> : null}
+      {notice ? <div className="login-page__notice">{notice}</div> : null}
       <Input
         id="email"
         label="Email"
@@ -163,7 +162,6 @@ function SignInForm({
           Forgot password?
         </button>
       </div>
-      {error ? <div className="login-page__error">{error}</div> : null}
       <Button type="submit" variant="primary" disabled={submitting}>
         {submitting ? 'Signing in...' : 'Sign in'}
       </Button>
@@ -225,19 +223,17 @@ function ResetPasswordForm({
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const trimmedEmail = email.trim();
 
   async function run(action: () => Promise<void>) {
-    setError(null);
     setNotice(null);
     setSubmitting(true);
     try {
       await action();
     } catch (err) {
-      setError(resetErrorText(err));
+      showErrorToast(resetErrorText(err));
     } finally {
       setSubmitting(false);
     }
@@ -263,7 +259,7 @@ function ResetPasswordForm({
   function reset(event: FormEvent) {
     event.preventDefault();
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
+      showErrorToast('Passwords do not match.');
       return;
     }
     void run(async () => {
@@ -288,7 +284,6 @@ function ResetPasswordForm({
           required
           autoFocus
         />
-        {error ? <div className="login-page__error">{error}</div> : null}
         <Button type="submit" variant="primary" disabled={submitting}>
           {submitting ? 'Sending...' : 'Send code'}
         </Button>
@@ -307,7 +302,7 @@ function ResetPasswordForm({
           ? `Your password was reset. Enter the code we emailed to ${trimmedEmail} and choose a new password.`
           : `If there's an account for ${trimmedEmail}, we've emailed it a code. Enter it below and choose a new password. The code expires in an hour.`}
       </p>
-      {notice && !error ? <div className="login-page__notice">{notice}</div> : null}
+      {notice ? <div className="login-page__notice">{notice}</div> : null}
       <Input
         id="resetCode"
         label="Code"
@@ -335,7 +330,6 @@ function ResetPasswordForm({
         onChange={(e) => setConfirmPassword(e.target.value)}
         required
       />
-      {error ? <div className="login-page__error">{error}</div> : null}
       <Button type="submit" variant="primary" disabled={submitting}>
         {submitting ? 'Saving...' : 'Reset password'}
       </Button>
@@ -353,7 +347,6 @@ function ResetPasswordForm({
           className="login-page__link"
           onClick={() => {
             setCodeStep(false);
-            setError(null);
             setNotice(null);
           }}
           disabled={submitting}
@@ -378,14 +371,12 @@ function NewPasswordForm({ challenge }: { challenge: NewPasswordRequiredResult }
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setError(null);
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
+      showErrorToast('Passwords do not match.');
       return;
     }
     setSubmitting(true);
@@ -394,7 +385,7 @@ function NewPasswordForm({ challenge }: { challenge: NewPasswordRequiredResult }
       // On success, AuthContext's identity state updates and LoginPage redirects on its next
       // render - nothing further to do here.
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not set the new password.');
+      showErrorToast(err instanceof Error ? err.message : 'Could not set the new password.');
     } finally {
       setSubmitting(false);
     }
@@ -436,7 +427,6 @@ function NewPasswordForm({ challenge }: { challenge: NewPasswordRequiredResult }
         onChange={(e) => setConfirmPassword(e.target.value)}
         required
       />
-      {error ? <div className="login-page__error">{error}</div> : null}
       <Button type="submit" variant="primary" disabled={submitting}>
         {submitting ? 'Setting password...' : 'Set password and sign in'}
       </Button>

@@ -13,6 +13,7 @@ import { useCursorPages } from '../hooks/useCursorPages';
 import { useListParams } from '../hooks/useListParams';
 import './CaregiversListPage.css';
 import { TableSkeleton } from '../design-system/Skeleton';
+import { LoadError } from '../design-system/LoadError';
 
 type CaregiverSort = NonNullable<ListCaregiversParams['sort']>;
 
@@ -72,7 +73,9 @@ export function CaregiversListPage() {
       </FilterBar>
 
       {query.isLoading ? <TableSkeleton columns={4} /> : null}
-      {query.isError ? <p>Failed to load caregivers.</p> : null}
+      {query.isError ? (
+        <LoadError what="the caregivers" onRetry={() => void query.refetch()} />
+      ) : null}
 
       {query.data ? (
         <>

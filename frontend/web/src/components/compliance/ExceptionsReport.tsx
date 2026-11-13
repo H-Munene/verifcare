@@ -27,6 +27,7 @@ const KINDS: readonly ExceptionKind[] = [
   'missing_checkout',
   'failed_check',
   'supervisor_override',
+  'checkout_override',
 ];
 
 export function ExceptionsReport({ period }: { period: Period }) {

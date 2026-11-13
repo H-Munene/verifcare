@@ -44,7 +44,7 @@ interface ConsentRecordResponse {
   subjectType: 'caregiver' | 'dependant';
   caregiverId: string | null;
   dependantId: string | null;
-  consentType: 'location_verification' | 'visit_audio';
+  consentType: (typeof schema.consentTypeEnum.enumValues)[number];
   grantedBy: string;
   grantedAt: string;
   revokedAt: string | null;

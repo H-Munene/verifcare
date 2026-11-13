@@ -66,11 +66,3 @@
   gap: 8px;
   margin-top: 4px;
 }
-
-.dependant-detail__modal-error {
-  font-size: 13px;
-  color: var(--color-danger-text);
-  background: var(--color-danger-tint);
-  border-radius: var(--radius-default);
-  padding: 8px 10px;
-}
