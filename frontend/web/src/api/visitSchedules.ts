@@ -31,7 +31,8 @@ export interface VisitSchedule {
   updatedAt: string;
 }
 
-export type VerificationAttemptType = 'geofence' | 'family_location' | 'qr_scan';
+export type VerificationAttemptType =
+  'geofence' | 'family_location' | 'qr_scan' | 'checkout_qr' | 'checkout_code';
 
 export type AudioSkipReason =
   'dependant_declined' | 'dependant_unwell_or_asleep' | 'technical_problem' | 'other';
@@ -46,11 +47,40 @@ export interface VerificationEvent {
   checkinMethod: 'qr' | 'supervisor_override' | null;
   qrFamilyMemberName: string | null;
   familyDistanceFromGeofenceMeters: number | null;
-  // Whether a recording exists or why not. Supervisors can't listen: only the family can.
+  // The dependant's recording, or why there isn't one. Supervisors can't listen: only the family can.
   audioRecordedAt: string | null;
   audioDurationSeconds: number | null;
   audioSkipReason: AudioSkipReason | null;
   audioSkipNote: string | null;
+  // Both recordings, each with its advisory voice check (shown to supervisors only).
+  recordings: VisitRecording[];
+  // How check-out was confirmed: the family's code, or the caregiver's override and its reason.
+  checkoutRequestedAt: string | null;
+  checkoutMethod: 'qr' | 'code' | 'override' | null;
+  checkoutFamilyMemberName: string | null;
+  checkoutOverrideReason: CheckoutOverrideReason | null;
+  checkoutOverrideNote: string | null;
+}
+
+export type CheckoutOverrideReason =
+  'no_family_member_present' | 'family_phone_unavailable' | 'camera_or_code_problem' | 'other';
+
+export type VoiceCheckResult =
+  'match' | 'mismatch' | 'too_short' | 'not_enrolled' | 'no_consent' | 'unavailable';
+
+export interface VoiceCheck {
+  result: VoiceCheckResult;
+  score: number | null;
+  speechSeconds: number | null;
+  threshold: number | null;
+  checkedAt: string;
+}
+
+export interface VisitRecording {
+  role: 'caregiver' | 'dependant';
+  recordedAt: string;
+  durationSeconds: number;
+  voiceCheck?: VoiceCheck | null;
 }
 
 export interface VerificationAttempt {
@@ -113,6 +143,23 @@ function toQueryString(params: ListVisitSchedulesParams): string {
   return query ? `?${query}` : '';
 }
 
+/** A person's recordings and their advisory voice checks (GET /voice-checks), newest first. */
+export interface VoiceCheckHistory {
+  enrolment: { enrolled: boolean; enrolledAt: string | null };
+  items: {
+    visitScheduleId: string;
+    scheduledStart: string;
+    caregiverName: string;
+    dependantName: string;
+    recordedAt: string;
+    durationSeconds: number;
+    result: VoiceCheckResult | null;
+    score: number | null;
+    speechSeconds: number | null;
+    threshold: number | null;
+  }[];
+}
+
 export function createVisitSchedulesApi(client: ApiClient) {
   return {
     listVisitSchedules: (params: ListVisitSchedulesParams = {}) =>
@@ -121,6 +168,8 @@ export function createVisitSchedulesApi(client: ApiClient) {
       client.get<VisitSchedule>(`/visit-schedules/${visitScheduleId}`),
     getVisitVerification: (visitScheduleId: string) =>
       client.get<VerificationAudit>(`/visit-schedules/${visitScheduleId}/verification`),
+    listVoiceChecks: (subject: { dependantId: string } | { caregiverId: string }) =>
+      client.get<VoiceCheckHistory>(`/voice-checks${toQueryString(subject)}`),
     createVisitSchedule: (body: CreateVisitScheduleRequest) =>
       client.post<VisitSchedule>('/visit-schedules', body),
     updateVisitSchedule: (visitScheduleId: string, body: UpdateVisitScheduleRequest) =>

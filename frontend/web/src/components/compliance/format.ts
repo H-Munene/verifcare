@@ -53,6 +53,7 @@ export const EXCEPTION_KIND_LABELS: Record<ExceptionKind, string> = {
   missing_checkout: 'No checkout',
   failed_check: 'Failed check',
   supervisor_override: 'Supervisor override',
+  checkout_override: 'Check-out override',
 };
 
 const ATTEMPT_LABELS: Record<string, string> = {

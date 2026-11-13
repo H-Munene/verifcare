@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useApi } from '../api/useApi';
 import { VisitHistoryList } from '../components/VisitHistoryList';
+import { VoiceChecksList } from '../components/VoiceChecksList';
 import { VisitStatsTiles } from '../components/VisitStatsTiles';
 import { Badge } from '../design-system/Badge';
 import { Button } from '../design-system/Button';
@@ -97,6 +98,13 @@ export function CaregiverDetailPage() {
       <div className="caregiver-detail__tab-panel">
         <VisitHistoryList caregiverId={caregiver.userId} />
       </div>
+
+      <section className="caregiver-detail__tab-panel" aria-labelledby="caregiver-voice-checks">
+        <h2 id="caregiver-voice-checks" className="caregiver-detail__section-title">
+          Voice checks
+        </h2>
+        <VoiceChecksList caregiverId={caregiver.userId} />
+      </section>
 
       {setActiveMutation.error ? (
         <div className="caregiver-detail__error">

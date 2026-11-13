@@ -114,6 +114,7 @@ export function ConsentReport() {
                 <Th>Role</Th>
                 <Th icon={Location01Icon}>Location checks</Th>
                 <Th icon={Mic01Icon}>Visit audio</Th>
+                <Th icon={Mic01Icon}>Voice checks</Th>
                 <Th icon={Alert02Icon} className="compliance__num">
                   Visits at risk
                 </Th>
@@ -136,6 +137,9 @@ export function ConsentReport() {
                   </td>
                   <td>
                     <Consent state={row.consents.visit_audio} />
+                  </td>
+                  <td>
+                    <Consent state={row.consents.voice_verification} />
                   </td>
                   <td className="compliance__num">
                     <Flag
