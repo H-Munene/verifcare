@@ -25,8 +25,10 @@ const envSchema = z
     // screenshot goes stale almost at once; the family app fetches a fresh code while the screen
     // is open, so a caregiver mid-scan is never left holding an expired one.
     CHECKIN_QR_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60),
-    // Where the visit's 30-second recording is stored (routes/visitAudio.ts).
+    // Where visit recordings and enrolment audio are stored (routes/visitAudio.ts).
     VISIT_AUDIO_BUCKET_NAME: z.string().min(1),
+    // The voice Lambda (voiceService.ts). Required in Lambda; local dev without it uses a fake.
+    VOICE_FUNCTION_NAME: z.string().min(1).optional(),
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.DATABASE_SECRET_ARN !== undefined, {
     message: 'Either DATABASE_URL (local dev) or DATABASE_SECRET_ARN (Lambda) must be set.',
@@ -42,6 +44,7 @@ export interface Config {
   checkinSessionTokenTtlSeconds: number;
   checkinQrTokenTtlSeconds: number;
   visitAudioBucketName: string;
+  voiceFunctionName: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -66,5 +69,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     checkinSessionTokenTtlSeconds: result.data.CHECKIN_SESSION_TOKEN_TTL_SECONDS,
     checkinQrTokenTtlSeconds: result.data.CHECKIN_QR_TOKEN_TTL_SECONDS,
     visitAudioBucketName: result.data.VISIT_AUDIO_BUCKET_NAME,
+    voiceFunctionName: result.data.VOICE_FUNCTION_NAME,
   };
 }

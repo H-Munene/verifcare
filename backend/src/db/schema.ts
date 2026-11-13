@@ -62,14 +62,22 @@ export const caregiverOccupationEnum = pgEnum('caregiver_occupation', [
 ]);
 // How a check-in is proved (migration 0017): the caregiver's geofence fix, the family member's phone
 // being at the home when it issues a code, and the caregiver scanning that code.
+// checkout_qr and checkout_code (0019) are the caregiver's tries at the family's check-out code.
 export const verificationAttemptTypeEnum = pgEnum('verification_attempt_type', [
   'geofence',
   'family_location',
   'qr_scan',
+  'checkout_qr',
+  'checkout_code',
 ]);
 // location_verification: both phones' positions are checked against the home at check-in.
-// visit_audio: a short recording is made at each visit for the dependant's family to listen to.
-export const consentTypeEnum = pgEnum('consent_type', ['location_verification', 'visit_audio']);
+// visit_audio: the visit's recordings are made and the dependant's family can listen to them.
+// voice_verification (0019): each recording is checked against the person's enrolled voiceprint.
+export const consentTypeEnum = pgEnum('consent_type', [
+  'location_verification',
+  'visit_audio',
+  'voice_verification',
+]);
 // Kenyan identity document types accepted when registering a brand-new family-member user
 // (HEZ-86 revision, 2026-09-21) - confirmed with the user as exactly these two, an enum rather
 // than text+CHECK since (unlike biometric_enrollments.status) there is no near-term need to add a
@@ -509,6 +517,18 @@ export const AUDIO_SKIP_REASONS = [
 ] as const;
 export type AudioSkipReason = (typeof AUDIO_SKIP_REASONS)[number];
 
+// How check-out was confirmed (0019): the family's QR code, its 6-digit code, or the caregiver's
+// override, which completes at once and is reviewed afterwards.
+export const CHECKOUT_METHODS = ['qr', 'code', 'override'] as const;
+export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
+export const CHECKOUT_OVERRIDE_REASONS = [
+  'no_family_member_present',
+  'family_phone_unavailable',
+  'camera_or_code_problem',
+  'other',
+] as const;
+export type CheckoutOverrideReason = (typeof CHECKOUT_OVERRIDE_REASONS)[number];
+
 export const verificationEvents = pgTable(
   'verification_events',
   {
@@ -532,9 +552,17 @@ export const verificationEvents = pgTable(
     // whereabouts are only needed to answer "were they at the home".
     qrFamilyMemberUserId: uuid().references(() => users.id),
     familyDistanceFromGeofenceMeters: doublePrecision(),
-    // Set at checkout when there is no recording for the visit.
+    // Set when there is no recording of the dependant for the visit.
     audioSkipReason: text().$type<AudioSkipReason>(),
     audioSkipNote: text(),
+    // Check-out (0019): requested once every requirement is met, then confirmed by a family
+    // member's code, or overridden with a reason.
+    checkoutRequestedAt: timestamp({ withTimezone: true }),
+    checkoutMethod: text().$type<CheckoutMethod>(),
+    checkoutFamilyMemberUserId: uuid().references(() => users.id),
+    checkoutFamilyDistanceMeters: doublePrecision(),
+    checkoutOverrideReason: text().$type<CheckoutOverrideReason>(),
+    checkoutOverrideNote: text(),
     // Hash of the short-lived session token, not the token itself (see schema.sql's file header).
     sessionTokenHash: text(),
     // When the current sessionTokenHash was issued (HEZ-33 originally derived this indirectly from
@@ -557,6 +585,18 @@ export const verificationEvents = pgTable(
     check(
       'chk_verification_events_audio_skip_other_note',
       sql`${table.audioSkipReason} IS DISTINCT FROM 'other' OR length(btrim(coalesce(${table.audioSkipNote}, ''))) > 0`,
+    ),
+    check(
+      'chk_verification_events_checkout_method',
+      sql`${table.checkoutMethod} IS NULL OR ${table.checkoutMethod} IN ('qr', 'code', 'override')`,
+    ),
+    check(
+      'chk_verification_events_checkout_override_reason',
+      sql`${table.checkoutOverrideReason} IS NULL OR (${table.checkoutMethod} = 'override' AND ${table.checkoutOverrideReason} IN ('no_family_member_present', 'family_phone_unavailable', 'camera_or_code_problem', 'other'))`,
+    ),
+    check(
+      'chk_verification_events_checkout_override_other_note',
+      sql`${table.checkoutOverrideReason} IS DISTINCT FROM 'other' OR length(btrim(coalesce(${table.checkoutOverrideNote}, ''))) > 0`,
     ),
     check(
       'chk_verification_events_checkout_after_checkin',
@@ -613,9 +653,17 @@ export const checkinQrTokens = pgTable(
     issuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp({ withTimezone: true }).notNull(),
     consumedAt: timestamp({ withTimezone: true }),
+    // 0019: check-out codes use the same table. A check-out code also has a 6-digit code to type,
+    // stored as an HMAC bound to the visit.
+    purpose: text().$type<'checkin' | 'checkout'>().notNull().default('checkin'),
+    codeHash: text(),
   },
   (table) => [
     check('chk_checkin_qr_tokens_expiry', sql`${table.expiresAt} > ${table.issuedAt}`),
+    check('chk_checkin_qr_tokens_purpose', sql`${table.purpose} IN ('checkin', 'checkout')`),
+    index('idx_checkin_qr_tokens_visit_code')
+      .on(table.visitScheduleId, table.codeHash)
+      .where(sql`${table.codeHash} IS NOT NULL`),
     index('idx_checkin_qr_tokens_visit').on(table.visitScheduleId),
     index('idx_checkin_qr_tokens_family_member').on(table.familyMemberUserId),
   ],
@@ -732,10 +780,14 @@ export const visitResolutions = pgTable(
 );
 
 // ============================================================================
-// audio_records - the visit's 30-second recording, which the dependant's linked family members can
-// listen to as added assurance (0017). One per visit. The object is removed by the S3 bucket's
-// 90-day lifecycle rule (infra/lib/storage.ts); AUDIO_RETENTION_DAYS mirrors that number.
+// audio_records - the visit's recordings (0017, two per visit since 0019): the caregiver's and the
+// dependant's, each checked against that person's voiceprint. The dependant's linked family members
+// can listen to the dependant's. The object is removed by the S3 bucket's 90-day lifecycle rule
+// (infra/lib/storage.ts); AUDIO_RETENTION_DAYS mirrors that number.
 // ============================================================================
+
+export const RECORDING_ROLES = ['caregiver', 'dependant'] as const;
+export type RecordingRole = (typeof RECORDING_ROLES)[number];
 
 export const audioRecords = pgTable(
   'audio_records',
@@ -748,17 +800,106 @@ export const audioRecords = pgTable(
     // exceeds Postgres's 63-byte identifier limit and would be silently truncated. Named explicitly
     // via foreignKey() below instead.
     verificationEventId: uuid().notNull(),
+    role: text().$type<RecordingRole>().notNull(),
     s3Key: text().notNull().unique('uq_audio_records_s3_key'),
     durationSeconds: integer().notNull(),
     uploadedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('uq_audio_records_verification_event').on(table.verificationEventId),
+    check('chk_audio_records_role', sql`${table.role} IN ('caregiver', 'dependant')`),
+    uniqueIndex('uq_audio_records_verification_event_role').on(
+      table.verificationEventId,
+      table.role,
+    ),
     foreignKey({
       name: 'fk_audio_records_verification_event',
       columns: [table.verificationEventId],
       foreignColumns: [verificationEvents.visitScheduleId],
     }),
+  ],
+);
+
+// ============================================================================
+// voice_enrollments (0019) - one active voiceprint per caregiver or dependant. The voiceprint itself
+// is in its own encrypted bucket, readable only by the voice Lambda; this row only points at it.
+// Re-enrolling or deregistering sets removed_at and deletes the object.
+// ============================================================================
+
+export const voiceEnrollments = pgTable(
+  'voice_enrollments',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    subjectType: subjectTypeEnum().notNull(),
+    caregiverId: uuid().references(() => caregivers.userId),
+    dependantId: uuid().references(() => dependants.id),
+    voiceprintKey: text().notNull().unique('uq_voice_enrollments_voiceprint_key'),
+    speechSeconds: doublePrecision().notNull(),
+    modelRevision: text().notNull(),
+    enrolledBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    enrolledAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    removedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'chk_voice_enrollments_subject',
+      sql`(${table.subjectType} = 'caregiver' AND ${table.caregiverId} IS NOT NULL AND ${table.dependantId} IS NULL) OR
+          (${table.subjectType} = 'dependant' AND ${table.dependantId} IS NOT NULL AND ${table.caregiverId} IS NULL)`,
+    ),
+    uniqueIndex('uq_voice_enrollments_active_caregiver')
+      .on(table.caregiverId)
+      .where(sql`${table.removedAt} IS NULL`),
+    uniqueIndex('uq_voice_enrollments_active_dependant')
+      .on(table.dependantId)
+      .where(sql`${table.removedAt} IS NULL`),
+    index('idx_voice_enrollments_enrolled_by').on(table.enrolledBy),
+  ],
+);
+
+// ============================================================================
+// voice_checks (0019) - each recording's check against the voiceprint of the person it claims to
+// be. Advisory: nothing in the system blocks on it. A score exists only for match or mismatch.
+// ============================================================================
+
+export const VOICE_CHECK_RESULTS = [
+  'match',
+  'mismatch',
+  'too_short',
+  'not_enrolled',
+  'no_consent',
+  'unavailable',
+] as const;
+export type VoiceCheckResult = (typeof VOICE_CHECK_RESULTS)[number];
+
+export const voiceChecks = pgTable(
+  'voice_checks',
+  {
+    id: uuid()
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    audioRecordId: uuid()
+      .notNull()
+      .references(() => audioRecords.id)
+      .unique('uq_voice_checks_audio_record'),
+    result: text().$type<VoiceCheckResult>().notNull(),
+    score: doublePrecision(),
+    speechSeconds: doublePrecision(),
+    threshold: doublePrecision(),
+    modelRevision: text(),
+    checkedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'chk_voice_checks_result',
+      sql`${table.result} IN ('match', 'mismatch', 'too_short', 'not_enrolled', 'no_consent', 'unavailable')`,
+    ),
+    check(
+      'chk_voice_checks_score',
+      sql`(${table.result} IN ('match', 'mismatch')) = (${table.score} IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -826,6 +967,8 @@ export const termsAcceptances = pgTable(
     // earlier acceptances, which didn't ask this - null means "not asked", not "refused".
     locationConsent: boolean(),
     audioConsent: boolean(),
+    // Terms v4 (0019): consent to each recording being checked against an enrolled voiceprint.
+    voiceConsent: boolean(),
   },
   (table) => [
     check(

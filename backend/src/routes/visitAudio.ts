@@ -1,13 +1,16 @@
-// Visit audio (2026-11-09): the caregiver records up to 30 seconds during the visit, and the
-// dependant's linked family members can listen to it as added assurance that the visit happened.
+// Visit recordings (2026-11-09, two per visit since 2026-11-13): the caregiver records their own
+// voice and then the dependant's, each at least 10 seconds. Both are check-out requirements, though
+// the dependant's can be replaced by a stated reason, since a dependant is never made to speak.
 //
-// Who can listen is deliberately narrow: family members linked to this dependant, and nobody else.
-// Supervisors only ever see that a recording exists or why there isn't one (user decision). Each
-// playback URL issued is audit-logged, since a recording made in someone's home is sensitive
-// whatever it's used for.
+// Each recording is checked against the voiceprint of the person it claims to be (voiceChecks.ts).
+// The result is advisory and never blocks anything, and the caregiver is not shown it.
 //
-// No model processes this audio. The acoustic model's results are reported separately and it does
-// not run in this system.
+// Who can listen is deliberately narrow: family members linked to this dependant, to the dependant's
+// recording only. Each playback URL issued is audit-logged, since a recording made in someone's
+// home is sensitive whatever it's used for.
+//
+// A recording of a person needs their visit_audio consent; it's analysed only with their
+// voice_verification consent and an enrolment.
 //
 // Mounted before routes/checkin.ts, whose router-wide requireRole('caregiver') would otherwise
 // reject family members.
@@ -19,31 +22,35 @@ import { recordAudit } from '../audit.js';
 import { requireRole } from '../auth/middleware.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
-import { subjectsWithActiveConsent } from '../db/consents.js';
+import { subjectsWithActiveConsent, type ConsentSubject } from '../db/consents.js';
 import * as schema from '../db/schema.js';
 import { visitAudioKeyPrefix, type VisitAudioStorage } from '../db/visitAudioStorage.js';
 import { sendProblem } from '../errors.js';
 import { parseOrSendProblem } from '../validation.js';
+import { checkRecording } from '../voiceChecks.js';
+import type { VoiceService } from '../voiceService.js';
 import { findFamilyMemberLink } from './dependants.js';
 
 export interface VisitAudioRouterDependencies {
   requireAuth: RequestHandler;
   storage: VisitAudioStorage;
+  voice: VoiceService;
   now?: () => Date;
 }
 
 // Mirrors infra/lib/storage.ts's lifecycle rule, which is what actually deletes the object.
 export const AUDIO_RETENTION_DAYS = 90;
-const MIN_DURATION_SECONDS = 5;
+export const MIN_RECORDING_SECONDS = 10;
 // One over the 30-second limit, since a recording stopped at 30 s can encode a fraction longer.
 const MAX_DURATION_SECONDS = 31;
 // 30 seconds of AAC is well under 1 MB. A presigned PUT can't enforce a size, so it's checked here.
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 
 const visitScheduleIdParamSchema = z.string().uuid();
+const roleParamSchema = z.enum(schema.RECORDING_ROLES);
 const confirmRequestSchema = z.object({
   s3Key: z.string().min(1).max(300),
-  durationSeconds: z.number().int().min(MIN_DURATION_SECONDS).max(MAX_DURATION_SECONDS),
+  durationSeconds: z.number().int().min(MIN_RECORDING_SECONDS).max(MAX_DURATION_SECONDS),
 });
 
 function getDb(res: Response): Db | undefined {
@@ -59,26 +66,52 @@ function getDb(res: Response): Db | undefined {
   return db;
 }
 
-async function dependantConsentsToAudio(db: Db, dependantId: string): Promise<boolean> {
-  const consented = await subjectsWithActiveConsent(
-    db,
-    [{ subjectType: 'dependant', id: dependantId }],
-    'visit_audio',
-  );
-  return consented.has(dependantId);
+/** Who a recording of `role` at this visit is of. */
+export function recordingSubject(
+  visit: { caregiverId: string; dependantId: string },
+  role: schema.RecordingRole,
+): ConsentSubject {
+  return role === 'caregiver'
+    ? { subjectType: 'caregiver', id: visit.caregiverId }
+    : { subjectType: 'dependant', id: visit.dependantId };
 }
 
-async function findRecording(db: Db, visitScheduleId: string) {
+/** For each role, whether a recording is required (the person consents to it) and whether one exists. */
+export async function recordingRequirements(
+  db: Db,
+  visit: { id: string; caregiverId: string; dependantId: string },
+) {
+  const subjects = schema.RECORDING_ROLES.map((role) => recordingSubject(visit, role));
+  const consented = await subjectsWithActiveConsent(db, subjects, 'visit_audio');
+  const recorded = await db
+    .select({ role: schema.audioRecords.role })
+    .from(schema.audioRecords)
+    .where(eq(schema.audioRecords.verificationEventId, visit.id));
+  const has = new Set(recorded.map((row) => row.role));
+  return Object.fromEntries(
+    schema.RECORDING_ROLES.map((role, i) => [
+      role,
+      { required: consented.has(subjects[i]!.id), recorded: has.has(role) },
+    ]),
+  ) as Record<schema.RecordingRole, { required: boolean; recorded: boolean }>;
+}
+
+async function findRecording(db: Db, visitScheduleId: string, role: schema.RecordingRole) {
   const [recording] = await db
     .select()
     .from(schema.audioRecords)
-    .where(eq(schema.audioRecords.verificationEventId, visitScheduleId));
+    .where(
+      and(
+        eq(schema.audioRecords.verificationEventId, visitScheduleId),
+        eq(schema.audioRecords.role, role),
+      ),
+    );
   return recording;
 }
 
 export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencies): Router {
   const router = Router();
-  const { requireAuth, storage } = dependencies;
+  const { requireAuth, storage, voice } = dependencies;
   const now = dependencies.now ?? (() => new Date());
 
   // The assigned caregiver's own visit. With `inProgressOnly`, also requires that it's under way.
@@ -115,16 +148,29 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
     return { visit, callerRow };
   }
 
-  function sendNoConsent(res: Response): void {
-    sendProblem(res, {
-      type: 'about:blank',
-      title: 'Forbidden',
-      status: 403,
-      detail: "This dependant's family has not consented to audio being recorded at visits.",
-    });
+  // Sends the error itself and returns false when this person hasn't consented to being recorded.
+  async function requireRecordingConsent(
+    db: Db,
+    subject: ConsentSubject,
+    res: Response,
+  ): Promise<boolean> {
+    const consented = await subjectsWithActiveConsent(db, [subject], 'visit_audio');
+    if (!consented.has(subject.id)) {
+      sendProblem(res, {
+        type: 'about:blank',
+        title: 'Forbidden',
+        status: 403,
+        detail:
+          subject.subjectType === 'caregiver'
+            ? 'You have not consented to being recorded at visits.'
+            : "This dependant's family has not consented to audio being recorded at visits.",
+      });
+      return false;
+    }
+    return true;
   }
 
-  // GET .../audio/requirement: lets the caregiver app decide whether to show the recorder.
+  // GET .../audio/requirement: which recordings the caregiver app should ask for.
   router.get(
     '/:visitScheduleId/audio/requirement',
     requireAuth,
@@ -144,10 +190,7 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
         if (!context) {
           return;
         }
-        res.status(200).json({
-          required: await dependantConsentsToAudio(db, context.visit.dependantId),
-          recorded: (await findRecording(db, visitScheduleId)) !== undefined,
-        });
+        res.status(200).json(await recordingRequirements(db, context.visit));
       } catch (err) {
         next(err);
       }
@@ -155,7 +198,7 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
   );
 
   router.post(
-    '/:visitScheduleId/audio/upload-url',
+    '/:visitScheduleId/audio/:role/upload-url',
     requireAuth,
     requireRole('caregiver'),
     async (req, res, next) => {
@@ -164,20 +207,20 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
         req.params.visitScheduleId,
         res,
       );
-      const db = visitScheduleId && getDb(res);
-      if (!visitScheduleId || !db || !req.auth) {
+      const role = visitScheduleId && parseOrSendProblem(roleParamSchema, req.params.role, res);
+      const db = role && getDb(res);
+      if (!visitScheduleId || !role || !db || !req.auth) {
         return;
       }
       try {
         const context = await resolveCaregiverVisit(db, visitScheduleId, req.auth.sub, res, true);
-        if (!context) {
+        if (
+          !context ||
+          !(await requireRecordingConsent(db, recordingSubject(context.visit, role), res))
+        ) {
           return;
         }
-        if (!(await dependantConsentsToAudio(db, context.visit.dependantId))) {
-          sendNoConsent(res);
-          return;
-        }
-        const created = await storage.createUploadUrl(visitScheduleId);
+        const created = await storage.createUploadUrl(visitAudioKeyPrefix(visitScheduleId, role));
         res.status(201).json({ ...created, expiresAt: created.expiresAt.toISOString() });
       } catch (err) {
         next(err);
@@ -186,7 +229,7 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
   );
 
   router.post(
-    '/:visitScheduleId/audio',
+    '/:visitScheduleId/audio/:role',
     requireAuth,
     requireRole('caregiver'),
     async (req, res, next) => {
@@ -195,24 +238,19 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
         req.params.visitScheduleId,
         res,
       );
-      if (!visitScheduleId) {
-        return;
-      }
-      const body = parseOrSendProblem(confirmRequestSchema, req.body, res);
+      const role = visitScheduleId && parseOrSendProblem(roleParamSchema, req.params.role, res);
+      const body = role && parseOrSendProblem(confirmRequestSchema, req.body, res);
       const db = body && getDb(res);
-      if (!body || !db || !req.auth) {
+      if (!visitScheduleId || !role || !body || !db || !req.auth) {
         return;
       }
       try {
         const context = await resolveCaregiverVisit(db, visitScheduleId, req.auth.sub, res, true);
-        if (!context) {
+        const subject = context && recordingSubject(context.visit, role);
+        if (!context || !subject || !(await requireRecordingConsent(db, subject, res))) {
           return;
         }
-        if (!(await dependantConsentsToAudio(db, context.visit.dependantId))) {
-          sendNoConsent(res);
-          return;
-        }
-        if (!body.s3Key.startsWith(visitAudioKeyPrefix(visitScheduleId))) {
+        if (!body.s3Key.startsWith(visitAudioKeyPrefix(visitScheduleId, role))) {
           sendProblem(res, {
             type: 'about:blank',
             title: 'Bad Request',
@@ -242,38 +280,46 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
         }
 
         const at = now();
-        // Upsert: a caregiver retrying after a dropped response must not hit a conflict.
-        await db.transaction(async (tx) => {
-          await tx
+        // Upsert: a caregiver retrying after a dropped response, or re-recording, must not conflict.
+        const recording = await db.transaction(async (tx) => {
+          const [row] = await tx
             .insert(schema.audioRecords)
             .values({
               verificationEventId: visitScheduleId,
+              role,
               s3Key: body.s3Key,
               durationSeconds: body.durationSeconds,
               uploadedAt: at,
             })
             .onConflictDoUpdate({
-              target: schema.audioRecords.verificationEventId,
+              target: [schema.audioRecords.verificationEventId, schema.audioRecords.role],
               set: { s3Key: body.s3Key, durationSeconds: body.durationSeconds, uploadedAt: at },
-            });
+            })
+            .returning();
           await recordAudit(tx, {
             actorUserId: context.callerRow.id,
             action: 'visit_audio.upload',
             entityType: 'visit_schedule',
             entityId: visitScheduleId,
-            metadata: { durationSeconds: body.durationSeconds },
+            metadata: { role, durationSeconds: body.durationSeconds },
           });
+          return row!;
         });
-        res
-          .status(201)
-          .json({ durationSeconds: body.durationSeconds, uploadedAt: at.toISOString() });
+        // After the recording is saved, so a slow or failing check can never lose it.
+        await checkRecording(db, voice, recording, subject);
+        res.status(201).json({
+          role,
+          durationSeconds: body.durationSeconds,
+          uploadedAt: at.toISOString(),
+        });
       } catch (err) {
         next(err);
       }
     },
   );
 
-  // GET .../audio: a short-lived playback URL, for family members linked to this dependant only.
+  // GET .../audio: a short-lived playback URL for the dependant's recording, for family members
+  // linked to this dependant only.
   router.get(
     '/:visitScheduleId/audio',
     requireAuth,
@@ -292,7 +338,7 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
         const [visit] = await db
           .select({ dependantId: schema.visitSchedules.dependantId })
           .from(schema.visitSchedules)
-          .where(and(eq(schema.visitSchedules.id, visitScheduleId)));
+          .where(eq(schema.visitSchedules.id, visitScheduleId));
         if (!visit) {
           sendProblem(res, { type: 'about:blank', title: 'Not Found', status: 404 });
           return;
@@ -302,7 +348,7 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
           sendProblem(res, { type: 'about:blank', title: 'Forbidden', status: 403 });
           return;
         }
-        const recording = await findRecording(db, visitScheduleId);
+        const recording = await findRecording(db, visitScheduleId, 'dependant');
         if (!recording) {
           sendProblem(res, {
             type: 'about:blank',

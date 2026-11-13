@@ -360,7 +360,7 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
   it('lists consent per person, with who revoked it and visits booked without it', async () => {
     const db = getDb();
     const granted = (subject: { caregiverId?: string; dependantId?: string }) =>
-      (['location_verification', 'visit_audio'] as const).map((consentType) => ({
+      schema.consentTypeEnum.enumValues.map((consentType) => ({
         subjectType: subject.caregiverId ? ('caregiver' as const) : ('dependant' as const),
         ...subject,
         consentType,

@@ -115,7 +115,7 @@ function toVerificationEventResponse(
 interface VerificationAttemptResponse {
   id: string;
   visitScheduleId: string;
-  attemptType: 'geofence' | 'family_location' | 'qr_scan';
+  attemptType: (typeof schema.verificationAttemptTypeEnum.enumValues)[number];
   passed: boolean;
   failureReason: string | null;
   attemptedAt: string;

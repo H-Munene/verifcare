@@ -1,3 +1,4 @@
+import { LambdaClient } from '@aws-sdk/client-lambda';
 import { S3Client } from '@aws-sdk/client-s3';
 import type { ErrorRequestHandler } from 'express';
 import serverlessHttp from 'serverless-http';
@@ -11,6 +12,7 @@ import { isPostgresAuthError } from './db/postgresErrors.js';
 import { createVisitAudioStorage } from './db/visitAudioStorage.js';
 import { errorHandler } from './errors.js';
 import { logger } from './logger.js';
+import { createLambdaVoiceService } from './voiceService.js';
 
 // Fail fast at cold start if this function was deployed without its DB secret wired up, rather
 // than waiting for the first request to discover it. DATABASE_URL is also a valid config shape
@@ -18,6 +20,10 @@ import { logger } from './logger.js';
 const config = loadConfig();
 if (!config.databaseSecretArn) {
   throw new Error('DATABASE_SECRET_ARN is not set - see infra/lib/api.ts.');
+}
+// Never fall back to the fake voice check in a deployed API.
+if (!config.voiceFunctionName) {
+  throw new Error('VOICE_FUNCTION_NAME is not set - see infra/lib/api.ts.');
 }
 
 // Cheap and synchronous - CognitoJwtVerifier.create() does not fetch the JWKS eagerly, only on
@@ -33,6 +39,11 @@ const visitAudioStorage = createVisitAudioStorage({
   bucketName: config.visitAudioBucketName,
 });
 
+const voiceService = createLambdaVoiceService({
+  lambdaClient: new LambdaClient({}),
+  functionName: config.voiceFunctionName,
+});
+
 // resolveDb (not db) - see app.ts's AppDependencies.resolveDb comment for why this needs to be a
 // per-request resolver createApp() wires in itself, before its routers, rather than middleware
 // bolted on afterward here (that was the actual bug, fixed 2026-09-14: middleware added to an
@@ -43,6 +54,7 @@ const app = createApp({
   requireVerifiedIdentity,
   cognitoAdmin,
   visitAudioStorage,
+  voiceService,
   resolveDb: getLambdaDb,
   geofenceAccuracyThresholdMeters: config.geofenceAccuracyThresholdMeters,
   checkinSessionTokenTtlSeconds: config.checkinSessionTokenTtlSeconds,

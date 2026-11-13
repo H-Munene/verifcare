@@ -4,6 +4,7 @@ import { pinoHttp } from 'pino-http';
 import type { CognitoAdmin } from './auth/cognitoAdmin.js';
 import type { Db } from './db/client.js';
 import type { VisitAudioStorage } from './db/visitAudioStorage.js';
+import { createFakeVoiceService, type VoiceService } from './voiceService.js';
 import { sendProblem } from './errors.js';
 import { logger } from './logger.js';
 import { createCaregiversRouter } from './routes/caregivers.js';
@@ -24,6 +25,7 @@ import { createVisitAudioRouter } from './routes/visitAudio.js';
 import { createVisitPlansRouter } from './routes/visitPlans.js';
 import { createVisitResolutionsRouter } from './routes/visitResolutions.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
+import { createVoiceEnrollmentsRouter } from './routes/voiceEnrollments.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -67,8 +69,10 @@ export interface AppDependencies {
   checkinSessionTokenTtlSeconds?: number;
   // How long a family member's check-in code stays valid (config.ts's default applies if omitted).
   checkinQrTokenTtlSeconds?: number;
-  // The visit's 30-second recording. Its routes exist only when this is provided.
+  // Visit recordings and voice enrolment audio. Their routes exist only when this is provided.
   visitAudioStorage?: VisitAudioStorage;
+  // The voice check. A fake that always matches when omitted, for tests; lambda.ts always sets it.
+  voiceService?: VoiceService;
 }
 
 // This does NOT install a terminal error handler - see errors.ts's errorHandler for why that must
@@ -145,9 +149,14 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       }),
     );
     if (visitAudioStorage) {
+      const voice = dependencies.voiceService ?? createFakeVoiceService();
       app.use(
         '/visit-schedules',
-        createVisitAudioRouter({ requireAuth, storage: visitAudioStorage }),
+        createVisitAudioRouter({ requireAuth, storage: visitAudioStorage, voice }),
+      );
+      app.use(
+        '/voice-enrollments',
+        createVoiceEnrollmentsRouter({ requireAuth, storage: visitAudioStorage, voice }),
       );
     }
     // Check-in's caregiver steps - a separate router at the same prefix (see routes/checkin.ts).

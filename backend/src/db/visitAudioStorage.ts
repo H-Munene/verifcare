@@ -1,6 +1,6 @@
-// S3 access for the visit's 30-second recording (2026-11-09). The phone uploads straight to S3
-// through a presigned URL, and family members play it back through another, so audio never passes
-// through the Lambda and access is decided per request by the API.
+// S3 access for visit recordings and voice enrolment audio (2026-11-09, 2026-11-13). The phone
+// uploads straight to S3 through a presigned URL, and family members play the dependant's recording
+// back through another, so audio never passes through the API and access is decided per request.
 
 import {
   GetObjectCommand,
@@ -10,6 +10,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v7 as uuidv7 } from 'uuid';
+import type { ConsentSubject } from './consents.js';
+import type { RecordingRole } from './schema.js';
 
 const UPLOAD_URL_EXPIRY_SECONDS = 300;
 const PLAYBACK_URL_EXPIRY_SECONDS = 300;
@@ -17,17 +19,23 @@ const PLAYBACK_URL_EXPIRY_SECONDS = 300;
 export const VISIT_AUDIO_CONTENT_TYPE = 'audio/mp4';
 
 export interface VisitAudioStorage {
+  /** A presigned PUT for a new object under keyPrefix (which must end in '/'). */
   createUploadUrl: (
-    visitScheduleId: string,
+    keyPrefix: string,
   ) => Promise<{ uploadUrl: string; s3Key: string; expiresAt: Date }>;
   /** The object's size in bytes, or null when no such object exists. */
   objectSize: (s3Key: string) => Promise<number | null>;
   createPlaybackUrl: (s3Key: string) => Promise<{ url: string; expiresAt: Date }>;
 }
 
-// Exported so the router can check that a submitted key belongs to the visit it's submitted for.
-export function visitAudioKeyPrefix(visitScheduleId: string): string {
-  return `${visitScheduleId}/`;
+// Exported so a router can check that a submitted key belongs to what it's submitted for.
+export function visitAudioKeyPrefix(visitScheduleId: string, role: RecordingRole): string {
+  return `${visitScheduleId}/${role}/`;
+}
+
+// Enrolment audio is deleted by the voice Lambda once the voiceprint is made.
+export function enrolmentAudioKeyPrefix(subject: ConsentSubject): string {
+  return `enrol/${subject.subjectType}/${subject.id}/`;
 }
 
 export function createVisitAudioStorage(params: {
@@ -37,8 +45,8 @@ export function createVisitAudioStorage(params: {
   const { s3Client, bucketName } = params;
 
   return {
-    createUploadUrl: async (visitScheduleId) => {
-      const s3Key = `${visitAudioKeyPrefix(visitScheduleId)}${uuidv7()}.m4a`;
+    createUploadUrl: async (keyPrefix) => {
+      const s3Key = `${keyPrefix}${uuidv7()}.m4a`;
       const uploadUrl = await getSignedUrl(
         s3Client,
         new PutObjectCommand({

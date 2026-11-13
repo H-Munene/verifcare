@@ -918,6 +918,7 @@ describe.skipIf(!hasTestDb)(
             .insert(schema.audioRecords)
             .values({
               verificationEventId: visit.id,
+              role: 'dependant',
               s3Key: `${visit.id}/clip.m4a`,
               durationSeconds: 30,
             });

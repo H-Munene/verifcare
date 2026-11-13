@@ -262,6 +262,7 @@ async function main() {
 
   await db.insert(schema.audioRecords).values({
     verificationEventId: completedVisit!.id,
+    role: 'dependant',
     s3Key: placeholderS3Key(`visit-audio/${completedVisit!.id}`),
     durationSeconds: 30,
     uploadedAt: daysFromNow(-3, 9, 58),

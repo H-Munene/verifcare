@@ -585,6 +585,7 @@ export async function consentRegister(db: Db, now: Date): Promise<ConsentRegiste
   const consentsOf = (subjectId: string): Record<ConsentType, ConsentState> => ({
     location_verification: latest.get(`${subjectId}:location_verification`) ?? NO_CONSENT,
     visit_audio: latest.get(`${subjectId}:visit_audio`) ?? NO_CONSENT,
+    voice_verification: latest.get(`${subjectId}:voice_verification`) ?? NO_CONSENT,
   });
   const hasLocationConsent = (subjectId: string) =>
     latest.get(`${subjectId}:location_verification`)?.status === 'active';
