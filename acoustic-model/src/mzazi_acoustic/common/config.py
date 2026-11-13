@@ -5,6 +5,7 @@ Constants that PLAN.md says must be fixed before looking at class labels
 Changing one of those later needs a dated entry in docs/ml-dev-log.md.
 """
 
+import os
 from pathlib import Path
 
 # paths
@@ -324,6 +325,26 @@ LIBRISPEECH_SUBSETS = ("dev-clean", "test-clean", "train-clean-100")
 SV_TEST_MARKER = SV_RESULTS / "sv_test_set_used.json"
 # Development datasets never judge a target, so they can't use up the once-only test set.
 SV_DEV_DATASETS = {"librispeech"}
+# AfriVoices-KE, gated on Hugging Face. Access and terms accepted by the developer, 2026-11-12.
+# Revisions are pinned so an upstream change can't alter the data.
+AFRIVOICES_DIR = DATA_DIR / "afrivoices"
+AFRIVOICES_REPOS = {
+    "Dholuo": ("Anv-ke/Dholuo", "a67114370d8c8a563e710f98c0b77ab8ad6c8e12"),
+    "Kikuyu": ("Anv-ke/kikuyu", "b0e2cd2b0aef5de69813455ef62134e23678c3e0"),
+    "Kalenjin": ("Anv-ke/Kalenjin", "90f1ba8dd37c814ec63711e7512fd14303a92c2d"),
+    "Maasai": ("Anv-ke/Maasai", "1859a22c2f2ea0fd97d3150972e64682da179653"),
+}
+AFRIVOICES_TYPE = "unscripted"  # spontaneous speech, the closest to a visit
+AFRIVOICES_SPLITS = ("dev", "dev_test")  # every speaker
+AFRIVOICES_OLDER_SPLIT, AFRIVOICES_OLDER_AGE = "train", "51+"  # only these speakers, as an older-voice group
+AFRIVOICES_TIMEZONE = "Africa/Nairobi"  # a recording's day, from the millisecond timestamp in its file name
+# Raw audio kept from each of a speaker's two chosen days. Generous, because silence is removed later.
+AFRIVOICES_KEEP_SECONDS = 90.0
+# Which dataset the SV scripts run on, set in the environment: SV_DATASET=afrivoices.
+SV_DATASET = os.environ.get("SV_DATASET", "librispeech")
+SV_DATASET_DIR = SV_DATA_DIR / SV_DATASET  # manifest, speakers, visit plan, speech pools and scores
+SV_DATASET_RESULTS = SV_DEV_RESULTS if SV_DATASET in SV_DEV_DATASETS else SV_RESULTS / SV_DATASET
+SV_AUDIO_DIR = {"librispeech": LIBRISPEECH_DIR, "afrivoices": AFRIVOICES_DIR / "audio"}[SV_DATASET]
 # Apache-2.0, trained on VoxCeleb, never fine-tuned. Pinned so an upstream change can't alter scores.
 SV_MODEL_NAME = "speechbrain/spkrec-ecapa-voxceleb"
 SV_MODEL_REVISION = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
@@ -331,37 +352,36 @@ SV_SAMPLE_RATE = TARGET_SAMPLE_RATE
 SV_TORCH_THREADS = EMBEDDING_TORCH_THREADS
 # Silero VAD's default speech probability threshold, fixed and never tuned against results.
 SV_VAD_THRESHOLD = 0.5
-SV_WINDOW_SECONDS = 1.5
-SV_HOP_SECONDS = 0.75
-SV_MIN_WINDOW_SPEECH_SHARE = 0.5  # windows that are mostly silence say nothing about who is speaking
 SV_ENROL_SECONDS = 30.0
 SV_ENROL_VARIANT_SECONDS = (10.0, 20.0, 30.0)
 SV_TEST_SECONDS = (3.0, 5.0, 10.0, 30.0)
+SV_TRIAL_REPORT_SECONDS = 30.0  # trial results are reported at this length, the plan's clean 30-second check
 SV_TRIAL_TEST_POOL_SECONDS = 45.0  # speech kept per test recording
-SV_VISIT_SECONDS = 30.0  # the caregiver app's recording cap
-SV_VISIT_SPEECH_SHARE = 0.85  # the rest is gaps between turns
-SV_TURN_SECONDS = (2.0, 6.0)
-SV_GAP_SECONDS = (0.2, 0.6)
-SV_LEVEL_DB = 3.0  # each speaker's random level offset, standing in for distance from the phone
-SV_DEPENDANT_SHARE = 0.4  # share of the speech in a two-person visit, primary setting
+# A visit is two recordings, the caregiver first and then the dependant, each at least this long
+# (decided by the developer 2026-11-12). Each is checked against one enrolled voiceprint.
+SV_CLIP_SECONDS = 10.0
+SV_CLIP_SPEECH_SHARE = 0.85  # the rest of a recording is pauses, so a simulated clip holds this much speech
+SV_CLIP_SPEECH_SECONDS = SV_CLIP_SECONDS * SV_CLIP_SPEECH_SHARE
+# Proposed at Gate 1: a clip with less speech than this is "too short" and goes to a supervisor.
+SV_MIN_CLIP_SPEECH_SECONDS = 5.0
 SV_CALIBRATION_SHARE = 0.5  # of speakers
 # Development run only: about 4.5 s per recording on this CPU makes all pairs take hours, and this
 # run proves the code rather than judging a target. A real evaluation uses every pair.
 SV_DEV_MAX_PAIRS = 40
-# Primary setting and variations, fixed in results/speaker_verification/00_framing.md before any run.
-# (name, noise_type, snr_db, dependant_share, enrol_seconds, overlap_seconds)
-SV_PRIMARY_CONDITION = ("primary", "pink", 20.0, SV_DEPENDANT_SHARE, 30.0, 0.0)
+# Primary setting and variations, to be fixed in results/speaker_verification/00_framing.md at Gate 1.
+# (name, noise_type, snr_db, clip_speech_seconds, enrol_seconds)
+SV_PRIMARY_CONDITION = ("primary", "pink", 20.0, SV_CLIP_SPEECH_SECONDS, 30.0)
 SV_VARIANT_CONDITIONS = [
-    ("clean", None, None, SV_DEPENDANT_SHARE, 30.0, 0.0),
-    ("enrol_10s", "pink", 20.0, SV_DEPENDANT_SHARE, 10.0, 0.0),
-    ("dependant_20pct", "pink", 20.0, 0.2, 30.0, 0.0),
-    ("dependant_60pct", "pink", 20.0, 0.6, 30.0, 0.0),
-    ("overlap", "pink", 20.0, SV_DEPENDANT_SHARE, 30.0, 0.3),
+    ("clean", None, None, SV_CLIP_SPEECH_SECONDS, 30.0),
+    ("enrol_10s", "pink", 20.0, SV_CLIP_SPEECH_SECONDS, 10.0),
+    ("clip_5s", "pink", 20.0, SV_MIN_CLIP_SPEECH_SECONDS, 30.0),
+    ("clip_20s", "pink", 20.0, 20.0 * SV_CLIP_SPEECH_SHARE, 30.0),
 ]
 SV_TARGET_FALSE_ACCEPT = 0.10  # set by the developer 2026-11-09 with the supervisor's agreement (was 0.01)
 SV_TARGET_FALSE_REJECT = 0.05  # proposed at Gate 1
+# The visit rule SV4 froze on real calibration speakers, copied here from 04_calibration.json by the
+# developer. Until it is set, test speakers are not scored. Never set from development data.
+SV_FROZEN_RULE = {"threshold": 0.5, "min_clip_speech_seconds": 5.0}  # SV4, AfriVoices-KE calibration, frozen 2026-11-13
 SV_DCF_P_TARGET = 0.01
 SV_BOOTSTRAP_RESAMPLES = 1000
-SV_LABEL_MARGIN = 0.05  # a window this close between the two enrolled voices is labelled unknown
 SV_THRESHOLD_GRID = tuple(round(0.10 + 0.025 * i, 3) for i in range(25))  # cosine 0.10 to 0.70
-SV_SECONDS_GRID = (0.75, 1.5, 3.0, 5.0, 8.0)  # candidates for the X and Y rules

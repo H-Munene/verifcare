@@ -1,4 +1,4 @@
-"""Charts of the speaker verification results, with a CSV of each chart's numbers. Development data only.
+"""Charts of the speaker verification results, with a CSV of each chart's numbers.
 
 Run after sv_05_evaluate.py, in the main venv, which has matplotlib.
 """
@@ -17,25 +17,29 @@ from sklearn.metrics import roc_curve
 
 from mzazi_acoustic.common import config
 from mzazi_acoustic.speaker_verification import decide, metrics, visits_io
-from sv_05_evaluate import visit_outcomes
+from sv_05_evaluate import DEVELOPMENT, frozen_rule, visit_outcomes
 
-OUT = config.SV_DEV_RESULTS / "figures"
-LENGTH = config.SV_VISIT_SECONDS
+OUT = config.SV_DATASET_RESULTS / "figures"
+LENGTH = config.SV_TRIAL_REPORT_SECONDS
 SURFACE, INK, SECONDARY, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 BLUE, ORANGE = "#2a78d6", "#eb6834"
-NOTE = "LibriSpeech (English audiobooks), development data only. Says nothing about Mzazi Care users."
+NOTE = ("LibriSpeech (English audiobooks), development data only. Says nothing about Mzazi Care users." if DEVELOPMENT else
+        "AfriVoices-KE test speakers (Dholuo, Kalenjin, Kikuyu, Maasai), scored once. Simulated visits, simulated noise.")
 SCENARIO_LABELS = {decide.GENUINE: "Both present\n(wrongly rejected)", "caregiver_alone": "Caregiver alone\n(wrongly accepted)",
                    "different_dependant": "Different dependant\n(wrongly accepted)",
                    "different_caregiver": "Different caregiver\n(wrongly accepted)"}
 CONDITION_LABELS = {"primary": "Primary setting", "clean": "Clean audio", "enrol_10s": "10 s enrolment",
-                    "dependant_20pct": "Dependant 20% of speech", "dependant_60pct": "Dependant 60% of speech",
-                    "overlap": "Overlapping speech"}
+                    "clip_5s": "5 s of speech per recording", "clip_20s": "20 s recordings"}
+
+ABOUT = ("**Development data only.** LibriSpeech is English audiobook reading in clean conditions.\n"
+         "These charts show how the pipeline behaves. They say nothing about Kenyan languages, phones in homes, older voices or real conversations, and judge no target.\n"
+         if DEVELOPMENT else
+         "**AfriVoices-KE test speakers, scored once** with the rule frozen at SV4 (`06_threshold_tradeoff` uses calibration speakers).\n"
+         "Kenyan-language smartphone speech, mostly from people aged 18 to 40. `05_evaluation.md` holds the verdict against the targets.\n")
 
 GUIDE = """# Speaker verification figures
 
-**Development data only.** LibriSpeech is English audiobook reading in clean conditions.
-These charts show how the pipeline behaves. They say nothing about Kenyan languages, phones in homes, older voices or real conversations, and judge no target.
-Each PNG has a CSV of the same name holding its numbers.
+""" + ABOUT + """Each PNG has a CSV of the same name holding its numbers.
 
 | Figure | What it shows |
 |---|---|
@@ -43,11 +47,11 @@ Each PNG has a CSV of the same name holding its numbers.
 | `02_det_curve` | The trade-off between false accepts and false rejects. Lower left is better |
 | `03_error_by_speech_length` | Equal error rate at 3, 5, 10 and 30 seconds of speech |
 | `04_visit_errors_by_scenario` | How often simulated visits were decided wrongly, for each fraud scenario |
-| `05_robustness_by_condition` | The same errors under noise, shorter enrolment, different speech shares and overlap |
+| `05_robustness_by_condition` | The same errors under noise, shorter enrolment, and shorter or longer recordings |
 | `06_threshold_tradeoff` | How the two kinds of error move with the match threshold, on calibration speakers |
-| `07_speech_heard` | How much speech was matched to each enrolled person, or left unknown |
+| `07_recording_scores` | Each recording's similarity to the voice it claims, in each kind of visit |
 
-Visits are simulated by joining single-speaker clips, so they are not real conversations.
+Each visit is two recordings, the caregiver's then the dependant's, cut from single-speaker audio, not recorded on a visit.
 Replay is not tested here.
 """
 
@@ -223,7 +227,7 @@ def robustness(all_outcomes):
 def threshold_tradeoff(calibration, rule):
     rows = []
     for threshold in config.SV_THRESHOLD_GRID:
-        rates = decide.error_rates(calibration, threshold, rule["caregiver_seconds"], rule["dependant_seconds"])
+        rates = decide.error_rates(calibration, threshold)
         rows.append({"threshold": threshold, "false_reject": rates["false_reject"], "worst_false_accept": max(rates["false_accept"].values())})
     table = pd.DataFrame(rows)
     fig, axes = figure("Choosing the match threshold on calibration speakers")
@@ -235,37 +239,44 @@ def threshold_tradeoff(calibration, rule):
     ax.annotate(f"Chosen: {rule['threshold']:g}", (rule["threshold"], 0.5), xycoords=("data", "axes fraction"), xytext=(-6 if on_right else 6, 0),
                 textcoords="offset points", ha="right" if on_right else "left", va="center", color=INK)
     ax.set_ylim(0, 1.02)
-    ax.set_xlabel(f"Cosine threshold, with rule: caregiver {rule['caregiver_seconds']:g} s, dependant {rule['dependant_seconds']:g} s")
+    ax.set_xlabel("Cosine threshold that both recordings must reach")
     ax.set_ylabel("Share of visits")
     percent_axis(ax.yaxis)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.13), ncols=2)
     save(fig, "06_threshold_tradeoff", table)
 
 
-def speech_heard(outcomes):
-    means = outcomes.groupby("scenario")[["caregiver_seconds", "dependant_seconds", "unknown_seconds"]].mean().loc[list(decide.SCENARIOS)]
-    fig, axes = figure("What the model heard in each kind of simulated visit", left=0.24)
-    ax = axes[0]
-    y = np.arange(len(means))[::-1]
-    start = np.zeros(len(means))
-    for column, colour, name, ink in (("caregiver_seconds", BLUE, "Matched enrolled caregiver", "#ffffff"), ("dependant_seconds", ORANGE, "Matched enrolled dependant", "#ffffff"), ("unknown_seconds", AXIS, "Unknown", INK)):
-        ax.barh(y, means[column], left=start, height=0.42, color=colour, edgecolor=SURFACE, linewidth=2, label=name)
-        for position, offset, value in zip(y, start, means[column]):
-            if value >= 2.5:
-                ax.text(offset + value / 2, position, f"{value:.0f}", ha="center", va="center", color=ink, fontsize=9)
-        start += means[column].to_numpy()
-    ax.set_yticks(y, [SCENARIO_LABELS[s].split("\n")[0] for s in means.index])
-    ax.grid(axis="y", visible=False)
-    ax.set_xlabel("Approximate mean seconds of speech per visit, primary setting")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.13), ncols=3, handlelength=1, columnspacing=1.4)
-    save(fig, "07_speech_heard", means.reset_index())
+def recording_scores(outcomes, rule):
+    """Each recording's score against the voice it claims, by scenario. A fraud shows up as one low score."""
+    fig, axes = figure("How well each recording matched the voice it claims", panels=2, sharey=True, left=0.24)
+    rows = []
+    y = np.arange(len(decide.SCENARIOS))[::-1]
+    for ax, role, title in zip(axes, ("caregiver", "dependant"), ("Caregiver's recording", "Dependant's recording")):
+        for position, scenario in zip(y, decide.SCENARIOS):
+            values = outcomes.loc[outcomes["scenario"] == scenario, f"{role}_score"].dropna().to_numpy()
+            jitter = np.random.default_rng(config.SEED).uniform(-0.12, 0.12, len(values))
+            ax.scatter(values, position + jitter, s=14, color=BLUE, alpha=0.55, linewidths=0)
+            rows += [{"scenario": scenario, "recording": role, "score": value} for value in values]
+        ax.axvline(rule["threshold"], color=SECONDARY, linewidth=1)
+        ax.set_title(title, loc="left", fontsize=10.5, color=INK)
+        ax.set_xlabel(f"Cosine similarity (line: threshold {rule['threshold']:g})")
+        ax.grid(axis="y", visible=False)
+    axes[0].set_yticks(y, [SCENARIO_LABELS[s].split("\n")[0] for s in decide.SCENARIOS])
+    save(fig, "07_recording_scores", pd.DataFrame(rows))
+
+
+def require_gate():
+    """Real test speakers are looked at only after sv_05 has claimed the test set, so nothing gets round it."""
+    if not DEVELOPMENT and not config.SV_TEST_MARKER.exists():
+        raise SystemExit("Run sv_05_evaluate.py first: it scores the test speakers once and claims the test set")
 
 
 def main():
+    require_gate()
     OUT.mkdir(parents=True, exist_ok=True)
-    rule = json.loads((config.SV_DEV_RESULTS / "04_calibration.json").read_text(encoding="utf-8"))
-    plan = pd.read_csv(config.SV_DATA_DIR / "librispeech_visits.csv")
-    scores = pd.read_csv(config.SV_DATA_DIR / "trial_scores.csv")
+    rule = frozen_rule()
+    plan = pd.read_csv(config.SV_DATASET_DIR / "visits.csv")
+    scores = pd.read_csv(config.SV_DATASET_DIR / "trial_scores.csv")
     scores = scores[scores["split"] == "holdout"]
     conditions = [config.SV_PRIMARY_CONDITION, *config.SV_VARIANT_CONDITIONS]
     outcomes = {c[0]: visit_outcomes(visits_io.load("holdout", c[0], plan), rule) for c in conditions}
@@ -276,7 +287,7 @@ def main():
     visit_errors(outcomes["primary"])
     robustness(outcomes)
     threshold_tradeoff(visits_io.load("calibration", "primary", plan), rule)
-    speech_heard(outcomes["primary"])
+    recording_scores(outcomes["primary"], rule)
     (OUT / "README.md").write_text(GUIDE, encoding="utf-8")
     print("wrote", OUT)
 

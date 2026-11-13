@@ -1,4 +1,4 @@
-"""SV2: speech pools, speaker split and visit plan. Development data only."""
+"""SV2: speech pools, speaker split and visit plan, for the dataset named by config.SV_DATASET."""
 
 import numpy as np
 import pandas as pd
@@ -8,8 +8,8 @@ from mzazi_acoustic.common import config
 from mzazi_acoustic.speaker_verification import trials
 from mzazi_acoustic.speaker_verification.vad import Vad
 
-OUT = config.SV_DEV_RESULTS
-DATA = config.SV_DATA_DIR
+OUT = config.SV_DATASET_RESULTS
+DATA = config.SV_DATASET_DIR
 POOLS = DATA / "speech"
 # More raw audio than the speech needed, because silence is removed afterwards.
 RAW_ALLOWANCE = 1.3
@@ -26,6 +26,7 @@ def choose_recordings(manifest):
         enrol = chapters.index[0]
         test = chapters.index[1] if eligible else chapters.index[0]
         rows.append({"speaker": speaker, "sex": group["sex"].iloc[0], "eligible": eligible,
+                     **{column: group[column].iloc[0] for column in ("language", "group") if column in group},
                      "enrol_recording": f"{speaker}_{enrol}", "test_recording": f"{speaker}_{test}",
                      "enrol_chapter": enrol, "test_chapter": test})
     return pd.DataFrame(rows)
@@ -36,7 +37,8 @@ def speech_pool(paths, seconds, vad):
     pieces, have = [], 0
     needed = round(seconds * config.SV_SAMPLE_RATE)
     for path in paths:
-        y, _ = sf.read(config.LIBRISPEECH_DIR / path, dtype="float32")
+        y, sr = sf.read(config.SV_AUDIO_DIR / path, dtype="float32")
+        assert sr == config.SV_SAMPLE_RATE, f"{path} is {sr} Hz, expected {config.SV_SAMPLE_RATE}"
         speech = y[vad.speech_mask(y)]
         pieces.append(speech)
         have += len(speech)
@@ -50,7 +52,10 @@ def save_pool(name, pool):
 
 
 def main():
-    manifest = pd.read_csv(DATA / "librispeech_manifest.csv", dtype={"speaker": str, "chapter": str})
+    manifest = pd.read_csv(DATA / "manifest.csv", dtype={"speaker": str, "chapter": str})
+    # Strangers are matched by sex, so a speaker whose sex isn't recorded can't take part.
+    unknown_sex = manifest.loc[~manifest["sex"].isin(["F", "M"]), "speaker"].nunique()
+    manifest = manifest[manifest["sex"].isin(["F", "M"])]
     POOLS.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
     table = choose_recordings(manifest)
@@ -71,26 +76,36 @@ def main():
             save_pool(f"{row.speaker}_enrol", speech_pool(enrol_paths, config.SV_ENROL_SECONDS, vad))
         usable_pool.append(len(np.load(POOLS / target, mmap_mode="r")) / config.SV_SAMPLE_RATE)
     table["test_pool_seconds"] = usable_pool
-    # Someone whose speech ran short can't supply the longest test segment, so they only act as a stranger.
-    table["eligible"] &= table["test_pool_seconds"] >= config.SV_TEST_SECONDS[-1]
-    table = table[table["test_pool_seconds"] >= config.SV_TEST_SECONDS[-1] / 2].reset_index(drop=True)
-    table.to_csv(DATA / "librispeech_speakers.csv", index=False)
+    # Everyone in a visit needs two separate recordings' worth of test speech, since a stranger can take
+    # either slot. Someone short of the longest trial segment only acts as a stranger.
+    two_clips = 2 * trials.longest_clip_speech()
+    table["eligible"] &= table["test_pool_seconds"] >= max(config.SV_TEST_SECONDS[-1], two_clips)
+    too_short = int((table["test_pool_seconds"] < two_clips).sum())
+    table = table[table["test_pool_seconds"] >= two_clips].reset_index(drop=True)
+    table.to_csv(DATA / "speakers.csv", index=False)
 
+    development = config.SV_DATASET in config.SV_DEV_DATASETS
     plans = []
     for split, group in table.groupby("split"):
         plan = trials.plan_visits(group)
-        plan = plan[plan["pair"] < config.SV_DEV_MAX_PAIRS]
+        if development:  # a real evaluation uses every pair
+            plan = plan[plan["pair"] < config.SV_DEV_MAX_PAIRS]
         plan.insert(0, "split", split)
         plans.append(plan)
     plan = pd.concat(plans, ignore_index=True)
-    plan.to_csv(DATA / "librispeech_visits.csv", index=False)
+    plan.to_csv(DATA / "visits.csv", index=False)
 
-    counts = table.groupby(["split", "sex"]).agg(speakers=("speaker", "count"), eligible=("eligible", "sum"))
+    strata = [column for column in ("split", "language", "group", "sex") if column in table]
+    counts = table.groupby(strata).agg(speakers=("speaker", "count"), eligible=("eligible", "sum"))
     visits = plan.groupby(["split", "scenario"]).size().unstack()
-    lines = ["# SV2 processing: LibriSpeech", "", "**Development data only. Judges no target.**", "",
+    recording = "chapters" if config.SV_DATASET == "librispeech" else "days"
+    lines = [f"# SV2 processing: {config.SV_DATASET}", "",
+             "**Development data only. Judges no target.**" if development else "**Split for Gate 3a. No scores exist yet.**", "",
              counts.to_markdown(), "", "Simulated visits per condition:", "", visits.to_markdown(), "",
-             "Enrolment and test audio come from different chapters, checked by `assert_different_recordings`.",
-             "Speakers who are not eligible act only as strangers.", ""]
+             f"Enrolment and test audio come from different {recording}, checked by `assert_different_recordings`.",
+             "Speakers who are not eligible act only as strangers.",
+             f"Speakers left out because their sex isn't recorded: {unknown_sex}.",
+             f"Speakers left out with under {two_clips:.0f} s of test speech, too little for two clips: {too_short}.", ""]
     (OUT / "02_processing.md").write_text("\n".join(lines), encoding="utf-8")
     print("\n".join(lines))
 

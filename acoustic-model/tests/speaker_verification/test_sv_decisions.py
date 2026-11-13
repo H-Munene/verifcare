@@ -1,76 +1,82 @@
-"""Window labelling, the visit decision, calibration and metrics."""
+"""The clip check, the visit decision, calibration and metrics."""
 
 import numpy as np
 import pytest
 
 from mzazi_acoustic.common import config
-from mzazi_acoustic.speaker_verification import decide, metrics, segment
+from mzazi_acoustic.speaker_verification import decide, metrics, verify
 
 SR = config.SV_SAMPLE_RATE
-HOP = config.SV_HOP_SECONDS
+ENOUGH = config.SV_MIN_CLIP_SPEECH_SECONDS
 
 
-def test_only_mostly_speech_windows_are_kept():
-    y = np.ones(SR * 6, dtype=np.float32)
-    mask = np.zeros(len(y), dtype=bool)
-    mask[:SR * 3] = True
-    starts, windows = segment.speech_windows(y, mask)
-    assert len(windows) == len(starts) > 0
-    assert (starts / SR <= 3 - config.SV_WINDOW_SECONDS * config.SV_MIN_WINDOW_SPEECH_SHARE + 1e-9).all()
-    assert windows.shape[1] == round(config.SV_WINDOW_SECONDS * SR)
+class HalfSpeech:
+    """A stand-in VAD that hears speech in the first half of any recording."""
+
+    def speech_mask(self, y):
+        mask = np.zeros(len(y), dtype=bool)
+        mask[:len(y) // 2] = True
+        return mask
 
 
-def test_a_recording_with_no_speech_gives_no_windows():
-    y = np.ones(SR * 3, dtype=np.float32)
-    assert len(segment.speech_windows(y, np.zeros(len(y), dtype=bool))[1]) == 0
+class FixedVoice:
+    def __init__(self):
+        self.calls = 0
+
+    def embed(self, y):
+        self.calls += 1
+        return np.array([1.0, 0.0], dtype=np.float32)
 
 
-def test_a_recording_shorter_than_a_window_gives_no_windows():
-    y = np.ones(SR // 2, dtype=np.float32)
-    assert len(segment.speech_windows(y, np.ones(len(y), dtype=bool))[1]) == 0
+def test_a_clip_is_scored_on_its_speech_only():
+    embedder = FixedVoice()
+    score, seconds = verify.score_clip(np.ones(SR * 12, dtype=np.float32), HalfSpeech(), embedder, np.array([0.6, 0.8]))
+    assert seconds == 6.0 and score == pytest.approx(0.6) and embedder.calls == 1
 
 
-def test_windows_go_to_the_clear_match_otherwise_unknown():
-    labels = segment.label_windows([0.8, 0.1, 0.1, 0.60], [0.1, 0.8, 0.1, 0.58], threshold=0.5, margin=0.05)
-    assert list(labels) == [segment.CAREGIVER, segment.DEPENDANT, segment.UNKNOWN, segment.UNKNOWN]
+def test_a_clip_with_too_little_speech_is_not_embedded():
+    embedder = FixedVoice()
+    score, seconds = verify.score_clip(np.ones(SR * 4, dtype=np.float32), HalfSpeech(), embedder, np.array([1.0, 0.0]))
+    assert np.isnan(score) and seconds == 2.0 and embedder.calls == 0
 
 
-def test_a_visit_passes_only_when_both_voices_are_heard_for_long_enough():
-    both = [segment.CAREGIVER] * 8 + [segment.DEPENDANT] * 4
-    assert decide.decide(both, 3 * HOP, 4 * HOP)["passed"] is True
-    result = decide.decide(both, 3 * HOP, 5 * HOP)
-    assert (result["caregiver_present"], result["dependant_present"], result["passed"]) == (True, False, False)
+def test_a_clip_is_a_match_mismatch_or_too_short():
+    assert decide.check_clip(0.6, ENOUGH, 0.5) == decide.MATCH
+    assert decide.check_clip(0.4, ENOUGH, 0.5) == decide.MISMATCH
+    assert decide.check_clip(0.9, ENOUGH - 0.1, 0.5) == decide.TOO_SHORT
+    assert decide.check_clip(float("nan"), ENOUGH, 0.5) == decide.TOO_SHORT
 
 
-def test_unknown_speech_is_counted():
-    result = decide.decide([segment.UNKNOWN] * 4, HOP, HOP)
-    assert result["unknown_seconds"] == 4 * HOP and result["passed"] is False
+def test_a_visit_passes_only_when_both_recordings_match():
+    assert decide.decide(0.8, ENOUGH, 0.7, ENOUGH, 0.5)["passed"] is True
+    result = decide.decide(0.8, ENOUGH, 0.2, ENOUGH, 0.5)
+    assert (result["caregiver"], result["dependant"], result["passed"]) == (decide.MATCH, decide.MISMATCH, False)
+    assert decide.decide(0.8, ENOUGH, 0.9, 1.0, 0.5)["passed"] is False
 
 
 def visit(scenario, caregiver, dependant):
-    return {"scenario": scenario, "caregiver_scores": np.array(caregiver), "dependant_scores": np.array(dependant)}
+    return {"scenario": scenario, "caregiver_score": caregiver, "caregiver_speech": ENOUGH,
+            "dependant_score": dependant, "dependant_speech": ENOUGH}
 
 
 def separable_visits():
-    high, low = [0.8] * 12, [0.0] * 12
-    return [visit(decide.GENUINE, high + low, low + high), visit("caregiver_alone", high + low, low + low),
-            visit("different_dependant", high + low, low + low), visit("different_caregiver", low + low, low + high)]
+    return [visit(decide.GENUINE, 0.8, 0.8), visit("caregiver_alone", 0.8, 0.1),
+            visit("different_dependant", 0.8, 0.1), visit("different_caregiver", 0.1, 0.8)]
 
 
 def test_error_rates_count_each_scenario_separately():
-    rates = decide.error_rates(separable_visits(), 0.5, HOP, HOP)
+    rates = decide.error_rates(separable_visits(), 0.5)
     assert rates["false_reject"] == 0
     assert set(rates["false_accept"].values()) == {0.0}
 
 
-def test_calibration_finds_a_rule_that_meets_the_target():
+def test_calibration_finds_a_threshold_that_meets_the_target():
     rule = decide.calibrate(separable_visits())
     assert rule["met_target"] is True and rule["false_reject"] == 0
 
 
 def test_calibration_says_so_when_nothing_meets_the_target():
-    high = [0.9] * 24
-    visits = [visit(name, high[:12] + [0.0] * 12, [0.0] * 12 + high[:12]) for name in decide.SCENARIOS]
+    visits = [visit(name, 0.9, 0.9) for name in decide.SCENARIOS]
     assert decide.calibrate(visits)["met_target"] is False
 
 

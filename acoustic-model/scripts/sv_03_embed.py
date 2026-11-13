@@ -1,4 +1,4 @@
-"""SV3: voiceprints, trial scores and window scores for every simulated visit. Development data only.
+"""SV3: voiceprints, trial scores and both clip scores for every simulated visit, for config.SV_DATASET.
 
 Everything is cached under the git-ignored data folder, so an interrupted run resumes. These are
 voiceprints: delete data/speaker_verification once results are final.
@@ -6,19 +6,28 @@ voiceprints: delete data/speaker_verification once results are final.
 
 import json
 import time
+import zlib
 
 import numpy as np
 import pandas as pd
 
 from mzazi_acoustic.common import config, degradation
-from mzazi_acoustic.speaker_verification import embed, enrol, segment, trials
+from mzazi_acoustic.speaker_verification import embed, enrol, metrics, trials, verify
 from mzazi_acoustic.speaker_verification.vad import Vad
 
-OUT = config.SV_DEV_RESULTS
-DATA = config.SV_DATA_DIR
+OUT = config.SV_DATASET_RESULTS
+DATA = config.SV_DATASET_DIR
 POOLS = DATA / "speech"
 VISITS = DATA / "visit_scores"
 SR = config.SV_SAMPLE_RATE
+
+
+PEOPLE = ("caregiver", "dependant", "first", "second")
+
+
+def speaker_seed(speaker):
+    """A stable number per speaker, since AfriVoices IDs aren't numbers."""
+    return zlib.crc32(str(speaker).encode())
 
 
 def pool(speaker, kind):
@@ -53,63 +62,96 @@ def conditioned(y, noise, snr, rng):
 
 
 def visit_scores(split, plan, condition, condition_index, embedder, vad):
-    """Window scores for one condition's visits. Each visit's randomness depends only on its identity."""
-    name, noise, snr, share, enrol_seconds, overlap = condition
+    """Both clip scores for one condition's visits. Each visit's randomness depends only on its identity.
+
+    The caregiver's recording is checked against the enrolled caregiver and the dependant's against
+    the enrolled dependant, through the same VAD-then-embed path a real recording would take.
+    """
+    name, noise, snr, clip_seconds, enrol_seconds = condition
     target = VISITS / f"{split}_{name}.npz"
     if target.exists():
         return None
     enrolled = {}
-    timings, caregiver_scores, dependant_scores, lengths = [], [], [], []
+    timings, scores = [], {"caregiver": [], "caregiver_speech": [], "dependant": [], "dependant_speech": []}
 
     def voiceprint(speaker):
         if speaker not in enrolled:
-            rng = np.random.default_rng([config.SEED, int(speaker), condition_index])
+            rng = np.random.default_rng([config.SEED, speaker_seed(speaker), condition_index])
             enrolled[speaker] = embedder.embed(conditioned(seconds(pool(speaker, "enrol"), enrol_seconds), noise, snr, rng))
         return enrolled[speaker]
 
     for visit_number, row in enumerate(plan.itertuples()):
         rng = np.random.default_rng([config.SEED, condition_index, int(row.pair), visit_number])
-        second = None if pd.isna(row.second) else pool(str(int(row.second)), "test")
-        audio, _ = trials.compose_visit(pool(str(int(row.first)), "test"), second, share, rng, overlap_seconds=overlap)
-        audio = conditioned(audio, noise, snr, rng)
+        recordings = (("caregiver", row.first, row.caregiver), ("dependant", row.second, row.dependant))
+        clips = [conditioned(trials.clip_from_pool(pool(speaker, "test"), slot, clip_seconds), noise, snr, rng)
+                 for slot, (_, speaker, _) in enumerate(recordings)]
         started = time.perf_counter()
-        mask = vad.speech_mask(audio)
-        caregiver, dependant = segment.score_windows(audio, mask, embedder, voiceprint(str(int(row.caregiver))),
-                                                     voiceprint(str(int(row.dependant))))
+        for (role, _, claimed), clip in zip(recordings, clips):
+            score, speech = verify.score_clip(clip, vad, embedder, voiceprint(claimed))
+            scores[role].append(score)
+            scores[f"{role}_speech"].append(speech)
         timings.append(time.perf_counter() - started)
-        caregiver_scores.append(caregiver)
-        dependant_scores.append(dependant)
-        lengths.append(len(caregiver))
     VISITS.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(target, caregiver=np.concatenate(caregiver_scores), dependant=np.concatenate(dependant_scores),
-                        lengths=np.array(lengths), seconds_per_visit=np.array(timings))
+    np.savez_compressed(target, **{key: np.array(values) for key, values in scores.items()},
+                        seconds_per_visit=np.array(timings))
     return float(np.median(timings))
 
 
+def embeddings_report(scores, holdout_open):
+    """03_embeddings.md for Gate 3: E1 against B0 on calibration speakers only."""
+    calibration = scores[scores["split"] == "calibration"]
+    rows = []
+    for length, group in calibration.groupby("test_seconds"):
+        row = {"test seconds": f"{length:g}", "target trials": int(group["label"].sum()),
+               "impostor trials": int((group["label"] == 0).sum())}
+        for model in ("e1", "b0"):
+            row[f"{model.upper()} EER"] = f"{metrics.equal_error_rate(group['label'], group[model])[0]:.3f}"
+            row[f"{model.upper()} minDCF"] = f"{metrics.min_dcf(group['label'], group[model]):.3f}"
+        rows.append(row)
+    lines = [f"# SV3 voiceprints: {config.SV_DATASET}", "",
+             "Calibration speakers only. Clean audio, enrolment from a different day to the test audio.", "",
+             pd.DataFrame(rows).to_markdown(index=False), "",
+             f"E1 is `{config.SV_MODEL_NAME}` at revision `{config.SV_MODEL_REVISION[:8]}`, frozen. B0 is MFCC statistics.",
+             "Test speakers: " + ("scored." if holdout_open else "not scored. They wait until SV4 freezes the rule."), ""]
+    (OUT / "03_embeddings.md").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+
+
 def main():
-    speakers = pd.read_csv(DATA / "librispeech_speakers.csv", dtype={"speaker": str})
-    plan = pd.read_csv(DATA / "librispeech_visits.csv")
+    speakers = pd.read_csv(DATA / "speakers.csv", dtype={"speaker": str})
+    plan = pd.read_csv(DATA / "visits.csv", dtype={column: str for column in PEOPLE})
     embedder = embed.Embedder()
     vad = Vad()
     OUT.mkdir(parents=True, exist_ok=True)
 
+    # Real test speakers are scored only once SV4's rule is frozen in config.py, so no test score exists before then.
+    holdout_open = config.SV_DATASET in config.SV_DEV_DATASETS or config.SV_FROZEN_RULE is not None
+    splits = ["calibration", "holdout"] if holdout_open else ["calibration"]
+
     target = DATA / "trial_scores.csv"
-    if not target.exists():
-        frames = [trial_scores(group, embedder).assign(split=split) for split, group in speakers.groupby("split")]
+    done = pd.read_csv(target) if target.exists() else pd.DataFrame({"split": []})
+    frames = [done] + [trial_scores(speakers[speakers["split"] == split], embedder).assign(split=split)
+                       for split in splits if split not in set(done["split"])]
+    if len(frames) > 1:
         pd.concat(frames, ignore_index=True).to_csv(target, index=False)
+    embeddings_report(pd.read_csv(target), holdout_open)
 
     timing = {}
     conditions = {"calibration": [config.SV_PRIMARY_CONDITION],
                   "holdout": [config.SV_PRIMARY_CONDITION, *config.SV_VARIANT_CONDITIONS]}
     for split, wanted in conditions.items():
+        if split not in splits:
+            continue
         for condition in wanted:
             index = [config.SV_PRIMARY_CONDITION, *config.SV_VARIANT_CONDITIONS].index(condition)
             result = visit_scores(split, plan[plan["split"] == split], condition, index, embedder, vad)
             print(split, condition[0], result, flush=True)
             if result is not None:
                 timing[f"{split}/{condition[0]}"] = result
-    if timing:
-        (OUT / "03_timing.json").write_text(json.dumps(timing, indent=2), encoding="utf-8")
+    if timing:  # merged, so scoring the test speakers later keeps the calibration timings
+        path = OUT / "03_timing.json"
+        earlier = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        path.write_text(json.dumps({**earlier, **timing}, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

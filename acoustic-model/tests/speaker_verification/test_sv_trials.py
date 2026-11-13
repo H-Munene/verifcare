@@ -1,4 +1,4 @@
-"""Leakage guards and simulated visits: the parts that would quietly flatter the results if wrong."""
+"""Leakage guards and visit plans: the parts that would quietly flatter the results if wrong."""
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,7 @@ def test_every_visit_holds_the_intended_people():
         if row.scenario == decide.GENUINE:
             assert (row.first, row.second) == (row.caregiver, row.dependant)
         elif row.scenario == "caregiver_alone":
-            assert row.first == row.caregiver and pd.isna(row.second)
+            assert row.first == row.second == row.caregiver
         elif row.scenario == "different_dependant":
             assert row.first == row.caregiver and row.second not in (row.caregiver, row.dependant)
         else:
@@ -79,31 +79,16 @@ def test_pairs_are_independent():
     assert len(people) == len(set(people))
 
 
-def pools():
-    rng = np.random.default_rng(0)
-    return rng.standard_normal(SR * 45).astype(np.float32) * 0.1, rng.standard_normal(SR * 45).astype(np.float32) * 0.1
+def test_the_two_recordings_come_from_separate_parts_of_the_audio():
+    pool = np.arange(SR * 20, dtype=np.float32)
+    first, second = trials.clip_from_pool(pool, 0, 8.5), trials.clip_from_pool(pool, 1, 8.5)
+    assert len(first) == len(second) == round(8.5 * SR)
+    assert first[-1] < second[0]
 
 
-@pytest.mark.parametrize("share", [0.2, 0.4, 0.6])
-def test_simulated_visit_has_the_intended_shares_and_length(share):
-    first, second = pools()
-    audio, turns = trials.compose_visit(first, second, share, np.random.default_rng(1))
-    assert len(audio) == SR * config.SV_VISIT_SECONDS
-    assert {who for who, _, _ in turns} == {0, 1}
-    spoken = [sum(end - start for who, start, end in turns if who == person) for person in (0, 1)]
-    assert spoken[1] / sum(spoken) == pytest.approx(share, abs=0.03)
-
-
-def test_a_person_alone_produces_one_speaker():
-    first, _ = pools()
-    _, turns = trials.compose_visit(first, None, 0.4, np.random.default_rng(1))
-    assert {who for who, _, _ in turns} == {0}
-
-
-def test_overlap_makes_consecutive_turns_share_samples():
-    first, second = pools()
-    _, turns = trials.compose_visit(first, second, 0.4, np.random.default_rng(1), overlap_seconds=0.3)
-    assert any(later[1] < earlier[2] for earlier, later in zip(turns, turns[1:]))
+def test_too_little_audio_for_a_recording_is_refused():
+    with pytest.raises(ValueError):
+        trials.clip_from_pool(np.zeros(SR * 10, dtype=np.float32), 1, 8.5)
 
 
 def test_a_development_dataset_leaves_the_marker_unset(tmp_path):

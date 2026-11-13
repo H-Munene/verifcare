@@ -46,10 +46,10 @@ def manifest():
 
 def main():
     extract()
-    config.SV_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (config.SV_DATA_DIR / "librispeech").mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
     table = manifest()
-    table.to_csv(config.SV_DATA_DIR / "librispeech_manifest.csv", index=False)
+    table.to_csv(config.SV_DATA_DIR / "librispeech" / "manifest.csv", index=False)
     per_speaker = table.groupby("speaker").agg(sex=("sex", "first"), chapters=("chapter", "nunique"),
                                                minutes=("seconds", lambda s: s.sum() / 60))
     summary = table.groupby("subset").agg(speakers=("speaker", "nunique"), chapters=("chapter", "nunique"),

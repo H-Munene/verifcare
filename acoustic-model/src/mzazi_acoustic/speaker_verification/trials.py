@@ -1,4 +1,4 @@
-"""Evaluation only: speaker splits, leakage guards, trial lists and simulated visits."""
+"""Evaluation only: speaker splits, leakage guards, trial lists and visit plans."""
 
 import json
 from datetime import datetime
@@ -8,9 +8,6 @@ import pandas as pd
 
 from mzazi_acoustic.common import config
 from mzazi_acoustic.speaker_verification import decide
-
-MIN_TURN_SECONDS = 0.5
-TURN_RMS = 0.05
 
 
 def locked_people(splits_file=config.PROCESSING_RESULTS / "splits.csv"):
@@ -51,11 +48,12 @@ def claim_test_set(dataset, marker=config.SV_TEST_MARKER, development=config.SV_
 
 
 def speaker_split(speakers, seed=config.SEED, calibration_share=config.SV_CALIBRATION_SHARE):
-    """Divide speakers into calibration and holdout, keeping the same mix of sex and eligibility in each."""
+    """Divide speakers into calibration and holdout, keeping the same mix of language, group, sex and eligibility."""
     rng = np.random.default_rng(seed)
     result = speakers.copy()
     result["split"] = "holdout"
-    for _, group in result.groupby(["sex", "eligible"]):
+    strata = [column for column in ("language", "group", "sex", "eligible") if column in result]
+    for _, group in result.groupby(strata):
         shuffled = rng.permutation(group.index.to_numpy())
         result.loc[shuffled[:round(len(shuffled) * calibration_share)], "split"] = "calibration"
     assert_speaker_disjoint(result)
@@ -80,8 +78,9 @@ def verification_trials(speakers):
 def plan_visits(speakers, seed=config.SEED):
     """Pair each eligible speaker with one other, so pairs are independent, and plan every scenario.
 
-    Each row says who is enrolled (caregiver, dependant) and who actually speaks (first, second).
-    A stranger matches the sex of the person they replace, and second is None for a caregiver alone.
+    Each row says who is enrolled (caregiver, dependant) and who actually speaks in each recording:
+    first in the caregiver's, second in the dependant's. A stranger matches the sex of the person they
+    replace. A caregiver alone speaks in both, using a different part of their test audio for each.
     """
     assert_different_recordings(speakers)
     rng = np.random.default_rng(seed)
@@ -98,48 +97,25 @@ def plan_visits(speakers, seed=config.SEED):
         people = (caregiver, dependant)
         rows += [
             (pair, decide.GENUINE, caregiver, dependant, caregiver, dependant),
-            (pair, "caregiver_alone", caregiver, dependant, caregiver, None),
+            (pair, "caregiver_alone", caregiver, dependant, caregiver, caregiver),
             (pair, "different_dependant", caregiver, dependant, caregiver, stranger(dependant, people)),
             (pair, "different_caregiver", caregiver, dependant, stranger(caregiver, people), dependant),
         ]
     return pd.DataFrame(rows, columns=["pair", "scenario", "caregiver", "dependant", "first", "second"])
 
 
-def compose_visit(first, second, second_share, rng, overlap_seconds=0.0, sr=config.SV_SAMPLE_RATE,
-                  seconds=config.SV_VISIT_SECONDS):
-    """A simulated visit from speech-only pools, alternating turns.
 
-    Returns (audio, turns), where each turn is (0 for first or 1 for second, start, end) in samples.
-    `second` is None for one person speaking alone.
+def longest_clip_speech(conditions=(config.SV_PRIMARY_CONDITION, *config.SV_VARIANT_CONDITIONS)):
+    return max(condition[3] for condition in conditions)
+
+
+def clip_from_pool(pool, slot, seconds, sr=config.SV_SAMPLE_RATE):
+    """The caregiver's recording (slot 0) or the dependant's (slot 1), from separate parts of one test pool.
+
+    So a caregiver alone never supplies the same audio to both recordings.
     """
-    samples = lambda value: round(value * sr)
-    total = samples(seconds)
-    audio = np.zeros(total, dtype=np.float32)
-    speech = samples(seconds * config.SV_VISIT_SPEECH_SHARE)
-    pools = [np.asarray(first, dtype=np.float32), None if second is None else np.asarray(second, dtype=np.float32)]
-    budget = [speech, 0] if second is None else [speech - samples(seconds * config.SV_VISIT_SPEECH_SHARE * second_share),
-                                                 samples(seconds * config.SV_VISIT_SPEECH_SHARE * second_share)]
-    levels = 10 ** (rng.uniform(-config.SV_LEVEL_DB, config.SV_LEVEL_DB, 2) / 20)
-    cursors, turns = [0, 0], []
-    who, position = 0, 0
-    minimum = samples(MIN_TURN_SECONDS)
-    while position < total and max(budget) >= minimum:
-        if budget[who] < minimum:
-            who = 1 - who
-        length = min(int(rng.integers(samples(config.SV_TURN_SECONDS[0]), samples(config.SV_TURN_SECONDS[1]) + 1)),
-                     budget[who], total - position)
-        pool = pools[who]
-        clip = pool[(cursors[who] + np.arange(length)) % len(pool)]
-        rms = float(np.sqrt(np.mean(clip ** 2)))
-        audio[position:position + length] += clip * (TURN_RMS / max(rms, 1e-9)) * levels[who]
-        turns.append((who, position, position + length))
-        budget[who] -= length
-        cursors[who] += length
-        position += length
-        other = 1 - who
-        if second is not None and budget[other] >= minimum:
-            who = other
-            position = max(0, position - samples(overlap_seconds)) if overlap_seconds else position
-        if not overlap_seconds or second is None:
-            position += int(rng.integers(samples(config.SV_GAP_SECONDS[0]), samples(config.SV_GAP_SECONDS[1]) + 1))
-    return np.clip(audio, -1.0, 1.0), turns
+    length = round(seconds * sr)
+    clip = pool[slot * length:(slot + 1) * length]
+    if len(clip) < length:
+        raise ValueError(f"the test pool holds {len(pool) / sr:.1f} s, too little for slot {slot} of {seconds} s")
+    return clip
