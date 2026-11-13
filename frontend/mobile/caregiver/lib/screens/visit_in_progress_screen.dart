@@ -27,11 +27,12 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
   List<VisitTask>? _tasks;
   String? _error;
   final _checked = <String>{};
-  bool _hasRecording = false;
-  // Assumed needed until the server says otherwise, so a slow or failed lookup can't hide the
+  // Per recording role ('caregiver', 'dependant').
+  final _hasRecording = {for (final role in recordingRoles) role: false};
+  // Assumed needed until the server says otherwise, so a slow or failed lookup can't hide a
   // recorder from a visit that needs it. The server has the last word at check-out anyway.
-  bool _audioRequired = true;
-  bool _alreadyUploaded = false;
+  final _audioRequired = {for (final role in recordingRoles) role: true};
+  final _alreadyUploaded = {for (final role in recordingRoles) role: false};
 
   @override
   void initState() {
@@ -47,8 +48,10 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
       );
       if (mounted) {
         setState(() {
-          _audioRequired = result.required;
-          _alreadyUploaded = result.recorded;
+          for (final MapEntry(key: role, value: r) in result.entries) {
+            _audioRequired[role] = r.required;
+            _alreadyUploaded[role] = r.recorded;
+          }
         });
       }
     } catch (_) {
@@ -109,9 +112,9 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
           visitSchedulesApi: widget.visitSchedulesApi,
           tasks: tasks,
           checkedTaskIds: Set.of(_checked),
-          hasRecording: _hasRecording,
-          audioRequired: _audioRequired,
-          alreadyUploaded: _alreadyUploaded,
+          hasRecording: Map.of(_hasRecording),
+          audioRequired: Map.of(_audioRequired),
+          alreadyUploaded: Map.of(_alreadyUploaded),
         ),
       ),
     );
@@ -145,14 +148,21 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
             _buildChecklist(),
           ];
           final audio = [
-            const _SectionTitle('Visit recording'),
-            VisitAudioRecorder(
-              key: _recorderKey,
-              visitScheduleId: widget.visit.id,
-              onRecordingChanged: (has) => setState(() => _hasRecording = has),
-            ),
+            for (final role in recordingRoles)
+              if (_audioRequired[role]!) ...[
+                _SectionTitle(_recordingTitles[role]!),
+                VisitAudioRecorder(
+                  key: _recorderKeys[role],
+                  storageKey: visitRecordingKey(widget.visit.id, role),
+                  label: _recordingTitles[role]!,
+                  hint: _recordingHints[role]!,
+                  onRecordingChanged: (has) =>
+                      setState(() => _hasRecording[role] = has),
+                ),
+                const SizedBox(height: 16),
+              ],
           ];
-          if (!_audioRequired) {
+          if (!_audioRequired.values.any((required) => required)) {
             return constrainedContent(
               ListView(padding: const EdgeInsets.all(16), children: checklist),
             );
@@ -188,10 +198,22 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
     );
   }
 
-  // Tablets / landscape get checklist and recorder side by side. The GlobalKey keeps the
+  // Tablets / landscape get checklist and recorders side by side. The GlobalKeys keep each
   // recorder's state (including a recording in progress) when a rotation swaps layouts.
   static const _twoColumnMinWidth = 840.0;
-  final _recorderKey = GlobalKey();
+  final _recorderKeys = {for (final role in recordingRoles) role: GlobalKey()};
+
+  static const _recordingTitles = {
+    'caregiver': 'Your voice',
+    'dependant': "The dependant's voice",
+  };
+  static const _recordingHints = {
+    'caregiver':
+        'Press and hold, and say a few sentences about the visit, for at least 10 seconds.',
+    'dependant':
+        "Hold while the dependant speaks for at least 10 seconds, for example answering an open "
+        "question. The family can listen to this.",
+  };
 
   Widget _buildChecklist() {
     if (_error != null) {

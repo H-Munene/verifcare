@@ -207,22 +207,67 @@ class VisitSchedulesApi {
     });
   }
 
-  /// Checks out from where the caregiver is now: the server refuses (422, with the distance and
-  /// radius in its detail) unless [gpsLat]/[gpsLng] are inside the dependant's home radius.
-  Future<VisitSchedule> checkout(
+  /// Asks to check out from where the caregiver is now. The server checks every requirement (inside
+  /// the home's radius, required tasks addressed, both recordings or a reason for the dependant's),
+  /// refusing with what's missing, and then the family can show their check-out code.
+  Future<void> requestCheckout(
     String visitScheduleId, {
     required double gpsLat,
     required double gpsLng,
     String? audioSkipReason,
     String? audioSkipNote,
-  }) async => VisitSchedule.fromJson(
-    await _client.post('/visit-schedules/$visitScheduleId/checkout', {
+  }) async {
+    await _client.post('/visit-schedules/$visitScheduleId/checkout/request', {
       'gpsLat': gpsLat,
       'gpsLng': gpsLng,
       'audioSkipReason': ?audioSkipReason,
       'audioSkipNote': ?audioSkipNote,
-    }),
-  );
+    });
+  }
+
+  /// Completes check-out with the QR code scanned from the family member's phone.
+  Future<void> checkoutWithQr(
+    String visitScheduleId, {
+    required String token,
+    required double gpsLat,
+    required double gpsLng,
+  }) async {
+    await _client.post('/visit-schedules/$visitScheduleId/checkout/qr-scan', {
+      'token': token,
+      'gpsLat': gpsLat,
+      'gpsLng': gpsLng,
+    });
+  }
+
+  /// Completes check-out with the 6 digits shown under the family member's QR code.
+  Future<void> checkoutWithCode(
+    String visitScheduleId, {
+    required String code,
+    required double gpsLat,
+    required double gpsLng,
+  }) async {
+    await _client.post('/visit-schedules/$visitScheduleId/checkout/code', {
+      'code': code,
+      'gpsLat': gpsLat,
+      'gpsLng': gpsLng,
+    });
+  }
+
+  /// Completes check-out without the family's code, at once. Supervisors see [reason] afterwards.
+  Future<void> checkoutWithOverride(
+    String visitScheduleId, {
+    required String reason,
+    String? note,
+    required double gpsLat,
+    required double gpsLng,
+  }) async {
+    await _client.post('/visit-schedules/$visitScheduleId/checkout/override', {
+      'reason': reason,
+      'note': ?note,
+      'gpsLat': gpsLat,
+      'gpsLng': gpsLng,
+    });
+  }
 
   Future<List<RecoveryOffer>> myRecoveryOffers() async {
     final json = await _client.get('/recovery-offers/mine');
@@ -239,27 +284,33 @@ class VisitSchedulesApi {
     await _client.post('/recovery-offers/$offerId/decline', const {});
   }
 
-  /// Whether this visit needs a recording (the family consented) and whether one is already saved.
-  Future<({bool required, bool recorded})> audioRequirement(
+  /// For each recording role ('caregiver', 'dependant'): whether it's needed (that person
+  /// consented to being recorded) and whether the server already holds it.
+  Future<Map<String, ({bool required, bool recorded})>> audioRequirement(
     String visitScheduleId,
   ) async {
     final json = await _client.get(
       '/visit-schedules/$visitScheduleId/audio/requirement',
     );
-    return (
-      required: json['required'] as bool,
-      recorded: json['recorded'] as bool,
-    );
+    return {
+      for (final entry in json.entries)
+        entry.key: (
+          required: (entry.value as Map)['required'] as bool,
+          recorded: (entry.value as Map)['recorded'] as bool,
+        ),
+    };
   }
 
-  /// Presign, upload straight to S3, then confirm. Safe to repeat: a retry replaces the recording.
+  /// Presign, upload straight to S3, then confirm, which also checks the voice. Safe to repeat: a
+  /// retry replaces the recording.
   Future<void> uploadAudio(
     String visitScheduleId, {
+    required String role,
     required List<int> bytes,
     required int durationSeconds,
   }) async {
     final presign = await _client.post(
-      '/visit-schedules/$visitScheduleId/audio/upload-url',
+      '/visit-schedules/$visitScheduleId/audio/$role/upload-url',
       const {},
     );
     await ApiClient.uploadToPresignedUrl(
@@ -267,7 +318,7 @@ class VisitSchedulesApi {
       bytes,
       'audio/mp4',
     );
-    await _client.post('/visit-schedules/$visitScheduleId/audio', {
+    await _client.post('/visit-schedules/$visitScheduleId/audio/$role', {
       's3Key': presign['s3Key'],
       'durationSeconds': durationSeconds,
     });
@@ -379,7 +430,9 @@ class VerificationAudit {
         arrivedAt: parse(
           attempts
               .map((a) => a as Map<String, dynamic>)
-              .where((a) => a['attemptType'] == 'geofence' && a['passed'] == true)
+              .where(
+                (a) => a['attemptType'] == 'geofence' && a['passed'] == true,
+              )
               .firstOrNull?['attemptedAt'],
         ),
         checkinAt: parse(event?['checkinAt']),

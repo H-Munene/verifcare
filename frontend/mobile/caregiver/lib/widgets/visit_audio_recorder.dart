@@ -12,61 +12,100 @@ import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
 const maxRecordingDuration = Duration(seconds: 30);
-// Long enough that a stray tap can't count as the visit's recording (the server enforces it too).
-const _minRecordingDuration = Duration(seconds: 5);
+// Each visit voice is checked against a voiceprint, which needs at least 10 seconds of speaking
+// (the server enforces it too).
+const visitRecordingMinDuration = Duration(seconds: 10);
 const _barCount = 36;
 
-/// Where a visit's audio log lives. Kept in app-private storage (other apps can't read it) and
-/// keyed by visit, so the recording survives the app being closed mid-visit. It stays here until
-/// the visit has been checked out, so a failed upload or a refused check-out can simply be retried.
-Future<File> visitAudioFile(String visitScheduleId) async {
+/// The two recordings made at each visit, in order (backend/src/db/schema.ts RECORDING_ROLES).
+const recordingRoles = ['caregiver', 'dependant'];
+
+/// The on-phone key of a visit's recording of one person.
+String visitRecordingKey(String visitScheduleId, String role) =>
+    '$visitScheduleId-$role';
+
+/// Where a recording lives. Kept in app-private storage (other apps can't read it) and keyed, so
+/// it survives the app being closed mid-visit. A visit's recordings stay here until it's checked
+/// out, so a failed upload or a refused check-out can simply be retried.
+Future<File> recordingFile(String key) async {
   final dir = await getApplicationDocumentsDirectory();
-  return File('${dir.path}/visit_audio/$visitScheduleId.m4a');
+  return File('${dir.path}/visit_audio/$key.m4a');
 }
 
 // The recorded loudness levels, so the playback waveform still draws after an app restart.
 File _levelsFile(File audio) => File(audio.path.replaceFirst('.m4a', '.json'));
 
 // The recording's length, which the upload has to state and the file doesn't readily give up.
-File _secondsFile(File audio) => File(audio.path.replaceFirst('.m4a', '.seconds'));
+File _secondsFile(File audio) =>
+    File(audio.path.replaceFirst('.m4a', '.seconds'));
 
-/// Uploads the recording saved on this phone for the visit.
-Future<void> uploadVisitAudio(
-  VisitSchedulesApi api,
-  String visitScheduleId,
-) async {
-  final file = await visitAudioFile(visitScheduleId);
+/// A saved recording's bytes and length, or null when there isn't one.
+Future<({List<int> bytes, int seconds})?> readRecording(String key) async {
+  final file = await recordingFile(key);
+  if (!await file.exists()) return null;
   final seconds = _secondsFile(file);
-  await api.uploadAudio(
-    visitScheduleId,
+  return (
     bytes: await file.readAsBytes(),
-    durationSeconds: await seconds.exists()
+    seconds: await seconds.exists()
         ? int.parse(await seconds.readAsString())
         : maxRecordingDuration.inSeconds,
   );
 }
 
-/// Removes the visit's recording from this phone, once it is no longer needed here.
-Future<void> deleteVisitAudio(String visitScheduleId) async {
-  final file = await visitAudioFile(visitScheduleId);
+/// Uploads the visit's recording of [role] saved on this phone, if there is one.
+Future<void> uploadVisitAudio(
+  VisitSchedulesApi api,
+  String visitScheduleId,
+  String role,
+) async {
+  final recording = await readRecording(
+    visitRecordingKey(visitScheduleId, role),
+  );
+  if (recording == null) return;
+  await api.uploadAudio(
+    visitScheduleId,
+    role: role,
+    bytes: recording.bytes,
+    durationSeconds: recording.seconds,
+  );
+}
+
+/// Removes a recording from this phone, once it is no longer needed here.
+Future<void> deleteRecording(String key) async {
+  final file = await recordingFile(key);
   for (final path in [file, _levelsFile(file), _secondsFile(file)]) {
     if (await path.exists()) await path.delete();
   }
 }
 
+/// Removes both of a visit's recordings from this phone.
+Future<void> deleteVisitAudio(String visitScheduleId) async {
+  for (final role in recordingRoles) {
+    await deleteRecording(visitRecordingKey(visitScheduleId, role));
+  }
+}
+
 enum _Mode { loading, idle, recording, recorded }
 
-/// Hold-to-record audio log with a live waveform, then playback / re-record (the user's
-/// temp_images/audio1.png and audio2.png mockups), capped at [maxRecordingDuration]. The family
-/// can listen to it, and check-out asks for a reason if there isn't one.
+/// Hold-to-record with a live waveform, then playback / re-record (the user's
+/// temp_images/audio1.png and audio2.png mockups), between [minDuration] and [maxDuration]. Used
+/// for a visit's two voices and for the enrolment sample, each under its own [storageKey].
 class VisitAudioRecorder extends StatefulWidget {
-  final String visitScheduleId;
+  final String storageKey;
+  final String label;
+  final String hint;
+  final Duration minDuration;
+  final Duration maxDuration;
   final ValueChanged<bool> onRecordingChanged;
 
   const VisitAudioRecorder({
     super.key,
-    required this.visitScheduleId,
+    required this.storageKey,
+    required this.label,
+    required this.hint,
     required this.onRecordingChanged,
+    this.minDuration = visitRecordingMinDuration,
+    this.maxDuration = maxRecordingDuration,
   });
 
   @override
@@ -119,7 +158,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
   }
 
   Future<void> _load() async {
-    _file = await visitAudioFile(widget.visitScheduleId);
+    _file = await recordingFile(widget.storageKey);
     if (await _file.exists()) {
       final levelsFile = _levelsFile(_file);
       if (await levelsFile.exists()) {
@@ -165,7 +204,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
         .listen((amp) => _levels.add(((amp.current + 50) / 50).clamp(0.05, 1)));
     _ticker = Timer.periodic(const Duration(milliseconds: 200), (_) {
       setState(() => _elapsed = DateTime.now().difference(_startedAt!));
-      if (_elapsed >= maxRecordingDuration) _stopRecording();
+      if (_elapsed >= widget.maxDuration) _stopRecording();
     });
     _setMode(_Mode.recording);
     // Released while start() was still in flight.
@@ -181,18 +220,22 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
     await _recorder.stop();
     _elapsed = DateTime.now().difference(_startedAt!);
 
-    if (_elapsed < _minRecordingDuration) {
+    if (_elapsed < widget.minDuration) {
       await _deleteFiles();
       _setMode(_Mode.idle);
       if (mounted) {
-        showSnack(context, 'Hold for at least 5 seconds.', error: false);
+        showSnack(
+          context,
+          'Hold for at least ${widget.minDuration.inSeconds} seconds.',
+          error: false,
+        );
       }
       return;
     }
     await _levelsFile(_file).writeAsString(jsonEncode(_levels));
-    await _secondsFile(
-      _file,
-    ).writeAsString(min(_elapsed.inSeconds, maxRecordingDuration.inSeconds).toString());
+    await _secondsFile(_file).writeAsString(
+      min(_elapsed.inSeconds, widget.maxDuration.inSeconds).toString(),
+    );
     await _player.setSourceDeviceFile(_file.path);
     _position = Duration.zero;
     _setMode(_Mode.recorded);
@@ -274,7 +317,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
               const SizedBox(width: 8),
             ],
             Text(
-              recording ? 'RECORDING' : 'VISIT RECORDING',
+              recording ? 'RECORDING' : widget.label.toUpperCase(),
               style: const TextStyle(
                 fontSize: 12,
                 letterSpacing: 0.6,
@@ -303,8 +346,8 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
         const SizedBox(height: 12),
         Text(
           recording
-              ? 'Recording stops by itself at 30 seconds.'
-              : "Press and hold to record up to 30 seconds. The dependant's family can listen to this.",
+              ? 'Recording stops by itself at ${widget.maxDuration.inSeconds} seconds.'
+              : widget.hint,
           textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 12, color: inkTertiary),
         ),
@@ -351,8 +394,8 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'VISIT RECORDING',
+        Text(
+          widget.label.toUpperCase(),
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 12,
@@ -416,9 +459,7 @@ class _VisitAudioRecorderState extends State<VisitAudioRecorder> {
             foregroundColor: inkDefault,
             minimumSize: const Size.fromHeight(44),
             side: const BorderSide(color: borderColor),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.zero,
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           ),
           child: const Text('Re-record'),
         ),
