@@ -18,6 +18,7 @@ export interface ApiParams {
   caregiverAppUserPoolClient: cognito.UserPoolClient;
   familyMemberAppUserPoolClient: cognito.UserPoolClient;
   visitAudioBucket: s3.Bucket;
+  voiceFunction: lambda.IFunction;
 }
 
 export interface Api {
@@ -35,6 +36,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     caregiverAppUserPoolClient,
     familyMemberAppUserPoolClient,
     visitAudioBucket,
+    voiceFunction,
   } = params;
 
   const apiFunction = new NodejsFunction(stack, "ApiFunction", {
@@ -54,6 +56,9 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
     depsLockFilePath: path.join(__dirname, "../../backend/package-lock.json"),
     handler: "handler",
     runtime: lambda.Runtime.NODEJS_22_X,
+    // A visit recording's upload waits on the voice check (up to 20 s, backend/src/voiceService.ts),
+    // so this sits just under API Gateway's 29 s limit. The default was 3 s.
+    timeout: cdk.Duration.seconds(28),
     architecture: lambda.Architecture.ARM_64,
     vpc,
     // Restricted to eu-west-1c specifically, not just PRIVATE_WITH_EGRESS -
@@ -79,6 +84,7 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
       FAMILY_MEMBER_USER_POOL_CLIENT_ID:
         familyMemberAppUserPoolClient.userPoolClientId,
       VISIT_AUDIO_BUCKET_NAME: visitAudioBucket.bucketName,
+      VOICE_FUNCTION_NAME: voiceFunction.functionName,
     },
   });
 
@@ -113,6 +119,9 @@ export function createApi(stack: cdk.Stack, params: ApiParams): Api {
   // the size check at confirm time and the KMS decrypt that playback needs.
   visitAudioBucket.grantPut(apiFunction);
   visitAudioBucket.grantRead(apiFunction);
+
+  // The voice check (2026-11-13): api calls the voice Lambda, and nothing else may.
+  voiceFunction.grantInvoke(apiFunction);
 
   new cdk.CfnOutput(stack, "ApiFunctionName", {
     value: apiFunction.functionName,

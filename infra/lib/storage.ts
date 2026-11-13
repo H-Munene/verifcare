@@ -4,6 +4,7 @@ import * as kms from "aws-cdk-lib/aws-kms";
 
 export interface Storage {
   visitAudioBucket: s3.Bucket;
+  voiceprintBucket: s3.Bucket;
 }
 
 export function createStorage(stack: cdk.Stack): Storage {
@@ -36,5 +37,23 @@ export function createStorage(stack: cdk.Stack): Storage {
   new cdk.CfnOutput(stack, "VisitAudioBucketName", {
     value: visitAudioBucket.bucketName,
   });
-  return { visitAudioBucket };
+
+  // Voiceprints (2026-11-13): biometric data, so its own key, and readable only by the voice Lambda
+  // (infra/lib/voice.ts); the API never reads one. No lifecycle rule: a voiceprint is deleted when
+  // its person re-enrols or is deactivated (backend/src/voiceChecks.ts).
+  const voiceprintKey = new kms.Key(stack, "VoiceprintKey", {
+    alias: "mzazi-care/voiceprints",
+    description: "Encrypts the voiceprint S3 bucket",
+    enableKeyRotation: true,
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+  });
+  const voiceprintBucket = new s3.Bucket(stack, "VoiceprintBucket", {
+    encryption: s3.BucketEncryption.KMS,
+    encryptionKey: voiceprintKey,
+    bucketKeyEnabled: true,
+    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    enforceSSL: true,
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+  });
+  return { visitAudioBucket, voiceprintBucket };
 }
