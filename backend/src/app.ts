@@ -26,6 +26,7 @@ import { createVisitAudioRouter } from './routes/visitAudio.js';
 import { createVisitPlansRouter } from './routes/visitPlans.js';
 import { createVisitResolutionsRouter } from './routes/visitResolutions.js';
 import { createVisitTasksRouter } from './routes/visitTasks.js';
+import { createVoiceChecksRouter } from './routes/voiceChecks.js';
 import { createVoiceEnrollmentsRouter } from './routes/voiceEnrollments.js';
 
 declare global {
@@ -163,6 +164,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         createVoiceEnrollmentsRouter({ requireAuth, storage: visitAudioStorage, voice }),
       );
     }
+    app.use('/voice-checks', createVoiceChecksRouter({ requireAuth }));
     // Check-out's caregiver steps (routes/checkout.ts).
     app.use('/visit-schedules', createCheckoutRouter({ requireAuth }));
     // Check-in's caregiver steps - a separate router at the same prefix (see routes/checkin.ts).
