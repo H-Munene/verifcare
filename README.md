@@ -4,7 +4,10 @@ Mzazi Care is a geo-verified visit tracking system for home caregivers in Kenya.
 It lets a care agency prove that a scheduled visit happened at the right place, at the right time, with the right people present.
 At check-in, the caregiver's phone checks it is within the dependant's home geofence, then scans a short-lived code shown on a family member's phone at the home.
 If nobody from the family is there, a supervisor can start the visit, and it is reported as an exception.
-The caregiver can record up to 30 seconds per visit, which only the dependant's family can listen to.
+During the visit the caregiver records their own voice and then the dependant's, and each recording is checked against that person's enrolled voiceprint.
+The check is advisory: supervisors see the result and score, and it never stops a visit counting.
+Check-out is confirmed the same way as check-in, with a code on the family member's phone, or the caregiver gives a reason and checks out at once.
+Only the dependant's family can listen to the dependant's recording.
 Supervisors plan each day's routes and monitor visits from a web console, caregivers check in and out with a mobile app, and family members follow their dependant's care from a second mobile app.
 
 | Component | Path | Stack |
@@ -14,7 +17,7 @@ Supervisors plan each day's routes and monitor visits from a web console, caregi
 | Family app | `frontend/mobile/family_member` | Flutter |
 | API | `backend` | Node.js 22, Express 5, Drizzle ORM, PostgreSQL |
 | Infrastructure | `infra` | AWS CDK (TypeScript), one stack: `MzaziCareStack` |
-| Acoustic model | `acoustic-model` | Python research package; results are reported only, and it does not run in the system |
+| Voice model | `acoustic-model` | Python. The frozen speaker-verification model runs in the system as a container Lambda (`voice_service/`); the cognitive model is research only and does not run |
 
 The supervisor web console is live at **https://mzazicare.hmunene.com/**.
 
@@ -23,7 +26,7 @@ The supervisor web console is live at **https://mzazicare.hmunene.com/**.
 ![Mzazi Care AWS architecture](assets/aws_architecture.png)
 
 Everything runs in one AWS CDK stack in `eu-west-1` (Ireland), defined in `infra/lib/`.
-The backend is serverless: three Node.js Lambda functions, so compute costs scale with use rather than running around the clock.
+The backend is serverless: three Node.js Lambda functions and one Python container Lambda for the voice check, so compute costs scale with use rather than running around the clock.
 
 How a request moves through the system (the numbers match the diagram):
 
@@ -37,21 +40,22 @@ How a request moves through the system (the numbers match the diagram):
 4. **Data:** `Lambda -> RDS PostgreSQL`, inside the VPC's private subnet.
 5. **AWS APIs:** `Lambda -> NAT gateway -> internet gateway -> Secrets Manager / S3 / Cognito`.
    There are no VPC endpoints, so the single NAT gateway carries all of this traffic.
-6. **Uploads:** `App -> S3` directly, using presigned URLs issued by the API, for visit recordings.
+6. **Uploads:** `App -> S3` directly, using presigned URLs issued by the API, for visit recordings and voice enrolment.
+   **Voice checks:** `api Lambda -> voice Lambda -> S3`. The voice Lambda has no VPC and no database access: it reads the recording and the voiceprint from S3 and returns a score, which the API stores. Only the API may invoke it.
 7. **Missed visits:** `EventBridge (every minute) -> missed-visit sweep Lambda -> RDS` marks overdue visits as missed, raises alerts, and offers late visits to the nearest available caregiver.
 8. **Operations:** `CloudWatch alarms -> SNS ops topic -> email` on Lambda errors, API 5xx responses, and high RDS CPU or low storage.
 9. **Deploys:** `GitHub Actions (OIDC) or a developer -> IAM deploy role -> CloudFormation`, followed by the migration runner Lambda for schema changes.
 
 Security and data protection:
 
-- RDS, its credentials secret and the visit-audio bucket are encrypted with their own KMS keys.
+- RDS, its credentials secret, the visit-audio bucket and the voiceprint bucket are encrypted with their own KMS keys.
 - The database credentials live in Secrets Manager and rotate every 30 days.
 - Every bucket blocks public access and rejects non-TLS requests.
 - Visit audio is deleted after 90 days, and each listen is recorded in the audit log.
-- No biometric data is collected.
+- Voiceprints are biometric data. They are made only with consent (terms v4), kept in their own bucket that only the voice Lambda can read, and deleted on re-enrolment or deactivation. Enrolment recordings are deleted once the voiceprint is made.
 - The Lambdas and RDS sit in private subnets with no inbound route from the internet.
 
-The diagram predates the move to QR check-in and still shows Rekognition and the acoustic model.
+The diagram predates QR check-in and the voice Lambda, and still shows Rekognition.
 The care alerts SNS topic is planned; alerts are in-app today.
 
 ## Cost estimate

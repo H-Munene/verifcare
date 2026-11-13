@@ -251,8 +251,8 @@ Listen to a sample of false accepts and false rejects, and note patterns.
 Evaluation stops here. The developer chose to integrate it as a **proof of concept**, not a production feature, knowing the false reject target was missed.
 Before any real person is enrolled: Terms v4 and fresh consent (`backend/src/terms.ts` tells caregivers and families that recordings are "not analysed by any automated system"), and supervisor sign-off, since this changes the project's objectives and design.
 
-POC scope, decided the same day:
-- **Test accounts only.** Demo caregivers and dependants with volunteer or synthetic voices. No real family is enrolled, so Terms v4 can follow before any real use.
+POC scope, decided the same day (the first item later superseded, see "Built" under SV6):
+- ~~**Test accounts only.**~~ Superseded the same day: the voice check runs on **every visit**, with consent mandatory through Terms v4.
 - **Advisory only.** A failed or missing check never blocks a visit or changes whether it counts. The result (match, mismatch or too short, with score and seconds of speech, per recording) is stored and shown to supervisors.
 - **The full flow:** the voice Lambda, an encrypted voiceprint store, database changes, the caregiver app's enrolment screen and two-recording visit flow, and a supervisor view in the web console.
 
@@ -268,6 +268,25 @@ This is new infrastructure and a change to what the system promises people.
 - The voice check is required on every visit. It runs on the recording after check-in, so it decides whether the visit counts as fully verified. A failed or missing result goes to a supervisor rather than blocking the visit.
 - A result is advisory to a supervisor and never marks a visit or caregiver automatically.
 - Voiceprints are deleted on offboarding, and audio and voiceprints never appear in logs.
+
+### Built, 2026-11-13 (branch `feat/voice-verification-poc`)
+
+Decided with the developer, replacing the proposal above where they differ:
+
+- **Every visit, consent mandatory.** Terms v4 adds a third required box (voice verification) to both apps. A revoked consent is never analysed (`no_consent`).
+- **Two recordings replace the 30-second family recording**: the caregiver's (always required) and the dependant's (or one of the existing reasons). The family plays the dependant's.
+- **Enrolment:** caregivers in the caregiver app, dependants by a linked family member in the family app, about 30 s each, at least 20 s of speech.
+- **Check-out is confirmed by the family**, like check-in: the caregiver requests it, the family member who facilitated check-in (any linked one after a supervisor override) shows a QR code with 6 digits, and the caregiver scans or types it. If neither works, the caregiver gives a reason and the visit completes at once; it appears as a `checkout_override` exception. Nobody approves it.
+- **Advisory only:** a voice check never blocks a visit or changes whether it counts. Supervisors see results and scores (visit details, a Voice checks tab); caregivers and families never see scores.
+
+How it runs:
+
+- `acoustic-model/voice_service/`: a Python container Lambda (`enrol`, `verify`, `remove`) reusing `vad.py`, `embed.py`, `enrol.py`, `verify.score_clip` and `decide.check_clip` unchanged, with `config.SV_FROZEN_RULE` (cosine 0.5, at least 5 s of speech). ECAPA at revision `0f99f2d0` is baked into the image and loaded offline; AAC is decoded with a pinned ffmpeg (`imageio-ffmpeg`).
+- `infra/lib/voice.ts` and `storage.ts`: no VPC or database access, 3008 MB, 60 s; invokable only by the API; a voiceprint bucket with its own rotating KMS key. The API's timeout went from the 3 s default to 28 s.
+- `backend/src/voiceService.ts` calls it with a 20 s limit; a timeout or error is stored as `unavailable`. `voiceChecks.ts` stores each result; migration 0019 adds `voice_enrollments`, `voice_checks` and the check-out columns.
+- Checked locally inside the image, offline, on LibriSpeech audio encoded as AAC: same speaker 0.85 (match), different speaker -0.03 (mismatch), a 4 s clip too short. Local cold start 2.6 s and 0.7 s per check; Lambda's cold start is not yet measured.
+
+Not done: a CloudWatch alarm for the voice Lambda (the project's 5-alarm budget is full), a replay test, and a real-world pilot.
 
 ## Decision gates
 
