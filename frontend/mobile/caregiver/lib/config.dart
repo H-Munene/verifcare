@@ -3,10 +3,10 @@
 // frontend/mobile/family_member/lib/config.dart). Checked in directly rather than via an env
 // file/package - there is nothing here to keep out of source control.
 class AppConfig {
-  static const String userPoolId = 'eu-west-1_DyvwyuZL6';
+  static const String userPoolId = 'eu-west-1_bBLdq7eZm';
 
   // infra/lib/auth.ts's CaregiverAppUserPoolClient, CfnOutput CaregiverUserPoolClientId.
-  static const String caregiverUserPoolClientId = '7p0dhh5gnpev1bc6i6trbhigom';
+  static const String caregiverUserPoolClientId = '1n6b6jgotbhkr7gg1ljp2aa26a';
 
   // Points at the real deployed API Gateway, not localhost - this app is tested on a physical
   // phone, where "localhost" would resolve to the phone itself, not the dev machine. Not used by
@@ -22,5 +22,5 @@ class AppConfig {
   );
 
   static const String apiBaseUrl =
-      'https://l4n2gm07ok.execute-api.eu-west-1.amazonaws.com/prod';
+      'https://1cxsfh5mqj.execute-api.eu-west-1.amazonaws.com/prod';
 }
