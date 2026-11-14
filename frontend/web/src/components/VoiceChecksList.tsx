@@ -48,8 +48,7 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
       <p className="visit-history-list__empty">
         {enrolment.enrolled && enrolment.enrolledAt
           ? `Voice recorded on ${new Date(enrolment.enrolledAt).toLocaleDateString()}.`
-          : 'No voice recorded yet, so recordings are not checked.'}{' '}
-        Results are advisory: a mismatch never stops a visit counting, and the check can be wrong.
+          : 'No voice recorded yet, so recordings are not checked.'}
       </p>
       {items.length === 0 ? (
         <p className="visit-history-list__empty">No recordings yet.</p>
@@ -82,9 +81,7 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
                       {result ? <Badge tone={result.tone}>{result.label}</Badge> : 'Not checked'}
                     </td>
                     <td>
-                      {item.score != null
-                        ? `${item.score.toFixed(2)} (match at ${item.threshold ?? 0.5})`
-                        : '-'}
+                      {item.score != null ? item.score.toFixed(2) : '-'}
                     </td>
                   </tr>
                 );
