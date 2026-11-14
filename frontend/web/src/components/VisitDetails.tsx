@@ -57,12 +57,14 @@ const VOICE_LABELS: Record<VoiceCheckResult, string> = {
   unavailable: 'Not checked: the check was unavailable',
 };
 
-/** "20 s. Voice matches (score 0.71, advisory)". */
+/** "20 s. Voice match score 0.71", the same wording for a match or a mismatch. */
 function recordingSummary(recording: VisitRecording): string {
   const check = recording.voiceCheck;
-  const result = check
-    ? `${VOICE_LABELS[check.result]}${check.score != null ? ` (score ${check.score.toFixed(2)}, advisory)` : ''}`
-    : 'Not checked';
+  const result = !check
+    ? 'Not checked'
+    : check.score != null
+      ? `Voice match score ${check.score.toFixed(2)}`
+      : VOICE_LABELS[check.result];
   return `${recording.durationSeconds} s. ${result}`;
 }
 
