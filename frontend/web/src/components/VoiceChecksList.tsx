@@ -80,9 +80,7 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
                     <td>
                       {result ? <Badge tone={result.tone}>{result.label}</Badge> : 'Not checked'}
                     </td>
-                    <td>
-                      {item.score != null ? item.score.toFixed(2) : '-'}
-                    </td>
+                    <td>{item.score != null ? item.score.toFixed(2) : '-'}</td>
                   </tr>
                 );
               })}
