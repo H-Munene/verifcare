@@ -163,7 +163,11 @@ export function CaregiverPerformanceReport({
         ) : (
           // A search leaves a few caregivers, drawn as vertical bars; the whole team reads
           // better as horizontal rows.
-          <CaregiverPerformanceCharts rows={rows} layout={term ? 'vertical' : 'horizontal'} />
+          <CaregiverPerformanceCharts
+            rows={rows}
+            period={period}
+            layout={term ? 'vertical' : 'horizontal'}
+          />
         )
       ) : null}
       {query.data && !noMatch && view === 'table' ? (

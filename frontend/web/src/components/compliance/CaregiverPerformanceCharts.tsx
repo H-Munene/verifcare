@@ -10,8 +10,9 @@
 // each person's numbers are larger and easier to compare side by side.
 
 import type { ReactNode } from 'react';
-import type { CaregiverPerformanceRow } from '../../api/compliance';
-import { date, percent } from './format';
+import type { CaregiverPerformanceRow, Period } from '../../api/compliance';
+import { percent } from './format';
+import { weekRange } from './period';
 import './CaregiverPerformanceCharts.css';
 
 export type ChartLayout = 'horizontal' | 'vertical';
@@ -279,10 +280,17 @@ function teamWeeks(rows: CaregiverPerformanceRow[]): TeamWeek[] {
   return [...byWeek.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
 }
 
-const weekLabel = (weekStart: string) => date(`${weekStart}T12:00:00Z`);
 const onTimeRate = (week: TeamWeek) => (week.checkedIn === 0 ? null : week.onTime / week.checkedIn);
 
-function WeeksChart({ rows, filtered }: { rows: CaregiverPerformanceRow[]; filtered: boolean }) {
+function WeeksChart({
+  rows,
+  filtered,
+  period,
+}: {
+  rows: CaregiverPerformanceRow[];
+  filtered: boolean;
+  period: Period;
+}) {
   const weeks = teamWeeks(rows);
   const max = Math.max(1, ...weeks.map((w) => w.completed + w.missed));
   const title = filtered ? 'Visits by week' : 'Team visits by week';
@@ -324,7 +332,7 @@ function WeeksChart({ rows, filtered }: { rows: CaregiverPerformanceRow[]; filte
               <span className="perf-charts__column-count">
                 {week.completed} done{week.missed > 0 ? `, ${week.missed} missed` : ''}
               </span>
-              <span className="perf-charts__column-date">Week of {weekLabel(week.weekStart)}</span>
+              <span className="perf-charts__column-date">{weekRange(week.weekStart, period)}</span>
             </div>
           ))}
         </div>
@@ -333,7 +341,7 @@ function WeeksChart({ rows, filtered }: { rows: CaregiverPerformanceRow[]; filte
         <caption>{title}</caption>
         <thead>
           <tr>
-            <th scope="col">Week of</th>
+            <th scope="col">Week</th>
             <th scope="col">Completed</th>
             <th scope="col">Missed</th>
             <th scope="col">On time</th>
@@ -342,7 +350,7 @@ function WeeksChart({ rows, filtered }: { rows: CaregiverPerformanceRow[]; filte
         <tbody>
           {weeks.map((week) => (
             <tr key={week.weekStart}>
-              <th scope="row">{weekLabel(week.weekStart)}</th>
+              <th scope="row">{weekRange(week.weekStart, period)}</th>
               <td>{week.completed}</td>
               <td>{week.missed}</td>
               <td>{percent(onTimeRate(week))}</td>
@@ -356,9 +364,11 @@ function WeeksChart({ rows, filtered }: { rows: CaregiverPerformanceRow[]; filte
 
 export function CaregiverPerformanceCharts({
   rows,
+  period,
   layout = 'horizontal',
 }: {
   rows: CaregiverPerformanceRow[];
+  period: Period;
   layout?: ChartLayout;
 }) {
   return (
@@ -371,7 +381,7 @@ export function CaregiverPerformanceCharts({
         series={PUNCTUALITY}
         layout={layout}
       />
-      <WeeksChart rows={rows} filtered={layout === 'vertical'} />
+      <WeeksChart rows={rows} filtered={layout === 'vertical'} period={period} />
     </div>
   );
 }
