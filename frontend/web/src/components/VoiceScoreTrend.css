@@ -1,0 +1,110 @@
+/* VoiceChecksList's rows: the heading or enrolment line, with Show trend at the far right. */
+.voice-checks__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.voice-checks__bar > h2,
+.voice-checks__bar > p {
+  margin: 0;
+}
+
+.voice-checks__bar .ds-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-trend {
+  border: 1px solid var(--color-border-structural);
+  border-radius: 8px;
+  padding: 14px 16px 10px;
+  background: var(--color-page-background);
+}
+
+.voice-trend__summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-ink-default);
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-trend__chart {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.voice-trend__axis {
+  position: relative;
+  height: 180px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+
+.voice-trend__axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.voice-trend__plot {
+  position: relative;
+  height: 180px;
+}
+
+.voice-trend__plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.voice-trend__grid {
+  stroke: var(--color-border-divider);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.voice-trend__threshold {
+  stroke: var(--color-state-no-checkin);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.voice-trend__threshold-label {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-120%);
+  font-size: 11px;
+  color: var(--color-state-no-checkin-icon);
+}
+
+.voice-trend__line {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.voice-trend__dates {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 0 40px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+
+/* The chart's numbers, for screen readers only. */
+.voice-trend__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
