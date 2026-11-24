@@ -7,7 +7,13 @@
 // The tab, month and each report's filters live in the URL, so a reload or a shared link shows
 // the same report. Reports are monthly because that's how they're exported and filed.
 
-import { ArrowLeft01Icon, ArrowRight01Icon, Download04Icon } from '@hugeicons/core-free-icons';
+import {
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  ChartColumnIcon,
+  Download04Icon,
+  Table01Icon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useMutation } from '@tanstack/react-query';
 import type { ExportReport } from '../api/compliance';
@@ -72,6 +78,7 @@ const FILTER_KEYS = [
   'status',
   'action',
   'entityType',
+  'view',
 ];
 
 export function CompliancePage() {
@@ -86,6 +93,8 @@ export function CompliancePage() {
   const month = parseMonth(params.get('month'));
   const period = monthPeriod(month);
   const hasPeriod = PERIOD_TABS.includes(tab);
+  // Caregiver performance's table or charts, kept in the URL like every other report setting.
+  const performanceView = params.oneOf('view', ['table', 'charts'] as const, 'table');
 
   const exportMutation = useMutation({
     mutationFn: (report: ExportReport) =>
@@ -162,6 +171,21 @@ export function CompliancePage() {
         )}
 
         <div className="compliance__exports">
+          {tab === 'performance' ? (
+            <Button
+              type="button"
+              aria-pressed={performanceView === 'charts'}
+              onClick={() => params.set('view', performanceView === 'charts' ? '' : 'charts')}
+            >
+              <HugeiconsIcon
+                icon={performanceView === 'charts' ? Table01Icon : ChartColumnIcon}
+                size={16}
+                strokeWidth={1.5}
+                aria-hidden
+              />
+              {performanceView === 'charts' ? 'Show table' : 'Show charts'}
+            </Button>
+          ) : null}
           {EXPORTS[tab].map(({ report, label }) => (
             <Button
               key={report}
@@ -185,7 +209,9 @@ export function CompliancePage() {
         className="compliance__panel"
       >
         {tab === 'visits' ? <VisitsReport period={period} /> : null}
-        {tab === 'performance' ? <CaregiverPerformanceReport period={period} /> : null}
+        {tab === 'performance' ? (
+          <CaregiverPerformanceReport period={period} view={performanceView} />
+        ) : null}
         {tab === 'exceptions' ? <ExceptionsReport period={period} /> : null}
         {tab === 'alerts' ? <AlertsReport period={period} /> : null}
         {tab === 'consent' ? <ConsentReport /> : null}

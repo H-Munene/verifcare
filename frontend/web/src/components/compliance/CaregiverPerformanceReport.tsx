@@ -11,6 +11,7 @@ import { useApi } from '../../api/useApi';
 import { SidePanel } from '../../design-system/SidePanel';
 import { TableSkeleton } from '../../design-system/Skeleton';
 import { TableFrame, Th } from '../../design-system/Table';
+import { CaregiverPerformanceCharts } from './CaregiverPerformanceCharts';
 import { date, percent } from './format';
 import { Flag } from './Marks';
 
@@ -109,7 +110,14 @@ function CaregiverDetail({ row, onClose }: { row: CaregiverPerformanceRow; onClo
   );
 }
 
-export function CaregiverPerformanceReport({ period }: { period: Period }) {
+export function CaregiverPerformanceReport({
+  period,
+  view = 'table',
+}: {
+  period: Period;
+  // "charts" swaps the table for CaregiverPerformanceCharts, from the page's Show charts button.
+  view?: 'table' | 'charts';
+}) {
   const { compliance } = useApi();
   const [openId, setOpenId] = useState<string | null>(null);
   const query = useQuery({
@@ -124,9 +132,15 @@ export function CaregiverPerformanceReport({ period }: { period: Period }) {
         Misses a supervisor has resolved as outside the caregiver&rsquo;s control are shown as
         excused and aren&rsquo;t counted against them. Open a caregiver for the full picture.
       </p>
-      {query.isLoading ? <TableSkeleton columns={8} /> : null}
+      {query.isLoading && view === 'table' ? <TableSkeleton columns={8} /> : null}
+      {query.isLoading && view === 'charts' ? (
+        <p className="compliance__message">Loading charts...</p>
+      ) : null}
       {query.isError ? <p className="compliance__message">The report couldn't be loaded.</p> : null}
-      {query.data ? (
+      {query.data && view === 'charts' ? (
+        <CaregiverPerformanceCharts rows={query.data.items} />
+      ) : null}
+      {query.data && view === 'table' ? (
         <TableFrame>
           <table className="ds-table ds-table--table-cell">
             <thead>
