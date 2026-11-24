@@ -48,10 +48,14 @@
   border-radius: 2px;
 }
 
+.perf-charts__card--wide {
+  grid-column: 1 / -1;
+}
+
 .perf-charts__rows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
 }
 
 .perf-charts__row {
@@ -75,14 +79,14 @@
 
 .perf-charts__track {
   display: flex;
-  height: 14px;
+  height: 26px;
   border-radius: 3px;
   background: var(--color-surface);
   overflow: hidden;
 }
 
 .perf-charts__track--thin {
-  height: 8px;
+  height: 10px;
   flex: 1;
 }
 
@@ -153,6 +157,32 @@
 
 .perf-charts__column-segment {
   flex-basis: 0;
+}
+
+/* Completion and punctuality as two side-by-side columns per caregiver, each 0 to 100%. */
+.perf-charts__column-plot--pair {
+  align-items: stretch;
+  gap: 6px;
+}
+
+.perf-charts__column-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  width: min(36px, 40%);
+}
+
+.perf-charts__column-value {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-charts__column-bar--rate {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
 }
 
 .perf-charts__column-count {

@@ -1,14 +1,20 @@
 // Caregiver performance as charts (2026-11-24), the same month's numbers as the table, shown when the
-// supervisor presses "Show charts". Four views, each answering one question: who missed visits and
-// were they excused; how complete and punctual each caregiver was; whether the team improved week
-// by week; and how well each caregiver's visits were evidenced. Still no overall score (see
-// CaregiverPerformanceReport.tsx). Plain HTML and CSS bars, like OutcomeTrendChart.tsx, with every
-// value also written as text, and each chart's numbers in a table for screen readers.
+// supervisor presses "Show charts". Three views, each answering one question: who missed visits and
+// were they excused; how complete and punctual each caregiver was; and whether visits improved week
+// by week. Still no overall score (see CaregiverPerformanceReport.tsx). Plain HTML and CSS bars, like
+// OutcomeTrendChart.tsx, with every value also written as text, and each chart's numbers in a table
+// for screen readers.
+//
+// The whole team reads best as horizontal bars, one row per caregiver. When the supervisor has
+// searched for particular caregivers, the few that remain are drawn as vertical bars instead, so
+// each person's numbers are larger and easier to compare side by side.
 
 import type { ReactNode } from 'react';
 import type { CaregiverPerformanceRow } from '../../api/compliance';
 import { date, percent } from './format';
 import './CaregiverPerformanceCharts.css';
+
+export type ChartLayout = 'horizontal' | 'vertical';
 
 const OUTCOMES = [
   { key: 'completed', label: 'Completed', color: 'var(--color-state-checked-in)' },
@@ -27,18 +33,10 @@ const PUNCTUALITY: [RateSeries, RateSeries] = [
   { label: 'On time', color: 'var(--color-state-awaiting)', value: (r) => r.onTimeRate },
 ];
 
-const EVIDENCE: [RateSeries, RateSeries] = [
-  {
-    label: 'Required tasks done',
-    color: 'var(--color-accent)',
-    value: (r) => r.requiredTasksDoneRate,
-  },
-  {
-    label: 'Confirmed by family code',
-    color: 'var(--color-state-awaiting)',
-    value: (r) => r.qrVerifiedRate,
-  },
-];
+const outcomeSummary = (row: CaregiverPerformanceRow) =>
+  `${row.completed} done${row.missed > 0 ? `, ${row.missed} missed` : ''}${
+    row.excused > 0 ? `, ${row.excused} excused` : ''
+  }`;
 
 function Legend({ items }: { items: readonly { label: string; color: string }[] }) {
   return (
@@ -53,9 +51,19 @@ function Legend({ items }: { items: readonly { label: string; color: string }[] 
   );
 }
 
-function Chart({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+function Chart({
+  title,
+  hint,
+  wide,
+  children,
+}: {
+  title: string;
+  hint: string;
+  wide?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <section className="perf-charts__card">
+    <section className={wide ? 'perf-charts__card perf-charts__card--wide' : 'perf-charts__card'}>
       <h3 className="perf-charts__title">{title}</h3>
       <p className="perf-charts__hint">{hint}</p>
       {children}
@@ -63,7 +71,7 @@ function Chart({ title, hint, children }: { title: string; hint: string; childre
   );
 }
 
-function OutcomesChart({ rows }: { rows: CaregiverPerformanceRow[] }) {
+function OutcomesChart({ rows, layout }: { rows: CaregiverPerformanceRow[]; layout: ChartLayout }) {
   const sorted = [...rows].sort((a, b) => b.assigned - a.assigned);
   const max = Math.max(1, ...sorted.map((r) => r.completed + r.missed + r.excused));
   return (
@@ -72,29 +80,55 @@ function OutcomesChart({ rows }: { rows: CaregiverPerformanceRow[] }) {
       hint="Excused misses were outside the caregiver's control and aren't counted against them."
     >
       <Legend items={OUTCOMES} />
-      <div className="perf-charts__rows" aria-hidden>
-        {sorted.map((row) => (
-          <div key={row.caregiverId} className="perf-charts__row">
-            <span className="perf-charts__name">{row.caregiverName}</span>
-            <span className="perf-charts__track">
-              {OUTCOMES.map((o) =>
-                row[o.key] > 0 ? (
-                  <span
-                    key={o.key}
-                    className="perf-charts__segment"
-                    style={{ width: `${(row[o.key] / max) * 100}%`, background: o.color }}
-                  />
-                ) : null,
-              )}
-            </span>
-            <span className="perf-charts__value">
-              {row.completed} done
-              {row.missed > 0 ? `, ${row.missed} missed` : ''}
-              {row.excused > 0 ? `, ${row.excused} excused` : ''}
-            </span>
-          </div>
-        ))}
-      </div>
+      {layout === 'horizontal' ? (
+        <div className="perf-charts__rows" aria-hidden>
+          {sorted.map((row) => (
+            <div key={row.caregiverId} className="perf-charts__row">
+              <span className="perf-charts__name">{row.caregiverName}</span>
+              <span className="perf-charts__track">
+                {OUTCOMES.map((o) =>
+                  row[o.key] > 0 ? (
+                    <span
+                      key={o.key}
+                      className="perf-charts__segment"
+                      style={{ width: `${(row[o.key] / max) * 100}%`, background: o.color }}
+                    />
+                  ) : null,
+                )}
+              </span>
+              <span className="perf-charts__value">{outcomeSummary(row)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="perf-charts__columns" aria-hidden>
+          {sorted.map((row) => (
+            <div key={row.caregiverId} className="perf-charts__column">
+              <span className="perf-charts__column-label">{row.assigned} visits</span>
+              <span className="perf-charts__column-plot">
+                <span
+                  className="perf-charts__column-bar"
+                  style={{ height: `${((row.completed + row.missed + row.excused) / max) * 100}%` }}
+                >
+                  {[...OUTCOMES]
+                    .reverse()
+                    .map((o) =>
+                      row[o.key] > 0 ? (
+                        <span
+                          key={o.key}
+                          className="perf-charts__column-segment"
+                          style={{ flexGrow: row[o.key], background: o.color }}
+                        />
+                      ) : null,
+                    )}
+                </span>
+              </span>
+              <span className="perf-charts__column-count">{outcomeSummary(row)}</span>
+              <span className="perf-charts__column-date">{row.caregiverName}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <table className="perf-charts__sr">
         <caption>Visit outcomes by caregiver</caption>
         <thead>
@@ -127,40 +161,70 @@ function RatesChart({
   hint,
   rows,
   series,
+  layout,
 }: {
   title: string;
   hint: string;
   rows: CaregiverPerformanceRow[];
   series: [RateSeries, RateSeries];
+  layout: ChartLayout;
 }) {
   return (
     <Chart title={title} hint={hint}>
       <Legend items={series} />
-      <div className="perf-charts__rows" aria-hidden>
-        {rows.map((row) => (
-          <div key={row.caregiverId} className="perf-charts__row perf-charts__row--pair">
-            <span className="perf-charts__name">{row.caregiverName}</span>
-            <span className="perf-charts__pair">
-              {series.map((s) => {
-                const value = s.value(row);
-                return (
-                  <span key={s.label} className="perf-charts__pair-line">
-                    <span className="perf-charts__track perf-charts__track--thin">
-                      {value !== null ? (
-                        <span
-                          className="perf-charts__segment"
-                          style={{ width: `${value * 100}%`, background: s.color }}
-                        />
-                      ) : null}
+      {layout === 'horizontal' ? (
+        <div className="perf-charts__rows" aria-hidden>
+          {rows.map((row) => (
+            <div key={row.caregiverId} className="perf-charts__row perf-charts__row--pair">
+              <span className="perf-charts__name">{row.caregiverName}</span>
+              <span className="perf-charts__pair">
+                {series.map((s) => {
+                  const value = s.value(row);
+                  return (
+                    <span key={s.label} className="perf-charts__pair-line">
+                      <span className="perf-charts__track perf-charts__track--thin">
+                        {value !== null ? (
+                          <span
+                            className="perf-charts__segment"
+                            style={{ width: `${value * 100}%`, background: s.color }}
+                          />
+                        ) : null}
+                      </span>
+                      <span className="perf-charts__value">{percent(value)}</span>
                     </span>
-                    <span className="perf-charts__value">{percent(value)}</span>
-                  </span>
-                );
-              })}
-            </span>
-          </div>
-        ))}
-      </div>
+                  );
+                })}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="perf-charts__columns" aria-hidden>
+          {rows.map((row) => (
+            <div key={row.caregiverId} className="perf-charts__column">
+              <span className="perf-charts__column-plot perf-charts__column-plot--pair">
+                {series.map((s) => {
+                  const value = s.value(row);
+                  return (
+                    <span key={s.label} className="perf-charts__column-slot">
+                      <span className="perf-charts__column-value">{percent(value)}</span>
+                      <span
+                        className="perf-charts__column-bar perf-charts__column-bar--rate"
+                        // Leaves room above a full bar for its percentage label.
+                        style={{
+                          height: `calc(${(value ?? 0) * 100}% - ${(value ?? 0) * 22}px)`,
+                          background: s.color,
+                        }}
+                      />
+                    </span>
+                  );
+                })}
+              </span>
+              <span className="perf-charts__column-date">{row.caregiverName}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <table className="perf-charts__sr">
         <caption>{title}</caption>
         <thead>
@@ -218,13 +282,17 @@ function teamWeeks(rows: CaregiverPerformanceRow[]): TeamWeek[] {
 const weekLabel = (weekStart: string) => date(`${weekStart}T12:00:00Z`);
 const onTimeRate = (week: TeamWeek) => (week.checkedIn === 0 ? null : week.onTime / week.checkedIn);
 
-function WeeksChart({ rows }: { rows: CaregiverPerformanceRow[] }) {
+function WeeksChart({ rows, filtered }: { rows: CaregiverPerformanceRow[]; filtered: boolean }) {
   const weeks = teamWeeks(rows);
   const max = Math.max(1, ...weeks.map((w) => w.completed + w.missed));
+  const title = filtered ? 'Visits by week' : 'Team visits by week';
   return (
     <Chart
-      title="Team visits by week"
-      hint="Completed and missed visits each week, with the share of check-ins on time above each column."
+      title={title}
+      hint={`Completed and missed visits each week${
+        filtered ? ' for the caregivers found' : ''
+      }, with the share of check-ins on time above each column.`}
+      wide
     >
       <Legend items={OUTCOMES.slice(0, 2)} />
       {weeks.length === 0 ? (
@@ -262,7 +330,7 @@ function WeeksChart({ rows }: { rows: CaregiverPerformanceRow[] }) {
         </div>
       )}
       <table className="perf-charts__sr">
-        <caption>Team visits by week</caption>
+        <caption>{title}</caption>
         <thead>
           <tr>
             <th scope="col">Week of</th>
@@ -286,26 +354,24 @@ function WeeksChart({ rows }: { rows: CaregiverPerformanceRow[] }) {
   );
 }
 
-export function CaregiverPerformanceCharts({ rows }: { rows: CaregiverPerformanceRow[] }) {
-  if (rows.length === 0) {
-    return <p className="compliance__message">No caregiver activity this month.</p>;
-  }
+export function CaregiverPerformanceCharts({
+  rows,
+  layout = 'horizontal',
+}: {
+  rows: CaregiverPerformanceRow[];
+  layout?: ChartLayout;
+}) {
   return (
     <div className="perf-charts">
-      <OutcomesChart rows={rows} />
+      <OutcomesChart rows={rows} layout={layout} />
       <RatesChart
         title="Completion and punctuality"
         hint="The share of each caregiver's visits completed, and of their check-ins that were on time."
         rows={rows}
         series={PUNCTUALITY}
+        layout={layout}
       />
-      <WeeksChart rows={rows} />
-      <RatesChart
-        title="Evidence quality"
-        hint="The share of required care tasks done, and of visits confirmed with the family member's code."
-        rows={rows}
-        series={EVIDENCE}
-      />
+      <WeeksChart rows={rows} filtered={layout === 'vertical'} />
     </div>
   );
 }
