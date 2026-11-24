@@ -34,10 +34,32 @@ const PUNCTUALITY: [RateSeries, RateSeries] = [
   { label: 'On time', color: 'var(--color-state-awaiting)', value: (r) => r.onTimeRate },
 ];
 
-const outcomeSummary = (row: CaregiverPerformanceRow) =>
-  `${row.completed} done${row.missed > 0 ? `, ${row.missed} missed` : ''}${
-    row.excused > 0 ? `, ${row.excused} excused` : ''
-  }`;
+interface TipItem {
+  label: string;
+  color: string;
+  value: number;
+}
+
+const outcomeItems = (row: CaregiverPerformanceRow): TipItem[] =>
+  OUTCOMES.map((o) => ({ label: o.label, color: o.color, value: row[o.key] }));
+
+// The counts behind a bar, shown while the pointer is over it (CSS :hover on the row or column).
+// Keyboard and screen reader users get the same numbers from each chart's table, or the Show table
+// view.
+function Tooltip({ title, items }: { title: string; items: TipItem[] }) {
+  return (
+    <span className="perf-charts__tip">
+      <span className="perf-charts__tip-title">{title}</span>
+      {items.map((item) => (
+        <span key={item.label} className="perf-charts__tip-row">
+          <span className="perf-charts__swatch" style={{ background: item.color }} />
+          <span className="perf-charts__tip-label">{item.label}</span>
+          <span className="perf-charts__tip-value">{item.value}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
 
 function Legend({ items }: { items: readonly { label: string; color: string }[] }) {
   return (
@@ -97,7 +119,7 @@ function OutcomesChart({ rows, layout }: { rows: CaregiverPerformanceRow[]; layo
                   ) : null,
                 )}
               </span>
-              <span className="perf-charts__value">{outcomeSummary(row)}</span>
+              <Tooltip title={row.caregiverName} items={outcomeItems(row)} />
             </div>
           ))}
         </div>
@@ -124,8 +146,8 @@ function OutcomesChart({ rows, layout }: { rows: CaregiverPerformanceRow[]; layo
                     )}
                 </span>
               </span>
-              <span className="perf-charts__column-count">{outcomeSummary(row)}</span>
               <span className="perf-charts__column-date">{row.caregiverName}</span>
+              <Tooltip title={row.caregiverName} items={outcomeItems(row)} />
             </div>
           ))}
         </div>
@@ -329,10 +351,14 @@ function WeeksChart({
                   ) : null}
                 </span>
               </span>
-              <span className="perf-charts__column-count">
-                {week.completed} done{week.missed > 0 ? `, ${week.missed} missed` : ''}
-              </span>
               <span className="perf-charts__column-date">{weekRange(week.weekStart, period)}</span>
+              <Tooltip
+                title={weekRange(week.weekStart, period)}
+                items={[
+                  { label: 'Completed', color: OUTCOMES[0].color, value: week.completed },
+                  { label: 'Missed', color: OUTCOMES[1].color, value: week.missed },
+                ]}
+              />
             </div>
           ))}
         </div>

@@ -59,8 +59,9 @@
 }
 
 .perf-charts__row {
+  position: relative;
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr) 190px;
+  grid-template-columns: 130px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   font-size: 13px;
@@ -207,4 +208,68 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Hover tooltips: the counts behind a bar, shown while the pointer is over its row or column. */
+.perf-charts__column {
+  position: relative;
+}
+
+.perf-charts__tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: 6px;
+  background: var(--color-page-background);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 10%);
+  font-size: 12px;
+  text-align: left;
+  pointer-events: none;
+}
+
+.perf-charts__row:hover .perf-charts__tip,
+.perf-charts__column:hover .perf-charts__tip {
+  display: flex;
+}
+
+/* Above the bar, just right of the caregiver's name. */
+.perf-charts__row .perf-charts__tip {
+  left: 140px;
+  bottom: calc(100% + 4px);
+}
+
+/* Above the column. */
+.perf-charts__column .perf-charts__tip {
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -100%);
+}
+
+.perf-charts__tip-title {
+  font-weight: 600;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__tip-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-ink-default);
+}
+
+.perf-charts__tip-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__row:hover .perf-charts__track,
+.perf-charts__column:hover .perf-charts__column-bar {
+  filter: brightness(0.95);
 }
