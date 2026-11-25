@@ -831,18 +831,12 @@ paths:
       tags: [Check-in]
       summary: Issue the check-in code shown on a family member's phone
       description: |
-        Family members linked to the visit's dependant only. The phone's own position must pass the
-        same mock-location, accuracy and radius checks as the caregiver's, so a code can't be
-        forwarded from elsewhere. The code is random, single-use, bound to this visit and valid for
-        about a minute; the app asks for a new one while the screen is open. Only its hash is
-        stored, and of the family phone's position only the distance from the home is kept.
+        Family members linked to the visit's dependant only, from anywhere: since 2026-11-25 the
+        family phone's position isn't checked, so a relative away from the home can read the 6
+        digits out to the caregiver, whose own phone must still pass the geofence step. The code
+        is random, single-use, bound to this visit and valid for about a minute; the app asks for
+        a new one while the screen is open. Only its hash is stored. Any request body is ignored.
       operationId: issueCheckinCode
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GeofenceCheckinRequest'
       responses:
         '201':
           description: The code to display.
@@ -858,6 +852,57 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/Problem'
+  /visit-schedules/{visitScheduleId}/checkin/code:
+    parameters:
+      - $ref: '#/components/parameters/VisitScheduleId'
+    post:
+      tags: [Check-in]
+      summary: Start the visit with the 6 digits under a family member's check-in code
+      description: |
+        The same rules as scanning: the assigned caregiver only, holding the geofence step's
+        session token, and a code works exactly once. A refused code is a 422 whose
+        `failureReason` is `invalid_code`, `expired_code` or `used_code`. After 5 wrong codes in
+        10 minutes, typing is refused with a 429 for a while; scanning still works.
+      operationId: checkinWithCode
+      security:
+        - bearerAuth: []
+          checkinSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        '200':
+          description: The visit has started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checkinAt]
+                properties:
+                  status:
+                    type: string
+                    enum: [in_progress]
+                  checkinAt:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/Problem'
   /visit-schedules/{visitScheduleId}/checkout/qr:
     parameters:
       - $ref: '#/components/parameters/VisitScheduleId'
@@ -866,16 +911,10 @@ paths:
       summary: Issue the check-out code shown on a family member's phone
       description: |
         Once the caregiver has requested check-out. Only the family member whose code started the
-        visit, or any linked family member when a supervisor override started it. The phone must
-        pass the same position checks as at check-in. The code works like the check-in code, and
-        also carries 6 digits for the caregiver to type; the digits are stored only as a hash.
+        visit, or any linked family member when a supervisor override started it. Like the
+        check-in code, it can be shown from anywhere, and its 6 digits are stored only as a hash.
+        Any request body is ignored.
       operationId: issueCheckoutCode
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GeofenceCheckinRequest'
       responses:
         '201':
           description: The code to display.
@@ -3317,7 +3356,7 @@ components:
       enum: [scheduled, in_progress, completed, missed, cancelled, investigated, reassigned]
     VerificationAttemptType:
       type: string
-      enum: [geofence, family_location, qr_scan, checkout_qr, checkout_code]
+      enum: [geofence, family_location, qr_scan, checkin_code, checkout_qr, checkout_code]
     ConsentType:
       type: string
       enum: [location_verification, visit_audio, voice_verification]
@@ -4289,7 +4328,7 @@ components:
         code:
           type: string
           pattern: '^\d{6}$'
-          description: Check-out codes only. The 6 digits shown under the QR code, for typing.
+          description: The 6 digits shown under the QR code, for typing. Check-in codes have them since 2026-11-25.
         expiresAt:
           type: string
           format: date-time
@@ -4306,7 +4345,7 @@ components:
       enum: [dependant_declined, dependant_unwell_or_asleep, technical_problem, other]
     CheckinMethod:
       type: string
-      enum: [qr, supervisor_override]
+      enum: [qr, code, supervisor_override]
     CheckinOverride:
       type: object
       required: [id, visitScheduleId, reason, status, requestedAt]

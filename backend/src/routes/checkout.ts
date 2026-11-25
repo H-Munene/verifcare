@@ -33,8 +33,8 @@ export interface CheckoutRouterDependencies {
 const MAX_CODE_FAILURES = 5;
 const CODE_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 
-/** The stored form of a check-out's 6-digit code, bound to its visit. */
-export function checkoutCodeHash(visitScheduleId: string, code: string): string {
+/** The stored form of a family code's 6 digits (check-in or check-out), bound to its visit. */
+export function visitCodeHash(visitScheduleId: string, code: string): string {
   // ponytail: an unsalted hash of a 6-digit code is reversible by anyone who can read the table;
   // the code lives 60 s and guessing online is capped, so a keyed HMAC is the upgrade if needed.
   return hashSessionToken(`${visitScheduleId}:${code}`);
@@ -202,7 +202,12 @@ export function createCheckoutRouter(dependencies: CheckoutRouterDependencies): 
   }
 
   type Completion =
-    | { method: 'qr' | 'code'; codeId: string; familyMemberUserId: string; familyDistance: number }
+    | {
+        method: 'qr' | 'code';
+        codeId: string;
+        familyMemberUserId: string;
+        familyDistance: number | null;
+      }
     | { method: 'override'; reason: schema.CheckoutOverrideReason; note: string | null };
 
   // Completes the visit. The UPDATEs decide, not earlier reads: of two simultaneous attempts, only
@@ -549,7 +554,7 @@ export function createCheckoutRouter(dependencies: CheckoutRouterDependencies): 
           and(
             eq(schema.checkinQrTokens.visitScheduleId, visitScheduleId),
             eq(schema.checkinQrTokens.purpose, 'checkout'),
-            eq(schema.checkinQrTokens.codeHash, checkoutCodeHash(visitScheduleId, body.code)),
+            eq(schema.checkinQrTokens.codeHash, visitCodeHash(visitScheduleId, body.code)),
           ),
         )
         // Newest first: should the same digits ever recur, an old expired code mustn't hide a live one.

@@ -74,7 +74,6 @@ function buildTestApp(geofenceAccuracyThresholdMeters = 20, sessionTokenTtlSecon
     '/visit-schedules',
     createCheckinCodeRouter({
       requireAuth,
-      geofenceAccuracyThresholdMeters,
       qrTokenTtlSeconds: 60,
     }),
   );
@@ -600,37 +599,27 @@ describe.skipIf(!hasTestDb)('QR check-in (real Postgres)', () => {
       expect(code?.expiresAt.getTime()).toBe((code?.issuedAt.getTime() ?? 0) + 60_000);
     });
 
-    it("records the family phone's distance but never its coordinates", async () => {
-      await issueCode();
-
-      const [attempt] = await getDb()
-        .select()
-        .from(schema.verificationAttempts)
-        .where(eq(schema.verificationAttempts.attemptType, 'family_location'));
-      expect(attempt?.passed).toBe(true);
-      expect(attempt?.metadata).toHaveProperty('distanceFromGeofenceMeters');
-      expect(attempt?.metadata).not.toHaveProperty('gpsLat');
-      expect(attempt?.metadata).not.toHaveProperty('gpsLng');
-    });
-
-    it('refuses a family phone away from the home, so a code cannot be forwarded', async () => {
-      const response = await issueCode(
+    it('gives a code with 6 digits wherever the family phone is, and records no location', async () => {
+      // An older app still sends a position (here far from the home); a newer one sends nothing.
+      const away = await issueCode(
         visitId,
         familyAuth,
         geofencePayload({ gpsLat: FAR_LAT, gpsLng: FAR_LNG }),
       );
+      const noPosition = await issueCode(visitId, familyAuth, {});
 
-      expect(response.status).toBe(422);
-      expect(failureReason(response)).toBe('out_of_range');
-      expect(await getDb().select().from(schema.checkinQrTokens)).toHaveLength(0);
-    });
-
-    it('refuses a mock location and poor accuracy', async () => {
-      const mock = await issueCode(visitId, familyAuth, geofencePayload({ isMockLocation: true }));
-      const vague = await issueCode(visitId, familyAuth, geofencePayload({ accuracyMeters: 500 }));
-
-      expect(failureReason(mock)).toBe('mock_location_detected');
-      expect(failureReason(vague)).toBe('insufficient_accuracy');
+      for (const response of [away, noPosition]) {
+        expect(response.status).toBe(201);
+        expect((response.body as { code: string }).code).toMatch(/^\d{6}$/);
+      }
+      const codes = await getDb().select().from(schema.checkinQrTokens);
+      expect(codes.map((code) => code.distanceFromGeofenceMeters)).toEqual([null, null]);
+      expect(
+        await getDb()
+          .select()
+          .from(schema.verificationAttempts)
+          .where(eq(schema.verificationAttempts.attemptType, 'family_location')),
+      ).toHaveLength(0);
     });
 
     it("refuses a family member who isn't linked to this dependant", async () => {
@@ -670,7 +659,7 @@ describe.skipIf(!hasTestDb)('QR check-in (real Postgres)', () => {
       const [event] = await getDb().select().from(schema.verificationEvents);
       expect(event?.checkinAt).not.toBeNull();
       expect(event?.checkinMethod).toBe('qr');
-      expect(event?.familyDistanceFromGeofenceMeters).toBeGreaterThan(0);
+      expect(event?.familyDistanceFromGeofenceMeters).toBeNull();
       const [family] = await getDb()
         .select()
         .from(schema.users)
@@ -780,6 +769,77 @@ describe.skipIf(!hasTestDb)('QR check-in (real Postgres)', () => {
       const response = await scan(session, token, visitId, testAuthHeader('cg-2', 'caregiver'));
 
       expect(response.status).toBe(403);
+    });
+  });
+
+  describe('typing a code', () => {
+    const type = (session: string | null, code: string) => {
+      const req = request(app)
+        .post(`/visit-schedules/${visitId}/checkin/code`)
+        .set('x-test-auth', caregiverAuth);
+      if (session) req.set('x-checkin-session-token', session);
+      return req.send({ code });
+    };
+    const digitsOf = (response: request.Response) => (response.body as { code: string }).code;
+    const wrongFor = (digits: string) => String((Number(digits) + 1) % 1_000_000).padStart(6, '0');
+
+    it('starts the visit with the 6 digits under the check-in code', async () => {
+      const session = await passGeofenceAndGetSessionToken(app, 'cg-1', visitId);
+      const digits = digitsOf(await issueCode());
+
+      const response = await type(session, digits);
+
+      expect(response.status).toBe(200);
+      expect((await visitRow())?.status).toBe('in_progress');
+      const [event] = await getDb().select().from(schema.verificationEvents);
+      expect(event?.checkinMethod).toBe('code');
+      const [attempt] = await getDb()
+        .select()
+        .from(schema.verificationAttempts)
+        .where(eq(schema.verificationAttempts.attemptType, 'checkin_code'));
+      expect(attempt?.passed).toBe(true);
+    });
+
+    it('refuses wrong digits, logging the try and saying how many are left', async () => {
+      const session = await passGeofenceAndGetSessionToken(app, 'cg-1', visitId);
+      const digits = digitsOf(await issueCode());
+
+      const response = await type(session, wrongFor(digits));
+
+      expect(response.status).toBe(422);
+      expect(failureReason(response)).toBe('invalid_code');
+      expect((response.body as { detail: string }).detail).toContain('4 tries left');
+      expect((await visitRow())?.status).toBe('scheduled');
+    });
+
+    it('refuses digits that were already used', async () => {
+      const session = await passGeofenceAndGetSessionToken(app, 'cg-1', visitId);
+      const digits = digitsOf(await issueCode());
+      await type(session, digits);
+      await getDb().update(schema.visitSchedules).set({ status: 'scheduled' });
+
+      const replay = await type(session, digits);
+
+      expect(failureReason(replay)).toBe('used_code');
+    });
+
+    it('stops accepting typed codes after 5 wrong ones', async () => {
+      const session = await passGeofenceAndGetSessionToken(app, 'cg-1', visitId);
+      const digits = digitsOf(await issueCode());
+      for (let i = 0; i < 5; i++) {
+        await type(session, wrongFor(digits));
+      }
+
+      const response = await type(session, digits);
+
+      expect(response.status).toBe(429);
+      expect((await visitRow())?.status).toBe('scheduled');
+    });
+
+    it('needs the session token from the geofence step', async () => {
+      const digits = digitsOf(await issueCode());
+
+      expect((await type(null, digits)).status).toBe(401);
     });
   });
 

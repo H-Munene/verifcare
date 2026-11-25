@@ -6,16 +6,18 @@
 // The flow:
 // 1. POST .../checkin/geofence: the caregiver's phone is at the home; issues a session token.
 // 2. POST .../checkin/qr-scan: the caregiver scans the code on a family member's phone
-//    (routes/checkinCode.ts issues it). This is what starts the visit.
-// 3. If no family member is at the home, POST .../checkin/override asks a supervisor to let the
+//    (routes/checkinCode.ts issues it), or POST .../checkin/code types its 6 digits (2026-11-25),
+//    e.g. read out over the phone by a family member who isn't at the home. Either starts the visit.
+// 3. If no family member can give a code, POST .../checkin/override asks a supervisor to let the
 //    visit start instead (routes/checkinOverrides.ts decides it).
 //
 // Why a code rather than a face: facial biometrics were judged too invasive for what they add. The
 // code is random, valid for about a minute, single-use and bound to one visit, and it can only be
-// issued by a family member linked to this dependant whose phone is itself at the home. So a
-// screenshot can't be replayed later or used at another home, and two independent devices have to
-// be at the address. What it doesn't prove is who is holding the caregiver's phone: that rests on
-// their login and on the family member recognising them.
+// issued by a family member linked to this dependant. So a screenshot can't be replayed later or
+// used at another home. Since 2026-11-25 the family phone no longer has to be at the home, so the
+// code proves a linked family member agreed to the visit starting, while the geofence step proves
+// the caregiver's phone is there. What it doesn't prove is who is holding the caregiver's phone:
+// that rests on their login and on the family member recognising them.
 //
 // RBAC: caregiver-only, and only for a visit they're the assigned caregiver on. Every attempt, pass
 // or fail, writes a verification_attempts row so the audit trail explains why a failure happened.
@@ -23,7 +25,7 @@
 // This router's router.use(requireRole('caregiver')) rejects every other role that reaches it, so
 // any route other roles need under this prefix must be mounted before it (see app.ts).
 
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNull } from 'drizzle-orm';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -38,6 +40,7 @@ import { isPostgresUniqueViolation } from '../db/postgresErrors.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { parseOrSendProblem } from '../validation.js';
+import { visitCodeHash } from './checkout.js';
 
 export interface CheckinRouterDependencies {
   requireAuth: RequestHandler;
@@ -64,6 +67,28 @@ const overrideRequestSchema = z
   });
 
 type QrFailureReason = 'invalid_qr' | 'expired_qr' | 'used_qr';
+
+const codeRequestSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code.'),
+});
+
+// Wrong 6-digit codes allowed per visit in the window before typing is refused for a while, the same
+// limit as check-out's.
+const MAX_CODE_FAILURES = 5;
+const CODE_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+
+type CodeFailureReason = 'invalid_code' | 'expired_code' | 'used_code';
+
+function codeFailureDetail(reason: CodeFailureReason): string {
+  switch (reason) {
+    case 'invalid_code':
+      return "That code isn't right for this visit. Check the 6 digits on the family member's check-in code.";
+    case 'expired_code':
+      return 'This code has expired. Use the new code on the family member’s phone.';
+    case 'used_code':
+      return 'This code has already been used. Use the new code on the family member’s phone.';
+  }
+}
 
 function qrFailureDetail(reason: QrFailureReason): string {
   switch (reason) {
@@ -411,64 +436,7 @@ export function createCheckinRouter(dependencies: CheckinRouterDependencies): Ro
         return;
       }
 
-      // The UPDATEs are what decide, not the reads above: two simultaneous scans can both pass
-      // those reads, but only one can consume the code and start the visit.
-      const started = await db.transaction(async (tx) => {
-        const [consumed] = await tx
-          .update(schema.checkinQrTokens)
-          .set({ consumedAt: now })
-          .where(
-            and(
-              eq(schema.checkinQrTokens.id, code.id),
-              isNull(schema.checkinQrTokens.consumedAt),
-              gt(schema.checkinQrTokens.expiresAt, now),
-            ),
-          )
-          .returning({ id: schema.checkinQrTokens.id });
-        if (!consumed) {
-          return false;
-        }
-        const [flipped] = await tx
-          .update(schema.visitSchedules)
-          .set({ status: 'in_progress', updatedAt: now })
-          .where(
-            and(
-              eq(schema.visitSchedules.id, visitScheduleId),
-              eq(schema.visitSchedules.status, 'scheduled'),
-            ),
-          )
-          .returning({ id: schema.visitSchedules.id });
-        if (!flipped) {
-          return false;
-        }
-        await tx
-          .update(schema.verificationEvents)
-          .set({
-            checkinAt: now,
-            checkinMethod: 'qr',
-            qrFamilyMemberUserId: code.familyMemberUserId,
-            familyDistanceFromGeofenceMeters: code.distanceFromGeofenceMeters,
-          })
-          .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
-        await tx.insert(schema.verificationAttempts).values({
-          id: uuidv7(),
-          visitScheduleId,
-          attemptType: 'qr_scan',
-          passed: true,
-          failureReason: null,
-          metadata: { familyMemberUserId: code.familyMemberUserId },
-          attemptedAt: now,
-        });
-        await recordAudit(tx, {
-          actorUserId: callerRow.id,
-          action: 'visit.checkin',
-          entityType: 'visit_schedule',
-          entityId: visitScheduleId,
-          metadata: { method: 'qr', familyMemberUserId: code.familyMemberUserId },
-        });
-        return true;
-      });
-
+      const started = await startWithCode(db, visitScheduleId, callerRow.id, code, 'qr', now);
       if (!started) {
         await refuse('used_qr');
         return;
@@ -478,6 +446,180 @@ export function createCheckinRouter(dependencies: CheckinRouterDependencies): Ro
       next(err);
     }
   });
+
+  router.post('/:visitScheduleId/checkin/code', async (req, res, next) => {
+    const visitScheduleId = parseOrSendProblem(
+      visitScheduleIdParamSchema,
+      req.params.visitScheduleId,
+      res,
+    );
+    const body = visitScheduleId && parseOrSendProblem(codeRequestSchema, req.body, res);
+    const db = body && getDb(res);
+    if (!visitScheduleId || !body || !db) {
+      return;
+    }
+
+    try {
+      const context = await resolveCaregiverCheckinContext(
+        db,
+        visitScheduleId,
+        req,
+        res,
+        sessionTokenTtlSeconds,
+      );
+      if (!context) {
+        return;
+      }
+      const { callerRow } = context;
+      const now = new Date();
+
+      const failures = await db
+        .select({ id: schema.verificationAttempts.id })
+        .from(schema.verificationAttempts)
+        .where(
+          and(
+            eq(schema.verificationAttempts.visitScheduleId, visitScheduleId),
+            eq(schema.verificationAttempts.attemptType, 'checkin_code'),
+            eq(schema.verificationAttempts.passed, false),
+            gte(
+              schema.verificationAttempts.attemptedAt,
+              new Date(now.getTime() - CODE_FAILURE_WINDOW_MS),
+            ),
+          ),
+        );
+      if (failures.length >= MAX_CODE_FAILURES) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Too Many Requests',
+          status: 429,
+          detail:
+            'Too many wrong codes. Scan the QR code instead, or wait 10 minutes before typing again.',
+        });
+        return;
+      }
+
+      const refuse = async (failureReason: CodeFailureReason): Promise<void> => {
+        await db.insert(schema.verificationAttempts).values({
+          id: uuidv7(),
+          visitScheduleId,
+          attemptType: 'checkin_code',
+          passed: false,
+          failureReason,
+          attemptedAt: now,
+        });
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: `${codeFailureDetail(failureReason)} ${MAX_CODE_FAILURES - failures.length - 1} tries left.`,
+          failureReason,
+        });
+      };
+
+      const [code] = await db
+        .select()
+        .from(schema.checkinQrTokens)
+        .where(
+          and(
+            eq(schema.checkinQrTokens.visitScheduleId, visitScheduleId),
+            eq(schema.checkinQrTokens.purpose, 'checkin'),
+            eq(schema.checkinQrTokens.codeHash, visitCodeHash(visitScheduleId, body.code)),
+          ),
+        )
+        // Newest first: should the same digits ever recur, an old expired code mustn't hide a live one.
+        .orderBy(desc(schema.checkinQrTokens.issuedAt))
+        .limit(1);
+      if (!code) {
+        await refuse('invalid_code');
+        return;
+      }
+      if (code.consumedAt) {
+        await refuse('used_code');
+        return;
+      }
+      if (code.expiresAt <= now) {
+        await refuse('expired_code');
+        return;
+      }
+
+      const started = await startWithCode(db, visitScheduleId, callerRow.id, code, 'code', now);
+      if (!started) {
+        await refuse('used_code');
+        return;
+      }
+      res.status(200).json({ status: 'in_progress', checkinAt: now.toISOString() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Consumes the family's code and starts the visit, both or neither. The UPDATEs are what decide,
+  // not the callers' reads: two simultaneous attempts can both pass those reads, but only one can
+  // consume the code and start the visit. False when another attempt got there first.
+  async function startWithCode(
+    db: Db,
+    visitScheduleId: string,
+    callerUserId: string,
+    code: typeof schema.checkinQrTokens.$inferSelect,
+    method: 'qr' | 'code',
+    now: Date,
+  ): Promise<boolean> {
+    return await db.transaction(async (tx) => {
+      const [consumed] = await tx
+        .update(schema.checkinQrTokens)
+        .set({ consumedAt: now })
+        .where(
+          and(
+            eq(schema.checkinQrTokens.id, code.id),
+            isNull(schema.checkinQrTokens.consumedAt),
+            gt(schema.checkinQrTokens.expiresAt, now),
+          ),
+        )
+        .returning({ id: schema.checkinQrTokens.id });
+      if (!consumed) {
+        return false;
+      }
+      const [flipped] = await tx
+        .update(schema.visitSchedules)
+        .set({ status: 'in_progress', updatedAt: now })
+        .where(
+          and(
+            eq(schema.visitSchedules.id, visitScheduleId),
+            eq(schema.visitSchedules.status, 'scheduled'),
+          ),
+        )
+        .returning({ id: schema.visitSchedules.id });
+      if (!flipped) {
+        return false;
+      }
+      await tx
+        .update(schema.verificationEvents)
+        .set({
+          checkinAt: now,
+          checkinMethod: method,
+          qrFamilyMemberUserId: code.familyMemberUserId,
+          familyDistanceFromGeofenceMeters: code.distanceFromGeofenceMeters,
+        })
+        .where(eq(schema.verificationEvents.visitScheduleId, visitScheduleId));
+      await tx.insert(schema.verificationAttempts).values({
+        id: uuidv7(),
+        visitScheduleId,
+        attemptType: method === 'qr' ? 'qr_scan' : 'checkin_code',
+        passed: true,
+        failureReason: null,
+        metadata: { familyMemberUserId: code.familyMemberUserId },
+        attemptedAt: now,
+      });
+      await recordAudit(tx, {
+        actorUserId: callerUserId,
+        action: 'visit.checkin',
+        entityType: 'visit_schedule',
+        entityId: visitScheduleId,
+        metadata: { method, familyMemberUserId: code.familyMemberUserId },
+      });
+      return true;
+    });
+  }
 
   // POST .../checkin/override: no family member can show a code, so the caregiver, already proven
   // to be at the home by the session token, asks a supervisor to start the visit.

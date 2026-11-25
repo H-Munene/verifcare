@@ -3,13 +3,14 @@
 //
 // POST /visit-schedules/{id}/checkout/qr (2026-11-13): the same, to confirm check-out once the
 // caregiver has requested it (routes/checkout.ts consumes it). Only the family member whose code
-// started the visit may confirm it, or any linked one when a supervisor override started it. A
-// check-out code also carries 6 digits, for when the caregiver's camera can't scan.
+// started the visit may confirm it, or any linked one when a supervisor override started it. Every
+// code also carries 6 digits, for when the caregiver's camera can't scan or the family member isn't
+// at the home and reads them out.
 //
-// The family phone's own position is checked, by the same rule as the caregiver's, before a code is
-// issued. Without that, a relative anywhere could forward a live code to a caregiver who never
-// reached the home's front door. Only the pass result and distance are kept, because the only
-// question about a family member's location is whether they were at the home.
+// Since 2026-11-25 the family phone can be anywhere (it used to have to be at the home): a relative
+// away from the home can still let a caregiver in. The caregiver's own phone still has to be at the
+// home, which the check-in geofence step and the check-out request both check. A request body is
+// ignored, so older apps that still send their position keep working.
 //
 // Mounted before routes/checkin.ts, whose router-wide requireRole('caregiver') would otherwise
 // reject family members.
@@ -17,22 +18,19 @@
 import { randomInt } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { Router, type RequestHandler, type Response } from 'express';
-import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import { recordAudit } from '../audit.js';
 import { requireRole } from '../auth/middleware.js';
 import { generateSessionToken } from '../auth/sessionToken.js';
-import { assessPosition, devicePositionSchema, positionFailureDetail } from '../checkinPosition.js';
 import type { Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { parseOrSendProblem } from '../validation.js';
-import { checkoutCodeHash } from './checkout.js';
+import { visitCodeHash } from './checkout.js';
 import { findFamilyMemberLink } from './dependants.js';
 
 export interface CheckinCodeRouterDependencies {
   requireAuth: RequestHandler;
-  geofenceAccuracyThresholdMeters: number;
   qrTokenTtlSeconds: number;
 }
 
@@ -53,7 +51,7 @@ function getDb(res: Response): Db | undefined {
 
 export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependencies): Router {
   const router = Router();
-  const { requireAuth, geofenceAccuracyThresholdMeters, qrTokenTtlSeconds } = dependencies;
+  const { requireAuth, qrTokenTtlSeconds } = dependencies;
 
   const issueCode =
     (purpose: 'checkin' | 'checkout'): RequestHandler =>
@@ -64,10 +62,6 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
         res,
       );
       if (!visitScheduleId) {
-        return;
-      }
-      const body = parseOrSendProblem(devicePositionSchema, req.body, res);
-      if (!body) {
         return;
       }
       const db = getDb(res);
@@ -84,11 +78,6 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
         const [row] = await db
           .select({
             visit: schema.visitSchedules,
-            dependant: {
-              geofenceLat: schema.dependants.geofenceLat,
-              geofenceLng: schema.dependants.geofenceLng,
-              geofenceRadiusMeters: schema.dependants.geofenceRadiusMeters,
-            },
             caregiverName: schema.users.fullName,
             // Flat, not a nested object: as a nested left-joined object, drizzle returned it as null
             // when the facilitator was null, hiding a set checkoutRequestedAt.
@@ -140,41 +129,9 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
           return;
         }
 
-        const { distanceMeters, failureReason } = assessPosition(
-          body,
-          row.dependant,
-          geofenceAccuracyThresholdMeters,
-        );
         const now = new Date();
-        await db.insert(schema.verificationAttempts).values({
-          id: uuidv7(),
-          visitScheduleId,
-          attemptType: 'family_location',
-          passed: !failureReason,
-          failureReason: failureReason ?? null,
-          // Deliberately not the coordinates: see the header.
-          metadata: {
-            familyMemberUserId: link.callerRow.id,
-            accuracyMeters: body.accuracyMeters,
-            isMockLocation: body.isMockLocation,
-            distanceFromGeofenceMeters: distanceMeters,
-          },
-          attemptedAt: now,
-        });
-        if (failureReason) {
-          sendProblem(res, {
-            type: 'about:blank',
-            title: 'Unprocessable Entity',
-            status: 422,
-            detail: positionFailureDetail(failureReason),
-            failureReason,
-          });
-          return;
-        }
-
         const { token, hash } = generateSessionToken();
-        const digits =
-          purpose === 'checkout' ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
+        const digits = String(randomInt(0, 1_000_000)).padStart(6, '0');
         const expiresAt = new Date(now.getTime() + qrTokenTtlSeconds * 1000);
         await db.transaction(async (tx) => {
           const [code] = await tx
@@ -183,11 +140,10 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
               visitScheduleId,
               familyMemberUserId: link.callerRow.id,
               tokenHash: hash,
-              distanceFromGeofenceMeters: distanceMeters,
               issuedAt: now,
               expiresAt,
               purpose,
-              codeHash: digits ? checkoutCodeHash(visitScheduleId, digits) : null,
+              codeHash: visitCodeHash(visitScheduleId, digits),
             })
             .returning({ id: schema.checkinQrTokens.id });
           await recordAudit(tx, {
@@ -195,13 +151,13 @@ export function createCheckinCodeRouter(dependencies: CheckinCodeRouterDependenc
             action: purpose === 'checkin' ? 'checkin_code.issue' : 'checkout_code.issue',
             entityType: 'visit_schedule',
             entityId: visitScheduleId,
-            metadata: { codeId: code?.id, distanceMeters: Math.round(distanceMeters) },
+            metadata: { codeId: code?.id },
           });
         });
 
         res.status(201).json({
           token,
-          ...(digits ? { code: digits } : {}),
+          code: digits,
           expiresAt: expiresAt.toISOString(),
           caregiverDisplayName: row.caregiverName,
         });

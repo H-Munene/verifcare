@@ -159,7 +159,8 @@ export function summarisePerformance(
           onTime += 1;
           week.onTime += 1;
         }
-        if (visit.checkinMethod === 'qr') {
+        // A typed code (2026-11-25) is the same family code as a scanned one.
+        if (visit.checkinMethod === 'qr' || visit.checkinMethod === 'code') {
           qrCheckins += 1;
         } else if (visit.checkinMethod === 'supervisor_override') {
           supervisorOverrides += 1;
