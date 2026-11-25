@@ -10,12 +10,10 @@ import 'screens/account_screen.dart';
 import 'screens/checkin_screen.dart';
 import 'screens/consent_screen.dart';
 import 'screens/home_screen.dart';
-import 'api/voice_enrollment_api.dart';
 import 'screens/login_screen.dart';
 import 'screens/schedule_calendar_screen.dart';
 import 'screens/visit_in_progress_screen.dart';
 import 'screens/visit_timeline_screen.dart';
-import 'screens/voice_enrolment_screen.dart';
 import 'visit_notifications.dart';
 import 'widgets/recovery_offer_banner.dart';
 
@@ -131,7 +129,6 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
   late final ApiClient _apiClient;
   late final VisitSchedulesApi _visitSchedulesApi;
   late final CheckinApi _checkinApi;
-  late final VoiceEnrollmentApi _voiceEnrollmentApi;
   int _tabIndex = 0;
   int _visitsRefreshToken = 0;
   // The caregiver's checked-in visit, if any - read from the server rather than stored on the
@@ -144,7 +141,6 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
     _apiClient = ApiClient(widget.authService.getIdToken);
     _visitSchedulesApi = VisitSchedulesApi(_apiClient);
     _checkinApi = CheckinApi(_apiClient);
-    _voiceEnrollmentApi = VoiceEnrollmentApi(_apiClient);
     _loadOngoingVisit();
     VisitNotifications.tappedVisitId.addListener(_openTappedVisit);
     // A tap that cold-launched the app landed before this shell existed (or before sign-in).
@@ -263,7 +259,6 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
       AccountScreen(
         authService: widget.authService,
         identity: widget.identity,
-        voiceEnrollmentApi: _voiceEnrollmentApi,
         onSignedOut: widget.onSignedOut,
       ),
     ];
@@ -272,7 +267,6 @@ class _AuthenticatedShellState extends State<_AuthenticatedShell> {
     return Scaffold(
       body: Column(
         children: [
-          VoiceEnrolmentBanner(api: _voiceEnrollmentApi),
           RecoveryOfferBanner(
             api: _visitSchedulesApi,
             onAccepted: _refreshVisits,

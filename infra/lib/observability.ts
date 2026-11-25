@@ -10,7 +10,7 @@ export interface ObservabilityParams {
   apiFunction: NodejsFunction;
   missedVisitSweepFunction: NodejsFunction;
   restApi: apigateway.LambdaRestApi;
-  database: rds.DatabaseInstance;
+  database: rds.IDatabaseInstance;
 }
 
 export function createObservability(stack: cdk.Stack, params: ObservabilityParams): void {

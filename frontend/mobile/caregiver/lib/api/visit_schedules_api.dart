@@ -284,33 +284,31 @@ class VisitSchedulesApi {
     await _client.post('/recovery-offers/$offerId/decline', const {});
   }
 
-  /// For each recording role ('caregiver', 'dependant'): whether it's needed (that person
-  /// consented to being recorded) and whether the server already holds it.
-  Future<Map<String, ({bool required, bool recorded})>> audioRequirement(
+  /// Whether the dependant's recording is needed (their family consented to it being recorded)
+  /// and whether the server already holds it. Only the dependant is recorded since 2026-11-24.
+  Future<({bool required, bool recorded})> dependantAudioRequirement(
     String visitScheduleId,
   ) async {
     final json = await _client.get(
       '/visit-schedules/$visitScheduleId/audio/requirement',
     );
-    return {
-      for (final entry in json.entries)
-        entry.key: (
-          required: (entry.value as Map)['required'] as bool,
-          recorded: (entry.value as Map)['recorded'] as bool,
-        ),
-    };
+    final dependant = json['dependant'] as Map<String, dynamic>;
+    return (
+      required: dependant['required'] as bool,
+      recorded: dependant['recorded'] as bool,
+    );
   }
 
-  /// Presign, upload straight to S3, then confirm, which also checks the voice. Safe to repeat: a
-  /// retry replaces the recording.
-  Future<void> uploadAudio(
+  /// Presign, upload straight to S3, then confirm, which also checks the voice against the
+  /// dependant's voiceprint and returns the result. Safe to repeat: a retry replaces the recording
+  /// and its check.
+  Future<VoiceCheck> uploadDependantAudio(
     String visitScheduleId, {
-    required String role,
     required List<int> bytes,
     required int durationSeconds,
   }) async {
     final presign = await _client.post(
-      '/visit-schedules/$visitScheduleId/audio/$role/upload-url',
+      '/visit-schedules/$visitScheduleId/audio/dependant/upload-url',
       const {},
     );
     await ApiClient.uploadToPresignedUrl(
@@ -318,11 +316,36 @@ class VisitSchedulesApi {
       bytes,
       'audio/mp4',
     );
-    await _client.post('/visit-schedules/$visitScheduleId/audio/$role', {
-      's3Key': presign['s3Key'],
-      'durationSeconds': durationSeconds,
-    });
+    final confirmed = await _client.post(
+      '/visit-schedules/$visitScheduleId/audio/dependant',
+      {'s3Key': presign['s3Key'], 'durationSeconds': durationSeconds},
+    );
+    return VoiceCheck.fromJson(confirmed['voiceCheck'] as Map<String, dynamic>);
   }
+}
+
+/// The voice check of a visit recording (backend/src/voiceChecks.ts). Advisory: a failed check can
+/// be recorded again, but never stops check-out.
+class VoiceCheck {
+  /// match, mismatch, too_short, not_enrolled, no_consent or unavailable.
+  final String result;
+
+  /// How alike the recording and the voiceprint are, 0 to 1; null when nothing was compared.
+  final double? score;
+  final double? threshold;
+
+  const VoiceCheck({required this.result, this.score, this.threshold});
+
+  factory VoiceCheck.fromJson(Map<String, dynamic> json) => VoiceCheck(
+    result: json['result'] as String,
+    score: (json['score'] as num?)?.toDouble(),
+    threshold: (json['threshold'] as num?)?.toDouble(),
+  );
+
+  bool get passed => result == 'match';
+
+  /// No comparison was made: the dependant has no voiceprint, or no consent to voice checks.
+  bool get notChecked => result == 'not_enrolled' || result == 'no_consent';
 }
 
 /// A request to cover another caregiver's late visit. Deliberately only the area and times: the

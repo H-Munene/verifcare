@@ -50,33 +50,55 @@ final _visit = VisitSchedule.fromJson({
   'updatedAt': '2026-11-12T07:00:00Z',
 });
 
-// The server's side: records each request and answers 200.
+// The server's side: records each request and answers 200, saying whether the dependant's
+// recording is needed.
 class _Backend {
+  final bool audioRequired;
+  _Backend({this.audioRequired = true});
+
   final requests = <(String, Map<String, dynamic>)>[];
   late final client = MockClient((request) async {
+    if (request.url.path.endsWith('/audio/requirement')) {
+      return _json({
+        'dependant': {'required': audioRequired, 'recorded': false},
+      });
+    }
     requests.add((
       request.url.path,
       request.body.isEmpty
           ? {}
           : jsonDecode(request.body) as Map<String, dynamic>,
     ));
-    return http.Response(
-      '{}',
-      200,
-      headers: {'content-type': 'application/json'},
-    );
+    return _json({});
   });
 }
 
-Widget _screen({required Map<String, bool> uploaded}) => MaterialApp(
+http.Response _json(Object body) => http.Response(
+  jsonEncode(body),
+  200,
+  headers: {'content-type': 'application/json'},
+);
+
+final _unticked = VisitTask(
+  careTaskId: 't1',
+  title: 'Give medication',
+  required: true,
+);
+
+Widget _screen({
+  List<VisitTask> tasks = const [],
+  Future<VoiceCheck?> Function()? upload,
+}) => MaterialApp(
   home: CheckoutScreen(
     visit: _visit,
     visitSchedulesApi: VisitSchedulesApi(ApiClient(() async => 'token')),
-    tasks: const [],
+    tasks: tasks,
     checkedTaskIds: const {},
-    hasRecording: const {'caregiver': false, 'dependant': false},
-    audioRequired: const {'caregiver': true, 'dependant': true},
-    alreadyUploaded: uploaded,
+    recorderBuilder: (onRecordingChanged) => TextButton(
+      onPressed: () => onRecordingChanged(true),
+      child: const Text('fake record'),
+    ),
+    uploadRecording: upload,
     scannerBuilder: (onValue) => TextButton(
       onPressed: () => onValue('scanned-token'),
       child: const Text('fake scan'),
@@ -100,85 +122,179 @@ void _expectRequest(
 Future<void> _afterCompleting(WidgetTester tester) =>
     tester.pump(const Duration(milliseconds: 500));
 
-ElevatedButton _checkOutButton(WidgetTester tester) => tester
-    .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Check out'));
+ElevatedButton _button(WidgetTester tester, String label) =>
+    tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, label));
+
+Future<void> _continue(WidgetTester tester) async {
+  await tester.tap(find.widgetWithText(ElevatedButton, 'Continue'));
+  await tester.pumpAndSettle();
+}
+
+// Records (with the fake recorder) and sends the recording for its check.
+Future<void> _recordAndCheck(WidgetTester tester) async {
+  await tester.tap(find.text('fake record'));
+  await tester.pump();
+  await tester.tap(find.widgetWithText(ElevatedButton, 'Check voice'));
+  await tester.pumpAndSettle();
+}
+
+const _checkoutRequest = '/visit-schedules/v1/checkout/request';
+const _atHome = {'gpsLat': -1.28, 'gpsLng': 36.81};
 
 void main() {
   setUp(() => GeolocatorPlatform.instance = _AtHome());
 
-  testWidgets("can't check out without the caregiver's own recording", (
+  testWidgets('every unticked task needs a reason before continuing', (
     tester,
   ) async {
-    await tester.pumpWidget(_screen(uploaded: const {'dependant': true}));
-
-    expect(find.text('Your voice not recorded'), findsOneWidget);
-    expect(_checkOutButton(tester).onPressed, isNull);
-  });
-
-  testWidgets("the dependant's recording can be replaced by a reason", (
-    tester,
-  ) async {
-    await tester.pumpWidget(_screen(uploaded: const {'caregiver': true}));
-    expect(_checkOutButton(tester).onPressed, isNull);
+    await tester.pumpWidget(_screen(tasks: [_unticked]));
+    expect(_button(tester, 'Continue').onPressed, isNull);
 
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Dependant unwell or asleep').last);
+    await tester.tap(find.text('Client declined').last);
     await tester.pumpAndSettle();
 
-    expect(_checkOutButton(tester).onPressed, isNotNull);
+    expect(_button(tester, 'Continue').onPressed, isNotNull);
   });
 
   testWidgets(
-    'requests check-out, then confirms with the 6 digits or the scanned code',
+    "a passed voice check shows the tick and the score, then the family's code",
     (tester) async {
       final backend = _Backend();
       await http.runWithClient(() async {
         await tester.pumpWidget(
-          _screen(uploaded: const {'caregiver': true, 'dependant': true}),
+          _screen(
+            upload: () async =>
+                const VoiceCheck(result: 'match', score: 0.82, threshold: 0.5),
+          ),
         );
-        await tester.tap(find.widgetWithText(ElevatedButton, 'Check out'));
+        await _continue(tester);
+        expect(_button(tester, 'Check voice').onPressed, isNull);
+
+        await _recordAndCheck(tester);
+        expect(find.text('Voice matches'), findsOneWidget);
+        expect(find.text('Match score 0.82'), findsOneWidget);
+        expect(backend.requests, isEmpty);
+
+        // Moves on by itself after a pause.
+        await tester.pump(const Duration(seconds: 2));
         await tester.pumpAndSettle();
-
-        _expectRequest(
-          backend.requests.single,
-          '/visit-schedules/v1/checkout/request',
-          {'gpsLat': -1.28, 'gpsLng': 36.81},
-        );
+        _expectRequest(backend.requests.single, _checkoutRequest, _atHome);
         expect(find.text('Scan the code'), findsOneWidget);
-
-        // Only six digits can be confirmed.
-        await tester.enterText(find.byType(TextField).first, '12345');
-        await tester.pump();
-        expect(
-          tester
-              .widget<OutlinedButton>(
-                find.widgetWithText(OutlinedButton, 'Confirm'),
-              )
-              .onPressed,
-          isNull,
-        );
-        await tester.enterText(find.byType(TextField).first, '123456');
-        await tester.pump();
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Confirm'));
-        await _afterCompleting(tester);
-        _expectRequest(
-          backend.requests.last,
-          '/visit-schedules/v1/checkout/code',
-          {'code': '123456', 'gpsLat': -1.28, 'gpsLng': 36.81},
-        );
       }, () => backend.client);
     },
   );
 
-  testWidgets('confirms with the scanned QR code', (tester) async {
+  testWidgets(
+    'a failed voice check shows the score, and can be recorded again or continued past',
+    (tester) async {
+      final backend = _Backend();
+      await http.runWithClient(() async {
+        await tester.pumpWidget(
+          _screen(
+            upload: () async => const VoiceCheck(
+              result: 'mismatch',
+              score: 0.31,
+              threshold: 0.5,
+            ),
+          ),
+        );
+        await _continue(tester);
+        await _recordAndCheck(tester);
+
+        expect(find.text("Voice doesn't match"), findsOneWidget);
+        expect(find.text('Match score 0.31, needs 0.50'), findsOneWidget);
+        expect(find.text('Record again'), findsOneWidget);
+        // No moving on by itself after a failed check.
+        await tester.pump(const Duration(seconds: 3));
+        expect(backend.requests, isEmpty);
+
+        await _continue(tester);
+        _expectRequest(backend.requests.single, _checkoutRequest, _atHome);
+        expect(find.text('Scan the code'), findsOneWidget);
+      }, () => backend.client);
+    },
+  );
+
+  testWidgets("a dependant who can't speak is accounted for with a reason", (
+    tester,
+  ) async {
     final backend = _Backend();
     await http.runWithClient(() async {
-      await tester.pumpWidget(
-        _screen(uploaded: const {'caregiver': true, 'dependant': true}),
+      await tester.pumpWidget(_screen());
+      await _continue(tester);
+
+      final withoutRecording = find.widgetWithText(
+        OutlinedButton,
+        'Continue without a recording',
       );
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Check out'));
+      expect(tester.widget<OutlinedButton>(withoutRecording).onPressed, isNull);
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Dependant unwell or asleep').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(withoutRecording);
+      await tester.tap(withoutRecording);
+      await tester.pumpAndSettle();
+
+      _expectRequest(backend.requests.single, _checkoutRequest, {
+        ..._atHome,
+        'audioSkipReason': 'dependant_unwell_or_asleep',
+      });
+      expect(find.text('Scan the code'), findsOneWidget);
+    }, () => backend.client);
+  });
+
+  testWidgets(
+    "goes straight to the family's code when the dependant isn't recorded",
+    (tester) async {
+      final backend = _Backend(audioRequired: false);
+      await http.runWithClient(() async {
+        await tester.pumpWidget(_screen());
+        await _continue(tester);
+
+        expect(find.text('fake record'), findsNothing);
+        _expectRequest(backend.requests.single, _checkoutRequest, _atHome);
+        expect(find.text('Scan the code'), findsOneWidget);
+      }, () => backend.client);
+    },
+  );
+
+  testWidgets('confirms with the 6 digits', (tester) async {
+    final backend = _Backend(audioRequired: false);
+    await http.runWithClient(() async {
+      await tester.pumpWidget(_screen());
+      await _continue(tester);
+
+      // Only six digits can be confirmed.
+      await tester.enterText(find.byType(TextField).first, '12345');
+      await tester.pump();
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Confirm'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.enterText(find.byType(TextField).first, '123456');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Confirm'));
+      await _afterCompleting(tester);
+      _expectRequest(
+        backend.requests.last,
+        '/visit-schedules/v1/checkout/code',
+        {'code': '123456', ..._atHome},
+      );
+    }, () => backend.client);
+  });
+
+  testWidgets('confirms with the scanned QR code', (tester) async {
+    final backend = _Backend(audioRequired: false);
+    await http.runWithClient(() async {
+      await tester.pumpWidget(_screen());
+      await _continue(tester);
       await tester.tap(find.text('Scan the code'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('fake scan'));
@@ -187,7 +303,7 @@ void main() {
       _expectRequest(
         backend.requests.last,
         '/visit-schedules/v1/checkout/qr-scan',
-        {'token': 'scanned-token', 'gpsLat': -1.28, 'gpsLng': 36.81},
+        {'token': 'scanned-token', ..._atHome},
       );
     }, () => backend.client);
   });
@@ -195,13 +311,10 @@ void main() {
   testWidgets('checks out without the code once a reason is given', (
     tester,
   ) async {
-    final backend = _Backend();
+    final backend = _Backend(audioRequired: false);
     await http.runWithClient(() async {
-      await tester.pumpWidget(
-        _screen(uploaded: const {'caregiver': true, 'dependant': true}),
-      );
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Check out'));
-      await tester.pumpAndSettle();
+      await tester.pumpWidget(_screen());
+      await _continue(tester);
 
       final withoutCode = find.widgetWithText(
         OutlinedButton,
@@ -219,11 +332,7 @@ void main() {
       _expectRequest(
         backend.requests.last,
         '/visit-schedules/v1/checkout/override',
-        {
-          'reason': 'no_family_member_present',
-          'gpsLat': -1.28,
-          'gpsLng': 36.81,
-        },
+        {'reason': 'no_family_member_present', ..._atHome},
       );
     }, () => backend.client);
   });

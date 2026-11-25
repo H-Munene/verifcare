@@ -304,15 +304,14 @@ async function main() {
   const LOCATION_REVOKED = 5;
   for (const [i, c] of caregivers.entries()) {
     grant({ caregiverId: c.id }, 'location_verification', c.id);
+    // Audio only: caregivers have no voiceprint since 2026-11-24.
     if (i !== 7) {
-      for (const consentType of ['visit_audio', 'voice_verification'] as const) {
-        grant(
-          { caregiverId: c.id },
-          consentType,
-          c.id,
-          i === 3 ? at(addDays(today, -8), 18) : undefined,
-        );
-      }
+      grant(
+        { caregiverId: c.id },
+        'visit_audio',
+        c.id,
+        i === 3 ? at(addDays(today, -8), 18) : undefined,
+      );
     }
   }
   for (const [i, d] of dependants.entries()) {
@@ -342,12 +341,12 @@ async function main() {
   const hasAudio = (id: string, when: Date) =>
     audioConsent.has(id) && (audioConsent.get(id) === null || audioConsent.get(id)! > when);
 
-  // The current terms are version 4. Some people only accepted 3, and a few never accepted any.
+  // The current terms are version 5. Some people only accepted 4, and a few never accepted any.
   const terms: (typeof schema.termsAcceptances.$inferInsert)[] = [];
   const accept = (userId: string, document: 'caregiver' | 'family_member', versions: string[]) =>
     versions.forEach((version, v) => {
       const id = randomUUID();
-      const acceptedAt = at(addDays(firstDay, version === '4' ? 5 + v : -30), 8);
+      const acceptedAt = at(addDays(firstDay, version === '5' ? 5 + v : -30), 8);
       terms.push({
         id,
         userId,
@@ -356,16 +355,16 @@ async function main() {
         acceptedAt,
         locationConsent: true,
         audioConsent: true,
-        // Version 4 added the voice box.
-        voiceConsent: version === '4' ? true : null,
+        // Version 4 added the voice box; version 5 took it away from caregivers.
+        voiceConsent: version === '5' && document === 'caregiver' ? null : true,
       });
       log(acceptedAt, userId, 'terms.accept', 'terms_acceptance', id, { document, version });
     });
   caregivers.forEach((c, i) =>
-    accept(c.id, 'caregiver', i === 9 ? [] : i >= 7 ? ['3'] : ['3', '4']),
+    accept(c.id, 'caregiver', i === 9 ? [] : i >= 7 ? ['4'] : ['4', '5']),
   );
   dependants.forEach((d, i) =>
-    accept(d.familyId, 'family_member', i % 7 === 3 ? [] : i % 5 === 0 ? ['3'] : ['4']),
+    accept(d.familyId, 'family_member', i % 7 === 3 ? [] : i % 5 === 0 ? ['4'] : ['5']),
   );
   await insertAll(schema.termsAcceptances, terms);
 
@@ -439,7 +438,7 @@ async function main() {
     }
     const checkedOut = !chance(habit.noCheckout);
     const checkoutAt = checkedOut ? minutes(checkinAt, between(40, 65)) : null;
-    const audioAllowed = hasAudio(caregiverId, start) && hasAudio(dependantId, start);
+    const audioAllowed = hasAudio(dependantId, start);
     const skipAudio = audioAllowed && checkedOut && chance(habit.skipAudio);
     const skipReason = skipAudio ? pick(AUDIO_SKIP_REASONS) : null;
     events.push({
@@ -481,22 +480,18 @@ async function main() {
     if (!checkoutAt) {
       return 'in_progress';
     }
-    // Two recordings per visit since 0019: the caregiver's, and the dependant's unless skipped.
-    if (audioAllowed) {
-      for (const role of skipAudio
-        ? (['caregiver'] as const)
-        : (['caregiver', 'dependant'] as const)) {
-        audio.push({
-          verificationEventId: visitId,
-          role,
-          s3Key: `${visitId}/${role}/${randomUUID()}.m4a`,
-          durationSeconds: role === 'caregiver' ? 15 : 22,
-          uploadedAt: minutes(checkoutAt, -4),
-        });
-        log(minutes(checkoutAt, -4), caregiverId, 'visit_audio.upload', 'visit_schedule', visitId, {
-          role,
-        });
-      }
+    // The dependant's recording at check-out, unless skipped (only the dependant since 2026-11-24).
+    if (audioAllowed && !skipAudio) {
+      audio.push({
+        verificationEventId: visitId,
+        role: 'dependant',
+        s3Key: `${visitId}/dependant/${randomUUID()}.m4a`,
+        durationSeconds: 22,
+        uploadedAt: minutes(checkoutAt, -4),
+      });
+      log(minutes(checkoutAt, -4), caregiverId, 'visit_audio.upload', 'visit_schedule', visitId, {
+        role: 'dependant',
+      });
     }
     for (const task of tasksOf.get(dependantId)!) {
       const status = task.required

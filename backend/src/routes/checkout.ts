@@ -1,7 +1,7 @@
 // Check-out (2026-11-13), the caregiver's side. Two steps, like check-in:
 //
 // 1. POST .../checkout/request: every requirement is met (inside the home's radius, required tasks
-//    addressed, both recordings made or the dependant's explained), so the family is asked to confirm.
+//    addressed, the dependant recorded or their recording explained), so the family is asked to confirm.
 // 2. The family member's phone shows a code (routes/checkinCode.ts's .../checkout/qr), and the
 //    caregiver scans it (.../checkout/qr-scan) or types its 6 digits (.../checkout/code). If neither
 //    is possible, .../checkout/override completes the visit at once with a reason, so the caregiver
@@ -369,16 +369,6 @@ export function createCheckoutRouter(dependencies: CheckoutRouterDependencies): 
       }
 
       const recordings = await recordingRequirements(db, loaded.visit);
-      if (recordings.caregiver.required && !recordings.caregiver.recorded) {
-        sendProblem(res, {
-          type: 'about:blank',
-          title: 'Conflict',
-          status: 409,
-          detail: 'Record your own voice to check out.',
-          failureReason: 'caregiver_recording_required',
-        });
-        return;
-      }
       const dependantMissing = recordings.dependant.required && !recordings.dependant.recorded;
       if (dependantMissing && !body.audioSkipReason) {
         sendProblem(res, {

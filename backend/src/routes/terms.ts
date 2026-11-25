@@ -28,7 +28,12 @@ import { z } from 'zod';
 import { recordAudit } from '../audit.js';
 import { getUserByCognitoSub } from '../db/callerLookup.js';
 import type { Db } from '../db/client.js';
-import { grantConsents, TERMS_CONSENT_TYPES, type ConsentSubject } from '../db/consents.js';
+import {
+  grantConsents,
+  TERMS_CONSENT_TYPES,
+  type ConsentSubject,
+  type ConsentType,
+} from '../db/consents.js';
 import * as schema from '../db/schema.js';
 import { sendProblem } from '../errors.js';
 import { CURRENT_TERMS, type TermsDocument, type TermsDocumentType } from '../terms.js';
@@ -50,11 +55,18 @@ const acceptTermsRequestSchema = z.object({
   audioConsent: z.literal(true, {
     error: 'Consent to audio recording during visits is required to accept the terms.',
   }),
-  // Terms v4 (2026-11-13): the third required box.
-  voiceConsent: z.literal(true, {
-    error: 'Consent to voice checks at visits is required to accept the terms.',
-  }),
+  // Terms v4 (2026-11-13): the third box. Required of family members only since v5 (2026-11-24),
+  // when caregivers stopped having a voiceprint; checked once the caller's document is known.
+  voiceConsent: z
+    .literal(true, { error: 'Consent to voice checks at visits is required to accept the terms.' })
+    .optional(),
 });
+
+// The consents each document's acceptance grants: a caregiver's no longer includes voice checks.
+const CONSENT_TYPES_BY_DOCUMENT: Record<TermsDocumentType, readonly ConsentType[]> = {
+  caregiver: TERMS_CONSENT_TYPES.filter((type) => type !== 'voice_verification'),
+  family_member: TERMS_CONSENT_TYPES,
+};
 
 function getDb(res: Response): Db | undefined {
   const db = res.req.app.locals.db as Db | undefined;
@@ -208,6 +220,16 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
         });
         return;
       }
+      if (terms.document === 'family_member' && !body.voiceConsent) {
+        sendProblem(res, {
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail: 'Consent to voice checks at visits is required to accept the terms.',
+        });
+        return;
+      }
+      const consentTypes = CONSENT_TYPES_BY_DOCUMENT[terms.document];
       // Accepting again is harmless and keeps the original acceptance time (the table is
       // append-only, so the first record stands). One transaction, so an acceptance is never
       // recorded without the consent records it promises, or the other way round.
@@ -220,11 +242,16 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             version: terms.version,
             locationConsent: body.locationConsent,
             audioConsent: body.audioConsent,
-            voiceConsent: body.voiceConsent,
+            voiceConsent: terms.document === 'family_member' ? true : null,
           })
           .onConflictDoNothing()
           .returning();
-        await grantConsents(tx, await consentSubjectsOf(tx, userId, terms.document), userId);
+        await grantConsents(
+          tx,
+          await consentSubjectsOf(tx, userId, terms.document),
+          userId,
+          consentTypes,
+        );
         // onConflictDoNothing means this exact version was already accepted (the table is
         // append-only) - a genuine no-op, so no audit row for it.
         if (inserted) {
@@ -236,7 +263,7 @@ export function createTermsRouter(dependencies: TermsRouterDependencies): Router
             metadata: {
               document: terms.document,
               version: terms.version,
-              consentTypesGranted: TERMS_CONSENT_TYPES,
+              consentTypesGranted: consentTypes,
             },
           });
         }

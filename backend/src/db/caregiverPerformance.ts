@@ -127,9 +127,13 @@ export function summarisePerformance(
     for (const visit of visits) {
       const assessment = assessVisit(visit, now);
       const weekStart = mondayOf(nairobiDate(visit.scheduledStart));
-      const week =
-        weeks.get(weekStart) ??
-        ({ weekStart, completed: 0, missed: 0, onTime: 0, checkedIn: 0 });
+      const week = weeks.get(weekStart) ?? {
+        weekStart,
+        completed: 0,
+        missed: 0,
+        onTime: 0,
+        checkedIn: 0,
+      };
       weeks.set(weekStart, week);
 
       const didNotArrive = assessment.outcome === 'missed' || visit.status === 'reassigned';

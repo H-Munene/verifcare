@@ -72,7 +72,7 @@ bool _acceptEnabled(WidgetTester tester) =>
 
 /// Ticks every consent checkbox, which Accept needs.
 Future<void> _consentToBoth(WidgetTester tester) async {
-  for (var i = 0; i < 3; i++) {
+  for (var i = 0; i < 2; i++) {
     await tester.tap(find.byType(CheckboxListTile).at(i));
   }
   await tester.pumpAndSettle();
@@ -224,16 +224,12 @@ void main() {
     await http.runWithClient(() async {
       await _pumpGate(tester, backend);
       final boxes = find.byType(CheckboxListTile);
-      expect(boxes, findsNWidgets(3));
+      // Location and audio: caregivers have no voice check consent since terms v5.
+      expect(boxes, findsNWidgets(2));
       expect(_acceptEnabled(tester), isFalse);
 
-      // Any two boxes aren't enough, whichever they are.
-      await tester.tap(boxes.at(0));
+      // One box isn't enough.
       await tester.tap(boxes.at(1));
-      await tester.pumpAndSettle();
-      expect(_acceptEnabled(tester), isFalse);
-      await tester.tap(boxes.at(0));
-      await tester.tap(boxes.at(2));
       await tester.pumpAndSettle();
       expect(_acceptEnabled(tester), isFalse);
 
@@ -256,7 +252,6 @@ void main() {
         'version': '1',
         'locationConsent': true,
         'audioConsent': true,
-        'voiceConsent': true,
       });
       expect(find.text('HOME'), findsOneWidget);
     }, () => backend.client);

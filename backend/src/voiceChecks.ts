@@ -54,12 +54,19 @@ export async function removeEnrollment(
     );
 }
 
+/** What a check found, as stored; `score` and `threshold` are null when nothing was compared. */
+export interface VoiceCheckOutcome {
+  result: schema.VoiceCheckResult;
+  score: number | null;
+  threshold: number | null;
+}
+
 export async function checkRecording(
   db: Db,
   voice: VoiceService,
   recording: { id: string; s3Key: string },
   subject: ConsentSubject,
-): Promise<schema.VoiceCheckResult> {
+): Promise<VoiceCheckOutcome> {
   let values: Omit<typeof schema.voiceChecks.$inferInsert, 'audioRecordId'>;
   const consented = await subjectsWithActiveConsent(db, [subject], 'voice_verification');
   const enrollment = consented.has(subject.id) ? await activeEnrollment(db, subject) : undefined;
@@ -93,5 +100,5 @@ export async function checkRecording(
       target: schema.voiceChecks.audioRecordId,
       set: { ...row, checkedAt: new Date() },
     });
-  return row.result;
+  return { result: row.result, score: row.score ?? null, threshold: row.threshold ?? null };
 }

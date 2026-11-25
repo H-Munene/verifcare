@@ -22,6 +22,10 @@
 // Version 4 (2026-11-13) adds voice verification: two recordings at each visit, each checked
 // against an enrolled voiceprint, with a third required checkbox. Version 3 promised recordings
 // were "not analysed by any automated system", so everyone must agree again before any is.
+//
+// Version 5 (2026-11-24) records only the dependant, once, at check-out, and shows the caregiver
+// the result. Caregivers no longer have a voiceprint, so their third checkbox (voice checks) goes;
+// their audio consent stays, since their voice can be heard in the dependant's recording.
 
 export type TermsDocumentType = 'caregiver' | 'family_member';
 
@@ -60,24 +64,24 @@ const contact: TermsSection = {
   ],
 };
 
-const voiceChecks = (whose: string): TermsSection => ({
+const voiceChecks = (dependant: string, shownTo: string): TermsSection => ({
   heading: 'Voice checks',
   paragraphs: [
-    `Each visit recording is compared automatically with the voiceprint of the person it should be, to help confirm that ${whose} were at the visit. A voiceprint is a set of numbers describing how a voice sounds, made once from about 30 seconds of speech. It is biometric data, and is kept encrypted where only the voice check can read it.`,
-    'The result for each recording (a match, a mismatch, or too little speech to judge) and its similarity score are shown to VerifCare supervisors. The check can be wrong, for example with background noise or a cold, so it is advisory only: it never stops a visit from counting and is never used on its own to decide anything about anyone.',
+    `Each visit recording is compared automatically with ${dependant}'s voiceprint, to help confirm that ${dependant} was at the visit. A voiceprint is a set of numbers describing how a voice sounds, made once from about 30 seconds of speech. It is biometric data, and is kept encrypted where only the voice check can read it.`,
+    `The result (a match, a mismatch, or too little speech to judge) and its similarity score are shown to ${shownTo} and to VerifCare supervisors. The check can be wrong, for example with background noise or a cold, so it is advisory only: it never stops a visit from counting and is never used on its own to decide anything about anyone.`,
   ],
 });
 
 const caregiverTerms: TermsDocument = {
   document: 'caregiver',
-  version: '4',
+  version: '5',
   title: 'Terms of Use and Privacy Notice',
-  effectiveDate: '2026-11-13',
+  effectiveDate: '2026-11-24',
   sections: [
     {
       heading: 'About this app',
       paragraphs: [
-        "VerifCare connects caregivers with the families of older people who need care at home. As a caregiver you use this app to see your visits, check in and out, record the care you give, and record your own voice and the dependant's voice at each visit.",
+        "VerifCare connects caregivers with the families of older people who need care at home. As a caregiver you use this app to see your visits, check in and out, record the care you give, and record the dependant's voice when you check out.",
       ],
     },
     {
@@ -86,8 +90,7 @@ const caregiverTerms: TermsDocument = {
         'Your account details: your name, email address and phone number.',
         "Your location when you check in and check out, to confirm you are at the dependant's home. We do not track your location between visits.",
         "What happens on each visit: check-in and check-out times, how you checked in and out, the care tasks you record, and your notes. To check in you scan a code on a family member's phone, or ask a supervisor if nobody from the family is there. To check out you scan or type a code from a family member's phone, or give a reason if you can't.",
-        "Two recordings of 10 to 30 seconds at each visit: your voice, then the dependant's. The dependant's family can listen to the dependant's recording, as added assurance that the visit took place.",
-        'A voiceprint of your voice, made from about 30 seconds of speech that you record once in the app.',
+        "One recording of 10 to 30 seconds of the dependant speaking, made when you check out. Your voice may be heard in it, for example asking the dependant a question. The dependant's family can listen to it, as added assurance that the visit took place.",
       ],
     },
     {
@@ -99,20 +102,20 @@ const caregiverTerms: TermsDocument = {
     {
       heading: 'Who can see it',
       paragraphs: [
-        "VerifCare supervisors can see your details, your visit records and each visit's voice check results, but they cannot listen to the recordings. A dependant's family members can see your name, your visit times and the care recorded on their dependant's visits, and can listen to the dependant's recording, not yours. They cannot see your phone number or your email address.",
+        "VerifCare supervisors can see your details, your visit records and each visit's voice check result, but they cannot listen to the recordings. A dependant's family members can see your name, your visit times and the care recorded on their dependant's visits, and can listen to the visit recording. They cannot see your phone number or your email address.",
       ],
     },
     {
       heading: 'How long we keep it',
       paragraphs: [
-        'Visit recordings are deleted after 90 days. Voice check results are kept with the visit records, as part of the care history. Your voiceprint is kept while you work with VerifCare, replaced if you record it again, and deleted when your account is closed.',
+        'Visit recordings are deleted after 90 days. Voice check results are kept with the visit records, as part of the care history. VerifCare no longer makes voiceprints of caregivers: a voiceprint of your voice made under earlier terms is no longer used, and is deleted when your account is closed.',
       ],
     },
-    voiceChecks('you and the dependant'),
+    voiceChecks('the dependant', 'you when you check out'),
     {
-      heading: 'Your consent to location checks, audio and voice checks',
+      heading: 'Your consent to location checks and audio',
       paragraphs: [
-        "Below these terms we ask for three separate consents, each with its own checkbox: to your location being checked against the dependant's home when you check in and out, to audio being recorded during your visits, and to your voice being checked against your voiceprint. You need to give all three to use the app.",
+        "Below these terms we ask for two separate consents, each with its own checkbox: to your location being checked against the dependant's home when you check in and out, and to audio being recorded during your visits, since your voice may be heard in the dependant's recording. You need to give both to use the app.",
         'Visits can only be scheduled for a caregiver who has consented to location checks. To withdraw any consent later, ask your supervisor.',
       ],
     },
@@ -122,7 +125,7 @@ const caregiverTerms: TermsDocument = {
     {
       heading: 'Accepting these terms',
       paragraphs: [
-        'By ticking all three boxes and tapping Accept you confirm that you have read this notice and agree to these terms, including the use of your location, visit audio and voice described above. If you decline, the app will close and you will be asked again the next time you open it.',
+        'By ticking both boxes and tapping Accept you confirm that you have read this notice and agree to these terms, including the use of your location and visit audio described above. If you decline, the app will close and you will be asked again the next time you open it.',
       ],
     },
   ],
@@ -130,9 +133,9 @@ const caregiverTerms: TermsDocument = {
 
 const familyMemberTerms: TermsDocument = {
   document: 'family_member',
-  version: '4',
+  version: '5',
   title: 'Terms of Use and Privacy Notice',
-  effectiveDate: '2026-11-13',
+  effectiveDate: '2026-11-24',
   sections: [
     {
       heading: 'About this app',
@@ -147,7 +150,7 @@ const familyMemberTerms: TermsDocument = {
         'Details you give us about a dependant: their name, date of birth, gender, home address and the exact location of their home, and their main health condition.',
         "Your phone's location at the moment you show a check-in or check-out code, to confirm you are at the dependant's home. We keep only how far you were from the home, and we do not track your location at any other time.",
         "Visit records for your dependants: check-in and check-out times, how the caregiver checked in and out (and their reason if they checked out without your code), the care tasks recorded, and caregivers' notes.",
-        "Two recordings of 10 to 30 seconds made by the caregiver at each visit: the caregiver's voice, then the dependant's. You and the other family members linked to the dependant can listen to the dependant's recording.",
+        "One recording of 10 to 30 seconds of your dependant speaking, made by the caregiver when they check out. The caregiver's voice may be heard in it. You and the other family members linked to the dependant can listen to it.",
         "A voiceprint of your dependant's voice, made from about 30 seconds of their speech that you record once in the app.",
       ],
     },
@@ -175,7 +178,7 @@ const familyMemberTerms: TermsDocument = {
         "Visit recordings are deleted after 90 days. Voice check results are kept with the visit records, as part of the care history. A dependant's voiceprint is kept while they receive care from VerifCare, replaced if it is recorded again, and deleted when they leave.",
       ],
     },
-    voiceChecks('the caregiver and your dependant'),
+    voiceChecks('your dependant', 'the caregiver when they check out'),
     {
       heading: 'Your consent for location checks, audio and voice checks',
       paragraphs: [

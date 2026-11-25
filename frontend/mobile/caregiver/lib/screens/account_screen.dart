@@ -1,23 +1,19 @@
 import 'package:flutter/material.dart';
 
-import '../api/voice_enrollment_api.dart';
 import '../app_ui.dart';
 import '../auth/cognito_auth_service.dart';
-import 'voice_enrolment_screen.dart';
 
 /// The caregiver's account (2026-10-12): who is signed in, and signing out - which used to be an
 /// icon in the old Home stub's app bar.
 class AccountScreen extends StatelessWidget {
   final CognitoAuthService authService;
   final IdentityClaims identity;
-  final VoiceEnrollmentApi voiceEnrollmentApi;
   final VoidCallback onSignedOut;
 
   const AccountScreen({
     super.key,
     required this.authService,
     required this.identity,
-    required this.voiceEnrollmentApi,
     required this.onSignedOut,
   });
 
@@ -98,41 +94,6 @@ class AccountScreen extends StatelessWidget {
                       ),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border.all(color: borderColor),
-                ),
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: ListTile(
-                    minTileHeight: 56,
-                    leading: const Icon(
-                      Icons.record_voice_over_outlined,
-                      color: inkSecondary,
-                    ),
-                    title: const Text(
-                      'Your voice',
-                      style: TextStyle(fontSize: 15),
-                    ),
-                    subtitle: const Text(
-                      'The voiceprint your visit recordings are checked against',
-                      style: TextStyle(fontSize: 12, color: inkTertiary),
-                    ),
-                    trailing: const Icon(
-                      Icons.chevron_right,
-                      color: inkTertiary,
-                    ),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<bool>(
-                        builder: (_) =>
-                            VoiceEnrolmentScreen(api: voiceEnrollmentApi),
-                      ),
-                    ),
-                  ),
                 ),
               ),
               const SizedBox(height: 16),
