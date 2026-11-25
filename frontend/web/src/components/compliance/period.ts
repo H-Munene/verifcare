@@ -39,3 +39,25 @@ export function recentMonths(count = 24): string[] {
 export function parseMonth(value: string): string {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value <= currentMonth() ? value : currentMonth();
 }
+
+const dayMonth = (iso: string, withMonth = true) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-KE', {
+    day: 'numeric',
+    ...(withMonth ? { month: 'short' } : {}),
+    timeZone: 'UTC',
+  });
+
+/** "2–8 Nov", "30 Nov – 6 Dec", or "30 Nov": the week, cut to the report's month. */
+export function weekRange(weekStart: string, period: Period): string {
+  const last = new Date(`${weekStart}T12:00:00Z`);
+  last.setUTCDate(last.getUTCDate() + 6);
+  const from = weekStart < period.from ? period.from : weekStart;
+  const lastDay = last.toISOString().slice(0, 10);
+  const to = lastDay > period.to ? period.to : lastDay;
+  if (from === to) {
+    return dayMonth(from);
+  }
+  return from.slice(0, 7) === to.slice(0, 7)
+    ? `${dayMonth(from, false)}–${dayMonth(to)}`
+    : `${dayMonth(from)} – ${dayMonth(to)}`;
+}

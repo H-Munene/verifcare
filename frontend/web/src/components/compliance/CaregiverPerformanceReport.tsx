@@ -8,9 +8,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { CaregiverPerformanceRow, Period } from '../../api/compliance';
 import { useApi } from '../../api/useApi';
+import { Input } from '../../design-system/Input';
 import { SidePanel } from '../../design-system/SidePanel';
 import { TableSkeleton } from '../../design-system/Skeleton';
 import { TableFrame, Th } from '../../design-system/Table';
+import { CaregiverPerformanceCharts } from './CaregiverPerformanceCharts';
 import { date, percent } from './format';
 import { Flag } from './Marks';
 
@@ -109,7 +111,14 @@ function CaregiverDetail({ row, onClose }: { row: CaregiverPerformanceRow; onClo
   );
 }
 
-export function CaregiverPerformanceReport({ period }: { period: Period }) {
+export function CaregiverPerformanceReport({
+  period,
+  view = 'table',
+}: {
+  period: Period;
+  // "charts" swaps the table for CaregiverPerformanceCharts, from the page's Show charts button.
+  view?: 'table' | 'charts';
+}) {
   const { compliance } = useApi();
   const [openId, setOpenId] = useState<string | null>(null);
   const query = useQuery({
@@ -117,16 +126,51 @@ export function CaregiverPerformanceReport({ period }: { period: Period }) {
     queryFn: () => compliance.getCaregiverPerformance(period),
   });
   const open = query.data?.items.find((row) => row.caregiverId === openId);
+  // Narrows the table and the charts to caregivers whose name contains the search.
+  const [search, setSearch] = useState('');
+  const term = search.trim().toLowerCase();
+  const rows = (query.data?.items ?? []).filter(
+    (row) => term === '' || row.caregiverName.toLowerCase().includes(term),
+  );
+  const noMatch = query.data !== undefined && term !== '' && rows.length === 0;
 
   return (
     <>
+      <div className="compliance__search">
+        <Input
+          type="search"
+          placeholder="Search caregivers"
+          aria-label="Search caregivers"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </div>
       <p className="compliance__hint">
         Misses a supervisor has resolved as outside the caregiver&rsquo;s control are shown as
         excused and aren&rsquo;t counted against them. Open a caregiver for the full picture.
       </p>
-      {query.isLoading ? <TableSkeleton columns={8} /> : null}
+      {query.isLoading && view === 'table' ? <TableSkeleton columns={8} /> : null}
+      {query.isLoading && view === 'charts' ? (
+        <p className="compliance__message">Loading charts...</p>
+      ) : null}
       {query.isError ? <p className="compliance__message">The report couldn't be loaded.</p> : null}
-      {query.data ? (
+      {noMatch ? (
+        <p className="compliance__message">No caregiver matches &ldquo;{search.trim()}&rdquo;.</p>
+      ) : null}
+      {query.data && !noMatch && view === 'charts' ? (
+        rows.length === 0 ? (
+          <p className="compliance__message">No caregiver activity this month.</p>
+        ) : (
+          // A search leaves a few caregivers, drawn as vertical bars; the whole team reads
+          // better as horizontal rows.
+          <CaregiverPerformanceCharts
+            rows={rows}
+            period={period}
+            layout={term ? 'vertical' : 'horizontal'}
+          />
+        )
+      ) : null}
+      {query.data && !noMatch && view === 'table' ? (
         <TableFrame>
           <table className="ds-table ds-table--table-cell">
             <thead>
@@ -142,7 +186,7 @@ export function CaregiverPerformanceReport({ period }: { period: Period }) {
               </tr>
             </thead>
             <tbody>
-              {query.data.items.map((row) => (
+              {rows.map((row) => (
                 <tr key={row.caregiverId}>
                   <td>
                     <button
@@ -174,7 +218,7 @@ export function CaregiverPerformanceReport({ period }: { period: Period }) {
                   <td className="compliance__num">{row.visitsCovered}</td>
                 </tr>
               ))}
-              {query.data.items.length === 0 ? (
+              {rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="ds-table__empty">
                     No caregiver activity this month.
