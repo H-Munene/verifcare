@@ -32,7 +32,7 @@ export interface VisitSchedule {
 }
 
 export type VerificationAttemptType =
-  'geofence' | 'family_location' | 'qr_scan' | 'checkout_qr' | 'checkout_code';
+  'geofence' | 'family_location' | 'qr_scan' | 'checkin_code' | 'checkout_qr' | 'checkout_code';
 
 export type AudioSkipReason =
   'dependant_declined' | 'dependant_unwell_or_asleep' | 'technical_problem' | 'other';
@@ -44,7 +44,7 @@ export interface VerificationEvent {
   checkinGpsLat: number | null;
   checkinGpsLng: number | null;
   distanceFromGeofenceMeters: number | null;
-  checkinMethod: 'qr' | 'supervisor_override' | null;
+  checkinMethod: 'qr' | 'code' | 'supervisor_override' | null;
   qrFamilyMemberName: string | null;
   familyDistanceFromGeofenceMeters: number | null;
   // The dependant's recording, or why there isn't one. Supervisors can't listen: only the family can.

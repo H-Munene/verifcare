@@ -60,6 +60,9 @@ const ATTEMPT_LABELS: Record<string, string> = {
   geofence: 'Location',
   family_location: 'Family phone location',
   qr_scan: 'Code scan',
+  checkin_code: 'Code entry',
+  checkout_qr: 'Check-out code scan',
+  checkout_code: 'Check-out code entry',
 };
 
 /** "Location: out of range (2)". */
