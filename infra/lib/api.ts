@@ -11,7 +11,7 @@ import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 
 export interface ApiParams {
   vpc: ec2.Vpc;
-  database: rds.DatabaseInstance;
+  database: rds.IDatabaseInstance;
   databaseSecret: rds.DatabaseSecret;
   userPool: cognito.UserPool;
   userPoolClient: cognito.UserPoolClient;
