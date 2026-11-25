@@ -1,70 +1,26 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../api/api_client.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
-/// The phone's position for one code request.
-typedef DevicePosition = ({
-  double lat,
-  double lng,
-  double accuracyMeters,
-  bool isMocked,
-});
-
-/// Thrown when the phone's location can't be read, with wording for the family member.
-class LocationUnavailable implements Exception {
-  final String message;
-  const LocationUnavailable(this.message);
-}
-
-Future<DevicePosition> currentDevicePosition() async {
-  if (!await Geolocator.isLocationServiceEnabled()) {
-    throw const LocationUnavailable('Turn on location to show the code.');
-  }
-  var permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-  }
-  if (permission == LocationPermission.denied ||
-      permission == LocationPermission.deniedForever) {
-    throw const LocationUnavailable(
-      'Location permission is needed to confirm you are at the home.',
-    );
-  }
-  final position = await Geolocator.getCurrentPosition(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      timeLimit: Duration(seconds: 20),
-    ),
-  );
-  return (
-    lat: position.latitude,
-    lng: position.longitude,
-    accuracyMeters: position.accuracy,
-    isMocked: position.isMocked,
-  );
-}
-
 /// The code a caregiver scans to start a visit, or (with [checkout]) to finish it, with 6 digits
-/// to type if their camera won't scan. The phone has to be at the home, which is checked each time
-/// a code is issued. A code lasts about a minute, so a new one is fetched well before it runs out:
-/// the caregiver never ends up holding an expired one, and a screenshot goes stale almost at once.
+/// under it to type instead. Since 2026-11-25 the phone can be anywhere, so a family member away
+/// from the home can read the digits out. A code lasts about a minute, so a new one is fetched well
+/// before it runs out: the caregiver never ends up holding an expired one, and a screenshot goes
+/// stale almost at once.
 class CheckInCodeScreen extends StatefulWidget {
   final VisitSchedule visit;
   final VisitSchedulesApi visitSchedulesApi;
-  final Future<DevicePosition> Function() locate;
   final bool checkout;
 
   const CheckInCodeScreen({
     super.key,
     required this.visit,
     required this.visitSchedulesApi,
-    this.locate = currentDevicePosition,
     this.checkout = false,
   });
 
@@ -105,14 +61,9 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
 
   Future<void> _issue() async {
     try {
-      final position = await widget.locate();
       final code = await widget.visitSchedulesApi.issueCheckinCode(
         widget.visit.id,
         purpose: widget.checkout ? 'checkout' : 'checkin',
-        gpsLat: position.lat,
-        gpsLng: position.lng,
-        accuracyMeters: position.accuracyMeters,
-        isMockLocation: position.isMocked,
       );
       if (mounted) {
         setState(() {
@@ -121,8 +72,6 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
           _waiting = false;
         });
       }
-    } on LocationUnavailable catch (e) {
-      _fail(e.message);
     } on ApiException catch (e) {
       if (e.problem.status == 409 && !widget.checkout) {
         // The visit has moved on, which at this point almost always means the code was scanned.
@@ -139,9 +88,7 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
       }
       _fail(e.problem.detail ?? e.problem.title);
     } catch (_) {
-      _fail(
-        "Couldn't get a code. Check your connection and location, then try again.",
-      );
+      _fail("Couldn't get a code. Check your connection, then try again.");
     }
   }
 
@@ -227,8 +174,8 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
                 widget.checkout
                     ? 'Show this code to your caregiver as they leave. Scanning it, or typing the '
                           'numbers below it, confirms the visit is finished.'
-                    : 'Only show this code to your caregiver, once they are at the home. '
-                          'Scanning it starts the visit.',
+                    : 'Only give this code to your caregiver once they are at the home. '
+                          'Scanning it, or typing the numbers below it, starts the visit.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -305,12 +252,6 @@ class _CheckInCodeScreenState extends State<CheckInCodeScreen> {
                   height: 260,
                   child: Center(child: CircularProgressIndicator()),
                 ),
-              const SizedBox(height: 16),
-              const Text(
-                'This code refreshes by itself.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: inkTertiary),
-              ),
             ],
           ],
         ),

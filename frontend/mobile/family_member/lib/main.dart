@@ -90,9 +90,14 @@ class _RootScreen extends StatefulWidget {
   State<_RootScreen> createState() => _RootScreenState();
 }
 
+// The root stays on screen for the app's whole life and swaps what it shows, like the caregiver
+// app's. It used to push the home screen over itself with pushAndRemoveUntil, which removed it, so
+// signing out (2026-11-25) called setState on a screen that was gone and never reached sign-in.
 class _RootScreenState extends State<_RootScreen> {
   bool _loading = true;
   IdentityClaims? _identity;
+  // A brand-new account is asked whether to register a dependant before reaching the home screen.
+  bool _choosingDependant = false;
 
   @override
   void initState() {
@@ -129,71 +134,56 @@ class _RootScreenState extends State<_RootScreen> {
   Widget _behindConsent(IdentityClaims identity, Widget child) =>
       ConsentGate(termsApi: widget.termsApi, sub: identity.sub, child: child);
 
-  void _goToHome(IdentityClaims identity) {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => _behindConsent(
-          identity,
-          HomeScreen(
-            authService: widget.authService,
-            dependantsApi: widget.dependantsApi,
-            visitSchedulesApi: widget.visitSchedulesApi,
-            usersApi: widget.usersApi,
-            linkRequestsApi: widget.linkRequestsApi,
-            identity: identity,
-            onSignedOut: () => setState(() => _identity = null),
-          ),
-        ),
-      ),
-      (route) => false,
-    );
+  void _goToHome() {
+    if (mounted) setState(() => _choosingDependant = false);
   }
 
-  void _goToDependantChoice(IdentityClaims identity) {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => _behindConsent(
-          identity,
-          DependantChoiceScreen(
-            onRegisterNow: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) => DependantWizardScreen.register(
-                    dependantsApi: widget.dependantsApi,
-                    usersApi: widget.usersApi,
-                    identity: identity,
-                    onDone: () => _goToHome(identity),
-                  ),
-                ),
-              );
+  Widget _dependantChoice(IdentityClaims identity) => DependantChoiceScreen(
+    onRegisterNow: () {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (wizardContext) => DependantWizardScreen.register(
+            dependantsApi: widget.dependantsApi,
+            usersApi: widget.usersApi,
+            identity: identity,
+            onDone: () {
+              Navigator.of(wizardContext).pop();
+              _goToHome();
             },
-            onJoinFamily: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) =>
-                      JoinFamilyScreen(linkRequestsApi: widget.linkRequestsApi),
-                ),
-              );
-              _goToHome(identity);
-            },
-            onSkip: () => _goToHome(identity),
           ),
         ),
-      ),
-      (route) => false,
-    );
-  }
+      );
+    },
+    onJoinFamily: () async {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              JoinFamilyScreen(linkRequestsApi: widget.linkRequestsApi),
+        ),
+      );
+      _goToHome();
+    },
+    onSkip: _goToHome,
+  );
 
   void _onAuthenticated(
     IdentityClaims identity, {
     required bool justRegistered,
   }) {
-    setState(() => _identity = identity);
-    if (justRegistered) {
-      _goToDependantChoice(identity);
-    } else {
-      _goToHome(identity);
-    }
+    setState(() {
+      _identity = identity;
+      _choosingDependant = justRegistered;
+    });
+  }
+
+  void _onSignedOut() {
+    if (!mounted) return;
+    // Anything opened over the home screen goes too, so sign-in is what shows.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    setState(() {
+      _identity = null;
+      _choosingDependant = false;
+    });
   }
 
   @override
@@ -205,15 +195,17 @@ class _RootScreenState extends State<_RootScreen> {
     if (identity != null) {
       return _behindConsent(
         identity,
-        HomeScreen(
-          authService: widget.authService,
-          dependantsApi: widget.dependantsApi,
-          visitSchedulesApi: widget.visitSchedulesApi,
-          usersApi: widget.usersApi,
-          linkRequestsApi: widget.linkRequestsApi,
-          identity: identity,
-          onSignedOut: () => setState(() => _identity = null),
-        ),
+        _choosingDependant
+            ? _dependantChoice(identity)
+            : HomeScreen(
+                authService: widget.authService,
+                dependantsApi: widget.dependantsApi,
+                visitSchedulesApi: widget.visitSchedulesApi,
+                usersApi: widget.usersApi,
+                linkRequestsApi: widget.linkRequestsApi,
+                identity: identity,
+                onSignedOut: _onSignedOut,
+              ),
       );
     }
     // Signed out, the app opens straight on sign-in (2026-10-12: the Welcome screen was removed at
