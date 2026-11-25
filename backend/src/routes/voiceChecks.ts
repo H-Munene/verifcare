@@ -1,6 +1,7 @@
-// GET /voice-checks?dependantId= | ?caregiverId= (2026-11-13): a person's voice check results
-// across their recent visits, for the web console's Voice checks tab. Supervisors only. The
-// results are advisory, and reading them is audit-logged, since they come from biometric data.
+// GET /voice-checks?dependantId= (2026-11-13): a dependant's voice check results across their
+// recent visits, for the web console's Voice checks tab. Supervisors only. The results are
+// advisory, and reading them is audit-logged, since they come from biometric data. (Until
+// 2026-11-24 caregivers were recorded and checked too, with ?caregiverId=.)
 
 import { and, desc, eq } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -22,10 +23,7 @@ export interface VoiceChecksRouterDependencies {
 
 const LIMIT = 50;
 
-const querySchema = z.union([
-  z.object({ dependantId: z.string().uuid() }).strict(),
-  z.object({ caregiverId: z.string().uuid() }).strict(),
-]);
+const querySchema = z.object({ dependantId: z.string().uuid() }).strict();
 
 function getDb(res: Response): Db | undefined {
   const db = res.req.app.locals.db as Db | undefined;
@@ -50,10 +48,7 @@ export function createVoiceChecksRouter(dependencies: VoiceChecksRouterDependenc
     if (!query || !db) {
       return;
     }
-    const subject: ConsentSubject =
-      'dependantId' in query
-        ? { subjectType: 'dependant', id: query.dependantId }
-        : { subjectType: 'caregiver', id: query.caregiverId };
+    const subject: ConsentSubject = { subjectType: 'dependant', id: query.dependantId };
     try {
       const caregiverUser = alias(schema.users, 'caregiver_user');
       const rows = await db
@@ -77,13 +72,11 @@ export function createVoiceChecksRouter(dependencies: VoiceChecksRouterDependenc
         .innerJoin(caregiverUser, eq(caregiverUser.id, schema.visitSchedules.caregiverId))
         .innerJoin(schema.dependants, eq(schema.dependants.id, schema.visitSchedules.dependantId))
         .leftJoin(schema.voiceChecks, eq(schema.voiceChecks.audioRecordId, schema.audioRecords.id))
-        // The person's own recordings only: the dependant's for a dependant, the caregiver's for one.
+        // The dependant's own recordings only, not a caregiver's from before 2026-11-24.
         .where(
           and(
-            eq(schema.audioRecords.role, subject.subjectType),
-            subject.subjectType === 'dependant'
-              ? eq(schema.visitSchedules.dependantId, subject.id)
-              : eq(schema.visitSchedules.caregiverId, subject.id),
+            eq(schema.audioRecords.role, 'dependant'),
+            eq(schema.visitSchedules.dependantId, subject.id),
           ),
         )
         .orderBy(desc(schema.visitSchedules.scheduledStart))

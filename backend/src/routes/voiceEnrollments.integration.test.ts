@@ -121,48 +121,63 @@ describe.skipIf(!hasTestDb)('voice enrolment (real Postgres)', () => {
     });
   });
 
-  const enrolSelf = (s3Key = `enrol/caregiver/${caregiverId}/sample.m4a`) =>
-    request(app).post('/voice-enrollments/me').set('x-test-auth', caregiver).send({ s3Key });
-  const enrolDependant = (who = family) =>
+  const enrolDependant = (who = family, s3Key = `enrol/dependant/${dependantId}/sample.m4a`) =>
     request(app)
       .post(`/voice-enrollments/dependants/${dependantId}`)
       .set('x-test-auth', who)
-      .send({ s3Key: `enrol/dependant/${dependantId}/sample.m4a` });
+      .send({ s3Key });
   const enrolments = () => getDb().select().from(schema.voiceEnrollments);
 
-  it('enrols a caregiver with voice consent, and reports it', async () => {
-    await grantVoiceConsent({ caregiverId });
+  it('enrols a dependant with voice consent, and reports it', async () => {
+    await grantVoiceConsent({ dependantId });
 
     const upload = await request(app)
-      .post('/voice-enrollments/me/upload-url')
-      .set('x-test-auth', caregiver);
+      .post(`/voice-enrollments/dependants/${dependantId}/upload-url`)
+      .set('x-test-auth', family);
     expect(upload.status).toBe(201);
     expect((upload.body as { s3Key: string }).s3Key).toBe(
-      `enrol/caregiver/${caregiverId}/sample.m4a`,
+      `enrol/dependant/${dependantId}/sample.m4a`,
     );
 
-    expect((await enrolSelf()).status).toBe(201);
+    expect((await enrolDependant()).status).toBe(201);
     const [input] = enrol.mock.calls[0]!;
-    expect(input.audioKey).toBe(`enrol/caregiver/${caregiverId}/sample.m4a`);
-    expect(input.voiceprintKey).toMatch(new RegExp(`^caregiver/${caregiverId}/.+\\.npy$`));
-    const status = await request(app).get('/voice-enrollments/me').set('x-test-auth', caregiver);
+    expect(input.audioKey).toBe(`enrol/dependant/${dependantId}/sample.m4a`);
+    expect(input.voiceprintKey).toMatch(new RegExp(`^dependant/${dependantId}/.+\\.npy$`));
+    const status = await request(app)
+      .get(`/voice-enrollments/dependants/${dependantId}`)
+      .set('x-test-auth', family);
     expect(status.body).toMatchObject({ enrolled: true, speechSeconds: 28 });
   });
 
-  it('refuses enrolment without voice consent, or with a key for someone else', async () => {
-    expect((await enrolSelf()).status).toBe(403);
-
+  it('no longer enrols caregivers (since 2026-11-24)', async () => {
     await grantVoiceConsent({ caregiverId });
-    expect((await enrolSelf(`enrol/caregiver/someone-else/sample.m4a`)).status).toBe(400);
+
+    for (const path of ['/voice-enrollments/me', '/voice-enrollments/me/upload-url']) {
+      const response = await request(app).post(path).set('x-test-auth', caregiver).send({});
+      expect(response.status).toBe(404);
+    }
+    const status = await request(app)
+      .get(`/voice-enrollments/caregivers/${caregiverId}`)
+      .set('x-test-auth', auth('sup-1', 'supervisor'));
+    expect(status.status).toBe(404);
+  });
+
+  it('refuses enrolment without voice consent, or with a key for someone else', async () => {
+    expect((await enrolDependant()).status).toBe(403);
+
+    await grantVoiceConsent({ dependantId });
+    expect((await enrolDependant(family, `enrol/dependant/someone-else/sample.m4a`)).status).toBe(
+      400,
+    );
     expect(enrol).not.toHaveBeenCalled();
     expect(await enrolments()).toHaveLength(0);
   });
 
   it('asks for another recording when too little speech was heard', async () => {
-    await grantVoiceConsent({ caregiverId });
+    await grantVoiceConsent({ dependantId });
     enrol.mockResolvedValueOnce({ enrolled: false, speechSeconds: 11 });
 
-    const response = await enrolSelf();
+    const response = await enrolDependant();
 
     expect(response.status).toBe(422);
     expect((response.body as { detail: string }).detail).toMatch(/11 seconds/);
@@ -170,10 +185,10 @@ describe.skipIf(!hasTestDb)('voice enrolment (real Postgres)', () => {
   });
 
   it('asks for the new voiceprint to be deleted when enrolment fails part way', async () => {
-    await grantVoiceConsent({ caregiverId });
+    await grantVoiceConsent({ dependantId });
     enrol.mockRejectedValueOnce(new Error('timed out'));
 
-    expect((await enrolSelf()).status).toBe(500);
+    expect((await enrolDependant()).status).toBe(500);
 
     const [input] = enrol.mock.calls[0]!;
     expect(remove).toHaveBeenCalledWith({ voiceprintKey: input.voiceprintKey });
@@ -181,11 +196,11 @@ describe.skipIf(!hasTestDb)('voice enrolment (real Postgres)', () => {
   });
 
   it('replaces a voiceprint on re-enrolment and deletes the old one', async () => {
-    await grantVoiceConsent({ caregiverId });
-    await enrolSelf();
+    await grantVoiceConsent({ dependantId });
+    await enrolDependant();
     const [first] = await enrolments();
 
-    await enrolSelf();
+    await enrolDependant();
 
     const rows = await enrolments();
     expect(rows).toHaveLength(2);
@@ -215,9 +230,6 @@ describe.skipIf(!hasTestDb)('voice enrolment (real Postgres)', () => {
     const dependant = await request(app)
       .get(`/voice-enrollments/dependants/${dependantId}`)
       .set('x-test-auth', supervisor);
-    const caregiverStatus = await request(app)
-      .get(`/voice-enrollments/caregivers/${caregiverId}`)
-      .set('x-test-auth', supervisor);
 
     expect(Object.keys(dependant.body as object).sort()).toEqual([
       'enrolled',
@@ -225,7 +237,6 @@ describe.skipIf(!hasTestDb)('voice enrolment (real Postgres)', () => {
       'speechSeconds',
     ]);
     expect(dependant.body).toMatchObject({ enrolled: true, speechSeconds: 28 });
-    expect(caregiverStatus.body).toMatchObject({ enrolled: false });
     expect(
       (
         await request(app)

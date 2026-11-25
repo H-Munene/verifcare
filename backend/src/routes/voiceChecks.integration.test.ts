@@ -102,31 +102,30 @@ describe.skipIf(!hasTestDb)('voice checks (real Postgres)', () => {
         { verificationEventId: visit!.id, role: 'caregiver', s3Key: 'c', durationSeconds: 15 },
       ])
       .returning();
-    await getDb()
-      .insert(schema.voiceChecks)
-      .values({
-        audioRecordId: recordings[0]!.id,
-        result: 'mismatch',
-        score: 0.31,
-        threshold: 0.5,
-      });
+    await getDb().insert(schema.voiceChecks).values({
+      audioRecordId: recordings[0]!.id,
+      result: 'mismatch',
+      score: 0.31,
+      threshold: 0.5,
+    });
   });
 
   const get = (query: string, who = supervisor) =>
     request(app).get(`/voice-checks?${query}`).set('x-test-auth', who);
 
-  it("lists only the person's own recordings, with their results", async () => {
+  it("lists only the dependant's own recordings, with their results", async () => {
     const dependant = (await get(`dependantId=${dependantId}`)).body as Body;
-    const caregiver = (await get(`caregiverId=${caregiverId}`)).body as Body;
 
+    // Not the caregiver's recording from the same visit (made before 2026-11-24).
     expect(dependant.items).toMatchObject([
       { result: 'mismatch', score: 0.31, caregiverName: 'Amina' },
     ]);
-    expect(caregiver.items).toMatchObject([{ result: null, score: null }]);
     expect(dependant.enrolment).toEqual({ enrolled: false, enrolledAt: null });
+    // Caregivers are no longer checked, so there's no caregiver history to ask for.
+    expect((await get(`caregiverId=${caregiverId}`)).status).toBe(400);
   });
 
-  it('is for supervisors only, needs exactly one person, and is audit-logged', async () => {
+  it('is for supervisors only, needs exactly one dependant, and is audit-logged', async () => {
     expect((await get(`dependantId=${dependantId}`, auth('cg-1', 'caregiver'))).status).toBe(403);
     expect((await get(`dependantId=${dependantId}&caregiverId=${caregiverId}`)).status).toBe(400);
     expect((await get('')).status).toBe(400);
