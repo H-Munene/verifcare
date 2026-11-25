@@ -106,6 +106,20 @@ class CheckinApi {
     );
   }
 
+  /// Starts the visit with the 6 digits under the family's check-in code. A refused code is a
+  /// 422 saying how many tries are left; too many wrong codes is a 429.
+  Future<void> enterCode({
+    required String visitScheduleId,
+    required String sessionToken,
+    required String code,
+  }) async {
+    await _client.post(
+      '/visit-schedules/$visitScheduleId/checkin/code',
+      {'code': code},
+      headers: {'X-Checkin-Session-Token': sessionToken},
+    );
+  }
+
   Future<void> requestOverride({
     required String visitScheduleId,
     required String sessionToken,
