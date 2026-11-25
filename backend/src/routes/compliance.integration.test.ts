@@ -16,6 +16,7 @@ import {
   teardownTestDb,
   truncateAllTables,
 } from '../db/testSupport.js';
+import { CURRENT_TERMS } from '../terms.js';
 import { createComplianceRouter } from './compliance.js';
 import { createVisitResolutionsRouter } from './visitResolutions.js';
 import { createVisitSchedulesRouter } from './visitSchedules.js';
@@ -431,14 +432,18 @@ describe.skipIf(!hasTestDb)('Compliance endpoints (real Postgres)', () => {
   it('reports who has accepted the current terms', async () => {
     const db = getDb();
     await db.insert(schema.termsAcceptances).values([
-      { userId: ids.amina!, document: 'caregiver', version: '4' },
+      { userId: ids.amina!, document: 'caregiver', version: CURRENT_TERMS.caregiver.version },
       { userId: ids.brian!, document: 'caregiver', version: '1' },
     ]);
     const response = await request(app).get('/compliance/terms').set('x-test-auth', supervisorAuth);
     const caregiverDoc = (response.body as TermsBody).documents.find(
       (d) => d.document === 'caregiver',
     );
-    expect(caregiverDoc).toMatchObject({ currentVersion: '4', activeUsers: 2, acceptedCurrent: 1 });
+    expect(caregiverDoc).toMatchObject({
+      currentVersion: CURRENT_TERMS.caregiver.version,
+      activeUsers: 2,
+      acceptedCurrent: 1,
+    });
     expect(caregiverDoc?.users[0]).toMatchObject({
       name: 'Brian Otieno',
       acceptedCurrent: false,

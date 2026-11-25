@@ -188,17 +188,16 @@ async function main() {
   // --- Consent records ---------------------------------------------------------------------
   // Location for everyone; visit audio and voice checks for all but the second dependant, so that
   // visit shows the no-consent path (no recorder for them, nothing of theirs required at checkout).
+  // Caregivers consent to location and audio only: they have no voiceprint since 2026-11-24.
 
   for (const [i, caregiver] of caregivers.entries()) {
     await db.insert(schema.consentRecords).values(
-      (['location_verification', 'visit_audio', 'voice_verification'] as const).map(
-        (consentType) => ({
-          subjectType: 'caregiver' as const,
-          caregiverId: caregiver.userId,
-          consentType,
-          grantedBy: caregiverUsers[i]!.id,
-        }),
-      ),
+      (['location_verification', 'visit_audio'] as const).map((consentType) => ({
+        subjectType: 'caregiver' as const,
+        caregiverId: caregiver.userId,
+        consentType,
+        grantedBy: caregiverUsers[i]!.id,
+      })),
     );
   }
   for (const [i, dependant] of dependants.entries()) {
@@ -268,48 +267,34 @@ async function main() {
     checkoutFamilyDistanceMeters: 7.5,
   });
 
-  // Both voices recorded and checked against the enrolments below (placeholder voiceprints: the
-  // local seed never calls the voice Lambda).
-  await db.insert(schema.voiceEnrollments).values([
-    {
-      subjectType: 'caregiver',
-      caregiverId: caregivers[0]!.userId,
-      voiceprintKey: `caregiver/${caregivers[0]!.userId}/${randomUUID()}.npy`,
-      speechSeconds: 29.4,
-      modelRevision: 'seed',
-      enrolledBy: caregiverUsers[0]!.id,
-    },
-    {
-      subjectType: 'dependant',
-      dependantId: dependants[0]!.id,
-      voiceprintKey: `dependant/${dependants[0]!.id}/${randomUUID()}.npy`,
-      speechSeconds: 27.8,
-      modelRevision: 'seed',
-      enrolledBy: familyMemberUsers[0]!.id,
-    },
-  ]);
-  const recordings = await db
+  // The dependant's voice, recorded at check-out and checked against the enrolment below
+  // (a placeholder voiceprint: the local seed never calls the voice Lambda).
+  await db.insert(schema.voiceEnrollments).values({
+    subjectType: 'dependant',
+    dependantId: dependants[0]!.id,
+    voiceprintKey: `dependant/${dependants[0]!.id}/${randomUUID()}.npy`,
+    speechSeconds: 27.8,
+    modelRevision: 'seed',
+    enrolledBy: familyMemberUsers[0]!.id,
+  });
+  const [recording] = await db
     .insert(schema.audioRecords)
-    .values(
-      (['caregiver', 'dependant'] as const).map((role) => ({
-        verificationEventId: completedVisit!.id,
-        role,
-        s3Key: placeholderS3Key(`${completedVisit!.id}/${role}`),
-        durationSeconds: role === 'caregiver' ? 15 : 22,
-        uploadedAt: daysFromNow(-3, 9, 50),
-      })),
-    )
+    .values({
+      verificationEventId: completedVisit!.id,
+      role: 'dependant',
+      s3Key: placeholderS3Key(`${completedVisit!.id}/dependant`),
+      durationSeconds: 22,
+      uploadedAt: daysFromNow(-3, 9, 50),
+    })
     .returning();
-  await db.insert(schema.voiceChecks).values(
-    recordings.map((recording, i) => ({
-      audioRecordId: recording.id,
-      result: 'match' as const,
-      score: i === 0 ? 0.74 : 0.66,
-      speechSeconds: i === 0 ? 12.1 : 17.3,
-      threshold: 0.5,
-      modelRevision: 'seed',
-    })),
-  );
+  await db.insert(schema.voiceChecks).values({
+    audioRecordId: recording!.id,
+    result: 'match',
+    score: 0.66,
+    speechSeconds: 17.3,
+    threshold: 0.5,
+    modelRevision: 'seed',
+  });
 
   // Completed, 2 days ago: caregiver[1] + dependant[1] (no audio consent -> no recording).
   const [completedVisit2] = await db

@@ -788,6 +788,10 @@ export const visitResolutions = pgTable(
 
 export const RECORDING_ROLES = ['caregiver', 'dependant'] as const;
 export type RecordingRole = (typeof RECORDING_ROLES)[number];
+// Since 2026-11-24 a visit records only the dependant, once, at check-out. 'caregiver' stays valid
+// for the rows recorded before then.
+export const VISIT_RECORDING_ROLES = ['dependant'] as const satisfies readonly RecordingRole[];
+export type VisitRecordingRole = (typeof VISIT_RECORDING_ROLES)[number];
 
 export const audioRecords = pgTable(
   'audio_records',

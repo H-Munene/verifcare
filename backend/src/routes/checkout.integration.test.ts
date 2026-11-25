@@ -219,14 +219,10 @@ describe.skipIf(!hasTestDb)('check-out (real Postgres)', () => {
       expect((response.body as { detail: string }).detail).toContain('Give medication');
     });
 
-    it("needs the caregiver's own recording, and the dependant's or a reason", async () => {
+    it("needs the dependant's recording or a reason, and not the caregiver's (since 2026-11-24)", async () => {
       await grantAudio('caregiver');
       await grantAudio('dependant');
 
-      expect((await requestCheckout()).body).toMatchObject({
-        failureReason: 'caregiver_recording_required',
-      });
-      await record('caregiver');
       expect((await requestCheckout()).body).toMatchObject({
         failureReason: 'dependant_recording_required',
       });
@@ -243,7 +239,6 @@ describe.skipIf(!hasTestDb)('check-out (real Postgres)', () => {
     it('ignores a reason when the dependant was recorded', async () => {
       await grantAudio('caregiver');
       await grantAudio('dependant');
-      await record('caregiver');
       await record('dependant');
 
       expect((await requestCheckout({ audioSkipReason: 'dependant_declined' })).status).toBe(200);

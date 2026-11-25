@@ -271,6 +271,26 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(await consentRows()).toHaveLength(0);
   });
 
+  it('needs the voice check consent from a family member only, since v5 (400)', async () => {
+    const familyMember = await createTestUser('fm-1', 'family_member', '+254700000002');
+    await linkFamilyMember(await createTestDependant(familyMember.id), familyMember.id, true);
+    for (const overrides of [{ voiceConsent: undefined }, { voiceConsent: false }]) {
+      const response = await request(app)
+        .post('/terms/current/accept')
+        .set('x-test-auth', testAuthHeader('fm-1', 'family_member'))
+        .send(acceptBody(CURRENT_TERMS.family_member.version, overrides));
+      expect(response.status).toBe(400);
+    }
+    expect(await getDb().select().from(schema.termsAcceptances)).toHaveLength(0);
+
+    await createTestCaregiver('cg-1', '+254700000001');
+    const caregiver = await request(app)
+      .post('/terms/current/accept')
+      .set('x-test-auth', testAuthHeader('cg-1', 'caregiver'))
+      .send(acceptBody(CURRENT_TERMS.caregiver.version, { voiceConsent: undefined }));
+    expect(caregiver.status).toBe(200);
+  });
+
   it("records the caregiver's own location and audio consent with the acceptance", async () => {
     const caregiver = await createTestCaregiver('cg-1', '+254700000001');
     const response = await request(app)
@@ -283,14 +303,14 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(acceptance).toMatchObject({
       locationConsent: true,
       audioConsent: true,
-      voiceConsent: true,
+      // Caregivers have no voiceprint since v5, so there's nothing to consent to.
+      voiceConsent: null,
     });
     const rows = await consentRows();
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.consentType).sort()).toEqual([
       'location_verification',
       'visit_audio',
-      'voice_verification',
     ]);
     for (const row of rows) {
       expect(row).toMatchObject({
@@ -362,7 +382,6 @@ describe.skipIf(!hasTestDb)('GET/POST /terms/current (real Postgres)', () => {
     expect(active.map((row) => [row.consentType, row.grantedBy]).sort()).toEqual([
       ['location_verification', supervisor.id],
       ['visit_audio', caregiver.id],
-      ['voice_verification', caregiver.id],
     ]);
   });
   it('asks someone who accepted v1 again, since v2 adds the consents', async () => {

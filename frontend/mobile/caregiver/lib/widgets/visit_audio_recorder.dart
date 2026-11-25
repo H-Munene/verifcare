@@ -12,17 +12,15 @@ import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
 
 const maxRecordingDuration = Duration(seconds: 30);
-// Each visit voice is checked against a voiceprint, which needs at least 10 seconds of speaking
+// The visit recording is checked against a voiceprint, which needs at least 10 seconds of speaking
 // (the server enforces it too).
 const visitRecordingMinDuration = Duration(seconds: 10);
 const _barCount = 36;
 
-/// The two recordings made at each visit, in order (backend/src/db/schema.ts RECORDING_ROLES).
-const recordingRoles = ['caregiver', 'dependant'];
-
-/// The on-phone key of a visit's recording of one person.
-String visitRecordingKey(String visitScheduleId, String role) =>
-    '$visitScheduleId-$role';
+/// The on-phone key of a visit's recording of the dependant, made at check-out (only the dependant
+/// is recorded since 2026-11-24).
+String visitRecordingKey(String visitScheduleId) =>
+    '$visitScheduleId-dependant';
 
 /// Where a recording lives. Kept in app-private storage (other apps can't read it) and keyed, so
 /// it survives the app being closed mid-visit. A visit's recordings stay here until it's checked
@@ -52,19 +50,16 @@ Future<({List<int> bytes, int seconds})?> readRecording(String key) async {
   );
 }
 
-/// Uploads the visit's recording of [role] saved on this phone, if there is one.
-Future<void> uploadVisitAudio(
+/// Uploads the visit's recording of the dependant saved on this phone and returns its voice check,
+/// or null when there's no recording.
+Future<VoiceCheck?> uploadVisitAudio(
   VisitSchedulesApi api,
   String visitScheduleId,
-  String role,
 ) async {
-  final recording = await readRecording(
-    visitRecordingKey(visitScheduleId, role),
-  );
-  if (recording == null) return;
-  await api.uploadAudio(
+  final recording = await readRecording(visitRecordingKey(visitScheduleId));
+  if (recording == null) return null;
+  return api.uploadDependantAudio(
     visitScheduleId,
-    role: role,
     bytes: recording.bytes,
     durationSeconds: recording.seconds,
   );
@@ -78,18 +73,18 @@ Future<void> deleteRecording(String key) async {
   }
 }
 
-/// Removes both of a visit's recordings from this phone.
+/// Removes a visit's recordings from this phone, including a caregiver recording left by an app
+/// version from before 2026-11-24.
 Future<void> deleteVisitAudio(String visitScheduleId) async {
-  for (final role in recordingRoles) {
-    await deleteRecording(visitRecordingKey(visitScheduleId, role));
-  }
+  await deleteRecording(visitRecordingKey(visitScheduleId));
+  await deleteRecording('$visitScheduleId-caregiver');
 }
 
 enum _Mode { loading, idle, recording, recorded }
 
 /// Hold-to-record with a live waveform, then playback / re-record (the user's
 /// temp_images/audio1.png and audio2.png mockups), between [minDuration] and [maxDuration]. Used
-/// for a visit's two voices and for the enrolment sample, each under its own [storageKey].
+/// for the dependant's voice at check-out, under its own [storageKey].
 class VisitAudioRecorder extends StatefulWidget {
   final String storageKey;
   final String label;
@@ -98,7 +93,7 @@ class VisitAudioRecorder extends StatefulWidget {
   final Duration maxDuration;
 
   /// Tap to start and tap to stop, instead of holding: for recordings too long to hold a finger
-  /// down for, like the 30-second enrolment.
+  /// down for.
   final bool tapToRecord;
   final ValueChanged<bool> onRecordingChanged;
 

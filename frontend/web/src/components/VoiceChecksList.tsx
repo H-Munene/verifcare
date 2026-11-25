@@ -1,16 +1,27 @@
-import { Calendar03Icon, Mic01Icon, UserIcon } from '@hugeicons/core-free-icons';
+import {
+  Calendar03Icon,
+  ChartLineData01Icon,
+  Mic01Icon,
+  Table01Icon,
+  UserIcon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useApi } from '../api/useApi';
 import type { VoiceCheckResult } from '../api/visitSchedules';
 import { Badge } from '../design-system/Badge';
+import { Button } from '../design-system/Button';
 import { LoadError } from '../design-system/LoadError';
 import { TableSkeleton } from '../design-system/Skeleton';
 import { TableFrame, Th } from '../design-system/Table';
+import { VoiceScoreTrend } from './VoiceScoreTrend';
 import './VisitHistoryList.css';
 
 // The Voice checks tab (2026-11-13), in the place the Cognitive Trend tab had: each of the
-// person's visit recordings, checked against their enrolled voiceprint. Advisory only: a mismatch
+// dependant's visit recordings, checked against their enrolled voiceprint. Advisory only: a mismatch
 // never changed whether the visit counted, and the check can be wrong (noise, a cold, a new phone).
+// Caregivers had one too until 2026-11-24, when visits stopped recording the caregiver.
 
 const RESULT: Record<VoiceCheckResult, { label: string; tone: 'success' | 'danger' | 'neutral' }> =
   {
@@ -23,16 +34,15 @@ const RESULT: Record<VoiceCheckResult, { label: string; tone: 'success' | 'dange
   };
 
 export interface VoiceChecksListProps {
-  caregiverId?: string;
-  dependantId?: string;
+  dependantId: string;
 }
 
-export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListProps) {
+export function VoiceChecksList({ dependantId }: VoiceChecksListProps) {
   const { visitSchedules } = useApi();
+  const [showTrend, setShowTrend] = useState(false);
   const query = useQuery({
-    queryKey: ['voice-checks', caregiverId ?? dependantId],
-    queryFn: () =>
-      visitSchedules.listVoiceChecks(caregiverId ? { caregiverId } : { dependantId: dependantId! }),
+    queryKey: ['voice-checks', dependantId],
+    queryFn: () => visitSchedules.listVoiceChecks(dependantId),
   });
 
   if (query.isLoading) {
@@ -43,22 +53,40 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
   }
   const { enrolment, items } = query.data;
 
+  const trendButton =
+    items.length > 0 ? (
+      <Button type="button" aria-pressed={showTrend} onClick={() => setShowTrend((on) => !on)}>
+        <HugeiconsIcon
+          icon={showTrend ? Table01Icon : ChartLineData01Icon}
+          size={16}
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        {showTrend ? 'Show list' : 'Show trend'}
+      </Button>
+    ) : null;
+
   return (
     <div>
-      <p className="visit-history-list__empty">
-        {enrolment.enrolled && enrolment.enrolledAt
-          ? `Voice recorded on ${new Date(enrolment.enrolledAt).toLocaleDateString()}.`
-          : 'No voice recorded yet, so recordings are not checked.'}
-      </p>
+      <div className="voice-checks__bar">
+        <p className="visit-history-list__empty">
+          {enrolment.enrolled && enrolment.enrolledAt
+            ? `Voice recorded on ${new Date(enrolment.enrolledAt).toLocaleDateString()}.`
+            : 'No voice recorded yet, so recordings are not checked.'}
+        </p>
+        {trendButton}
+      </div>
       {items.length === 0 ? (
         <p className="visit-history-list__empty">No recordings yet.</p>
+      ) : showTrend ? (
+        <VoiceScoreTrend items={items} />
       ) : (
         <TableFrame>
           <table className="ds-table ds-table--table-cell">
             <thead>
               <tr>
                 <Th icon={Calendar03Icon}>Visit</Th>
-                <Th icon={UserIcon}>{caregiverId ? 'Dependant' : 'Caregiver'}</Th>
+                <Th icon={UserIcon}>Caregiver</Th>
                 <Th icon={Mic01Icon}>Result</Th>
                 <Th>Score</Th>
               </tr>
@@ -76,7 +104,7 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
                         minute: '2-digit',
                       })}
                     </td>
-                    <td>{caregiverId ? item.dependantName : item.caregiverName}</td>
+                    <td>{item.caregiverName}</td>
                     <td>
                       {result ? <Badge tone={result.tone}>{result.label}</Badge> : 'Not checked'}
                     </td>

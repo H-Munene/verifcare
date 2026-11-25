@@ -35,7 +35,6 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
   let verify: ReturnType<typeof vi.fn<VoiceService['verify']>>;
   let visitId: string;
   let dependantId: string;
-  let caregiverId: string;
   let supervisorId: string;
   let now: Date;
   const caregiver = auth('cg-1', 'caregiver');
@@ -57,34 +56,30 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
     return row!;
   }
 
+  // The dependant's consent; only the dependant is recorded since 2026-11-24.
   async function grant(
-    who: 'caregiver' | 'dependant',
+    _who: 'dependant',
     consentType: 'visit_audio' | 'voice_verification' = 'visit_audio',
   ) {
-    await getDb()
-      .insert(schema.consentRecords)
-      .values({
-        subjectType: who,
-        caregiverId: who === 'caregiver' ? caregiverId : null,
-        dependantId: who === 'dependant' ? dependantId : null,
-        consentType,
-        grantedBy: supervisorId,
-      });
+    await getDb().insert(schema.consentRecords).values({
+      subjectType: 'dependant',
+      dependantId,
+      consentType,
+      grantedBy: supervisorId,
+    });
   }
 
   async function grantAudioConsent() {
-    await grant('caregiver');
     await grant('dependant');
   }
 
-  async function enrol(who: 'caregiver' | 'dependant') {
+  async function enrol(who: 'dependant') {
     await grant(who, 'voice_verification');
     await getDb()
       .insert(schema.voiceEnrollments)
       .values({
         subjectType: who,
-        caregiverId: who === 'caregiver' ? caregiverId : null,
-        dependantId: who === 'dependant' ? dependantId : null,
+        dependantId,
         voiceprintKey: `${who}/voiceprint.npy`,
         speechSeconds: 30,
         modelRevision: 'test',
@@ -139,7 +134,6 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
     supervisorId = supervisor.id;
     const caregiverUser = await addUser('cg-1', 'caregiver', '+254700000002');
     await getDb().insert(schema.caregivers).values({ userId: caregiverUser.id });
-    caregiverId = caregiverUser.id;
     const familyUser = await addUser('fam-1', 'family_member', '+254700000003');
     await addUser('fam-2', 'family_member', '+254700000004');
     const [dependant] = await getDb()
@@ -206,41 +200,42 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
     ).sort((a, b) => a.role.localeCompare(b.role));
 
   describe('recording', () => {
-    it("reports which recordings are needed, following each person's consent", async () => {
-      const none = { required: false, recorded: false };
-      expect((await requirement()).body).toEqual({ caregiver: none, dependant: none });
+    it("reports whether the dependant's recording is needed, following their consent", async () => {
+      expect((await requirement()).body).toEqual({
+        dependant: { required: false, recorded: false },
+      });
 
       await grantAudioConsent();
-      await confirm({}, caregiver, 'caregiver');
       expect((await requirement()).body).toEqual({
-        caregiver: { required: true, recorded: true },
         dependant: { required: true, recorded: false },
+      });
+      await confirm();
+      expect((await requirement()).body).toEqual({
+        dependant: { required: true, recorded: true },
       });
     });
 
-    it("refuses a person's recording without their consent", async () => {
-      await grant('dependant');
-
-      expect((await upload(caregiver, 'caregiver')).status).toBe(403);
-      expect((await confirm({}, caregiver, 'caregiver')).status).toBe(403);
-      expect((await confirm()).status).toBe(201);
-      expect(await getDb().select().from(schema.audioRecords)).toMatchObject([
-        { role: 'dependant' },
-      ]);
+    it("refuses the dependant's recording without their consent", async () => {
+      expect((await upload()).status).toBe(403);
+      expect((await confirm()).status).toBe(403);
+      expect(await getDb().select().from(schema.audioRecords)).toHaveLength(0);
     });
 
-    it('stores one recording per person, even if the caregiver retries', async () => {
+    it('no longer records the caregiver (since 2026-11-24)', async () => {
       await grantAudioConsent();
 
-      expect((await confirm({}, caregiver, 'caregiver')).status).toBe(201);
+      expect((await upload(caregiver, 'caregiver')).status).toBe(400);
+      expect((await confirm({}, caregiver, 'caregiver')).status).toBe(400);
+    });
+
+    it('stores one recording per visit, even if the caregiver retries', async () => {
+      await grantAudioConsent();
+
       expect((await confirm()).status).toBe(201);
       expect((await confirm({ durationSeconds: 28 })).status).toBe(201);
 
       const rows = await getDb().select().from(schema.audioRecords);
-      expect(rows.map((r) => [r.role, r.durationSeconds]).sort()).toEqual([
-        ['caregiver', 30],
-        ['dependant', 28],
-      ]);
+      expect(rows.map((r) => [r.role, r.durationSeconds])).toEqual([['dependant', 28]]);
     });
 
     it('only accepts a recording during the visit', async () => {
@@ -292,39 +287,41 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
   describe('voice check', () => {
     beforeEach(grantAudioConsent);
 
-    it('checks each recording against the voiceprint of the person it claims to be', async () => {
-      await enrol('caregiver');
+    it("checks the recording against the dependant's voiceprint and returns the result", async () => {
       await enrol('dependant');
-      await confirm({}, caregiver, 'caregiver');
-      await confirm();
+      const response = await confirm();
 
       expect(verify.mock.calls.map(([input]) => input)).toEqual([
-        { audioKey: `${visitId}/caregiver/clip.m4a`, voiceprintKey: 'caregiver/voiceprint.npy' },
         { audioKey: `${visitId}/dependant/clip.m4a`, voiceprintKey: 'dependant/voiceprint.npy' },
       ]);
-      expect(await checks()).toEqual([
-        { role: 'caregiver', result: 'match', score: 0.71 },
-        { role: 'dependant', result: 'match', score: 0.71 },
-      ]);
+      expect(await checks()).toEqual([{ role: 'dependant', result: 'match', score: 0.71 }]);
+      // Shown to the caregiver straight away, so they can record again after a failed check.
+      expect(response.body).toMatchObject({
+        voiceCheck: { result: 'match', score: 0.71, threshold: 0.5 },
+      });
     });
 
-    it('does not analyse anyone without voice consent, or who is not enrolled', async () => {
-      await grant('dependant', 'voice_verification');
-      await confirm({}, caregiver, 'caregiver');
-      await confirm();
+    it('does not analyse a dependant without voice consent, or who is not enrolled', async () => {
+      const noConsent = await confirm();
+      expect(noConsent.body).toMatchObject({
+        voiceCheck: { result: 'no_consent', score: null, threshold: null },
+      });
 
+      await grant('dependant', 'voice_verification');
+      const notEnrolled = await confirm();
+      expect(notEnrolled.body).toMatchObject({
+        voiceCheck: { result: 'not_enrolled', score: null },
+      });
       expect(verify).not.toHaveBeenCalled();
-      expect(await checks()).toEqual([
-        { role: 'caregiver', result: 'no_consent', score: null },
-        { role: 'dependant', result: 'not_enrolled', score: null },
-      ]);
     });
 
     it('keeps the recording and marks the check unavailable when the voice service fails', async () => {
       await enrol('dependant');
       verify.mockRejectedValueOnce(new Error('timed out'));
 
-      expect((await confirm()).status).toBe(201);
+      const response = await confirm();
+      expect(response.status).toBe(201);
+      expect(response.body).toMatchObject({ voiceCheck: { result: 'unavailable' } });
       expect(await checks()).toEqual([{ role: 'dependant', result: 'unavailable', score: null }]);
     });
 
@@ -347,7 +344,6 @@ describe.skipIf(!hasTestDb)('visit audio (real Postgres)', () => {
   describe('listening', () => {
     beforeEach(async () => {
       await grantAudioConsent();
-      await confirm({ durationSeconds: 20 }, caregiver, 'caregiver');
       await confirm();
     });
 

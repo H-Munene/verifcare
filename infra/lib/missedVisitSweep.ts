@@ -10,7 +10,7 @@ import * as eventsTargets from "aws-cdk-lib/aws-events-targets";
 
 export interface MissedVisitSweepParams {
   vpc: ec2.Vpc;
-  database: rds.DatabaseInstance;
+  database: rds.IDatabaseInstance;
   databaseSecret: rds.DatabaseSecret;
 }
 

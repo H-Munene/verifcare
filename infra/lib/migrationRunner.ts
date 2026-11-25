@@ -7,7 +7,7 @@ import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 
 export interface MigrationRunnerParams {
   vpc: ec2.Vpc;
-  database: rds.DatabaseInstance;
+  database: rds.IDatabaseInstance;
   databaseSecret: rds.DatabaseSecret;
 }
 

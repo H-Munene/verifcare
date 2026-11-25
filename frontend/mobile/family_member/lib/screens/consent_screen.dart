@@ -15,11 +15,10 @@ const _locationConsentLabel =
     'being checked at the home when visits start and end, including my phone when I show a '
     'check-in code.';
 const _audioConsentLabel =
-    "For the same dependants, I agree to their voice and the caregiver's being recorded during "
-    'their visits.';
+    'For the same dependants, I agree to their voice being recorded when the caregiver checks out '
+    "of a visit, where the caregiver's voice may also be heard.";
 const _voiceConsentLabel =
-    "For the same dependants, I agree to each recording being checked against a voiceprint of the "
-    'person speaking.';
+    'For the same dependants, I agree to each recording being checked against their voiceprint.';
 
 /// Shows [child] only once the signed-in user has accepted the current terms of use and privacy
 /// notice (2026-09-26, user request). Until then the terms fill the screen and can't be dismissed:

@@ -1,9 +1,11 @@
-// Visit recordings (2026-11-09, two per visit since 2026-11-13): the caregiver records their own
-// voice and then the dependant's, each at least 10 seconds. Both are check-out requirements, though
-// the dependant's can be replaced by a stated reason, since a dependant is never made to speak.
+// Visit recordings (2026-11-09): since 2026-11-24 one per visit, of the dependant, made at
+// check-out and at least 10 seconds long (2026-11-13 to 11-23 the caregiver was recorded too). It's
+// a check-out requirement, though it can be replaced by a stated reason, since a dependant is never
+// made to speak.
 //
-// Each recording is checked against the voiceprint of the person it claims to be (voiceChecks.ts).
-// The result is advisory and never blocks anything, and the caregiver is not shown it.
+// The recording is checked against the dependant's voiceprint (voiceChecks.ts), and the result is
+// returned so the caregiver sees it at once. It's advisory: a failed check can be recorded again,
+// but never blocks check-out.
 //
 // Who can listen is deliberately narrow: family members linked to this dependant, to the dependant's
 // recording only. Each playback URL issued is audit-logged, since a recording made in someone's
@@ -47,7 +49,7 @@ const MAX_DURATION_SECONDS = 31;
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 
 const visitScheduleIdParamSchema = z.string().uuid();
-const roleParamSchema = z.enum(schema.RECORDING_ROLES);
+const roleParamSchema = z.enum(schema.VISIT_RECORDING_ROLES);
 const confirmRequestSchema = z.object({
   s3Key: z.string().min(1).max(300),
   durationSeconds: z.number().int().min(MIN_RECORDING_SECONDS).max(MAX_DURATION_SECONDS),
@@ -81,7 +83,7 @@ export async function recordingRequirements(
   db: Db,
   visit: { id: string; caregiverId: string; dependantId: string },
 ) {
-  const subjects = schema.RECORDING_ROLES.map((role) => recordingSubject(visit, role));
+  const subjects = schema.VISIT_RECORDING_ROLES.map((role) => recordingSubject(visit, role));
   const consented = await subjectsWithActiveConsent(db, subjects, 'visit_audio');
   const recorded = await db
     .select({ role: schema.audioRecords.role })
@@ -89,11 +91,11 @@ export async function recordingRequirements(
     .where(eq(schema.audioRecords.verificationEventId, visit.id));
   const has = new Set(recorded.map((row) => row.role));
   return Object.fromEntries(
-    schema.RECORDING_ROLES.map((role, i) => [
+    schema.VISIT_RECORDING_ROLES.map((role, i) => [
       role,
       { required: consented.has(subjects[i]!.id), recorded: has.has(role) },
     ]),
-  ) as Record<schema.RecordingRole, { required: boolean; recorded: boolean }>;
+  ) as Record<schema.VisitRecordingRole, { required: boolean; recorded: boolean }>;
 }
 
 async function findRecording(db: Db, visitScheduleId: string, role: schema.RecordingRole) {
@@ -306,11 +308,12 @@ export function createVisitAudioRouter(dependencies: VisitAudioRouterDependencie
           return row!;
         });
         // After the recording is saved, so a slow or failing check can never lose it.
-        await checkRecording(db, voice, recording, subject);
+        const voiceCheck = await checkRecording(db, voice, recording, subject);
         res.status(201).json({
           role,
           durationSeconds: body.durationSeconds,
           uploadedAt: at.toISOString(),
+          voiceCheck,
         });
       } catch (err) {
         next(err);
