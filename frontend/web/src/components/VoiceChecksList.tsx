@@ -1,11 +1,21 @@
-import { Calendar03Icon, Mic01Icon, UserIcon } from '@hugeicons/core-free-icons';
+import {
+  Calendar03Icon,
+  ChartLineData01Icon,
+  Mic01Icon,
+  Table01Icon,
+  UserIcon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { useQuery } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
 import { useApi } from '../api/useApi';
 import type { VoiceCheckResult } from '../api/visitSchedules';
 import { Badge } from '../design-system/Badge';
+import { Button } from '../design-system/Button';
 import { LoadError } from '../design-system/LoadError';
 import { TableSkeleton } from '../design-system/Skeleton';
 import { TableFrame, Th } from '../design-system/Table';
+import { VoiceScoreTrend } from './VoiceScoreTrend';
 import './VisitHistoryList.css';
 
 // The Voice checks tab (2026-11-13), in the place the Cognitive Trend tab had: each of the
@@ -25,10 +35,14 @@ const RESULT: Record<VoiceCheckResult, { label: string; tone: 'success' | 'dange
 export interface VoiceChecksListProps {
   caregiverId?: string;
   dependantId?: string;
+  // The section's heading, when the page shows one: the Show trend button sits at its far right.
+  // Without one (the dependant's Voice checks tab), the button sits beside the enrolment line.
+  heading?: ReactNode;
 }
 
-export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListProps) {
+export function VoiceChecksList({ caregiverId, dependantId, heading }: VoiceChecksListProps) {
   const { visitSchedules } = useApi();
+  const [showTrend, setShowTrend] = useState(false);
   const query = useQuery({
     queryKey: ['voice-checks', caregiverId ?? dependantId],
     queryFn: () =>
@@ -43,15 +57,39 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
   }
   const { enrolment, items } = query.data;
 
+  const trendButton =
+    items.length > 0 ? (
+      <Button type="button" aria-pressed={showTrend} onClick={() => setShowTrend((on) => !on)}>
+        <HugeiconsIcon
+          icon={showTrend ? Table01Icon : ChartLineData01Icon}
+          size={16}
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        {showTrend ? 'Show list' : 'Show trend'}
+      </Button>
+    ) : null;
+
   return (
     <div>
-      <p className="visit-history-list__empty">
-        {enrolment.enrolled && enrolment.enrolledAt
-          ? `Voice recorded on ${new Date(enrolment.enrolledAt).toLocaleDateString()}.`
-          : 'No voice recorded yet, so recordings are not checked.'}
-      </p>
+      {heading ? (
+        <div className="voice-checks__bar">
+          {heading}
+          {trendButton}
+        </div>
+      ) : null}
+      <div className="voice-checks__bar">
+        <p className="visit-history-list__empty">
+          {enrolment.enrolled && enrolment.enrolledAt
+            ? `Voice recorded on ${new Date(enrolment.enrolledAt).toLocaleDateString()}.`
+            : 'No voice recorded yet, so recordings are not checked.'}
+        </p>
+        {heading ? null : trendButton}
+      </div>
       {items.length === 0 ? (
         <p className="visit-history-list__empty">No recordings yet.</p>
+      ) : showTrend ? (
+        <VoiceScoreTrend items={items} />
       ) : (
         <TableFrame>
           <table className="ds-table ds-table--table-cell">

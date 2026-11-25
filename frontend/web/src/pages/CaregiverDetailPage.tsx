@@ -101,10 +101,14 @@ export function CaregiverDetailPage() {
       </div>
 
       <section className="caregiver-detail__tab-panel" aria-labelledby="caregiver-voice-checks">
-        <h2 id="caregiver-voice-checks" className="caregiver-detail__section-title">
-          Voice checks
-        </h2>
-        <VoiceChecksList caregiverId={caregiver.userId} />
+        <VoiceChecksList
+          caregiverId={caregiver.userId}
+          heading={
+            <h2 id="caregiver-voice-checks" className="caregiver-detail__section-title">
+              Voice checks
+            </h2>
+          }
+        />
       </section>
 
       <div className="caregiver-detail__actions">
