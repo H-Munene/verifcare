@@ -52,7 +52,8 @@ export interface VerificationEvent {
   audioDurationSeconds: number | null;
   audioSkipReason: AudioSkipReason | null;
   audioSkipNote: string | null;
-  // Both recordings, each with its advisory voice check (shown to supervisors only).
+  // The visit's recordings with their advisory voice checks (shown to supervisors only): the
+  // dependant's, plus the caregiver's on visits before 2026-11-24.
   recordings: VisitRecording[];
   // How check-out was confirmed: the family's code, or the caregiver's override and its reason.
   checkoutRequestedAt: string | null;
@@ -143,7 +144,7 @@ function toQueryString(params: ListVisitSchedulesParams): string {
   return query ? `?${query}` : '';
 }
 
-/** A person's recordings and their advisory voice checks (GET /voice-checks), newest first. */
+/** A dependant's recordings and their advisory voice checks (GET /voice-checks), newest first. */
 export interface VoiceCheckHistory {
   enrolment: { enrolled: boolean; enrolledAt: string | null };
   items: {
@@ -168,8 +169,8 @@ export function createVisitSchedulesApi(client: ApiClient) {
       client.get<VisitSchedule>(`/visit-schedules/${visitScheduleId}`),
     getVisitVerification: (visitScheduleId: string) =>
       client.get<VerificationAudit>(`/visit-schedules/${visitScheduleId}/verification`),
-    listVoiceChecks: (subject: { dependantId: string } | { caregiverId: string }) =>
-      client.get<VoiceCheckHistory>(`/voice-checks${toQueryString(subject)}`),
+    listVoiceChecks: (dependantId: string) =>
+      client.get<VoiceCheckHistory>(`/voice-checks${toQueryString({ dependantId })}`),
     createVisitSchedule: (body: CreateVisitScheduleRequest) =>
       client.post<VisitSchedule>('/visit-schedules', body),
     updateVisitSchedule: (visitScheduleId: string, body: UpdateVisitScheduleRequest) =>

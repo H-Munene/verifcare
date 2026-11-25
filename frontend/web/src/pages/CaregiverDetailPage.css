@@ -32,10 +32,3 @@
   border-top: 1px solid var(--color-border-divider);
   padding-top: 16px;
 }
-
-.caregiver-detail__section-title {
-  margin: 0 0 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-ink-primary);
-}

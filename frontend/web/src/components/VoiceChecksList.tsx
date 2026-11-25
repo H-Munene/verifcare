@@ -9,8 +9,9 @@ import { TableFrame, Th } from '../design-system/Table';
 import './VisitHistoryList.css';
 
 // The Voice checks tab (2026-11-13), in the place the Cognitive Trend tab had: each of the
-// person's visit recordings, checked against their enrolled voiceprint. Advisory only: a mismatch
+// dependant's visit recordings, checked against their enrolled voiceprint. Advisory only: a mismatch
 // never changed whether the visit counted, and the check can be wrong (noise, a cold, a new phone).
+// Caregivers had one too until 2026-11-24, when visits stopped recording the caregiver.
 
 const RESULT: Record<VoiceCheckResult, { label: string; tone: 'success' | 'danger' | 'neutral' }> =
   {
@@ -23,16 +24,14 @@ const RESULT: Record<VoiceCheckResult, { label: string; tone: 'success' | 'dange
   };
 
 export interface VoiceChecksListProps {
-  caregiverId?: string;
-  dependantId?: string;
+  dependantId: string;
 }
 
-export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListProps) {
+export function VoiceChecksList({ dependantId }: VoiceChecksListProps) {
   const { visitSchedules } = useApi();
   const query = useQuery({
-    queryKey: ['voice-checks', caregiverId ?? dependantId],
-    queryFn: () =>
-      visitSchedules.listVoiceChecks(caregiverId ? { caregiverId } : { dependantId: dependantId! }),
+    queryKey: ['voice-checks', dependantId],
+    queryFn: () => visitSchedules.listVoiceChecks(dependantId),
   });
 
   if (query.isLoading) {
@@ -58,7 +57,7 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
             <thead>
               <tr>
                 <Th icon={Calendar03Icon}>Visit</Th>
-                <Th icon={UserIcon}>{caregiverId ? 'Dependant' : 'Caregiver'}</Th>
+                <Th icon={UserIcon}>Caregiver</Th>
                 <Th icon={Mic01Icon}>Result</Th>
                 <Th>Score</Th>
               </tr>
@@ -76,7 +75,7 @@ export function VoiceChecksList({ caregiverId, dependantId }: VoiceChecksListPro
                         minute: '2-digit',
                       })}
                     </td>
-                    <td>{caregiverId ? item.dependantName : item.caregiverName}</td>
+                    <td>{item.caregiverName}</td>
                     <td>
                       {result ? <Badge tone={result.tone}>{result.label}</Badge> : 'Not checked'}
                     </td>
