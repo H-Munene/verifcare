@@ -2805,7 +2805,19 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [visitScheduleId, scheduledStart, caregiverName, dependantName, recordedAt, durationSeconds, result, score, speechSeconds, threshold]
+                      required:
+                        [
+                          visitScheduleId,
+                          scheduledStart,
+                          caregiverName,
+                          dependantName,
+                          recordedAt,
+                          durationSeconds,
+                          result,
+                          score,
+                          speechSeconds,
+                          threshold,
+                        ]
                       properties:
                         visitScheduleId:
                           type: string
@@ -4313,7 +4325,8 @@ components:
       allOf:
         - $ref: '#/components/schemas/CheckinOverride'
         - type: object
-          required: [scheduledStart, scheduledEnd, dependantName, caregiverName, distanceFromGeofenceMeters]
+          required:
+            [scheduledStart, scheduledEnd, dependantName, caregiverName, distanceFromGeofenceMeters]
           properties:
             scheduledStart: { type: string, format: date-time }
             scheduledEnd: { type: string, format: date-time }
@@ -4330,7 +4343,18 @@ components:
           maxLength: 1000
     VisitPlan:
       type: object
-      required: [id, date, shiftStart, shiftEnd, visitMinutes, status, clusters, unplaced, excludedCaregivers]
+      required:
+        [
+          id,
+          date,
+          shiftStart,
+          shiftEnd,
+          visitMinutes,
+          status,
+          clusters,
+          unplaced,
+          excludedCaregivers,
+        ]
       properties:
         id: { type: string, format: uuid }
         date: { type: string, format: date }
@@ -4343,7 +4367,8 @@ components:
           type: array
           items:
             type: object
-            required: [id, caregiverId, caregiverName, base, totalDistanceMeters, totalTravelMinutes, stops]
+            required:
+              [id, caregiverId, caregiverName, base, totalDistanceMeters, totalTravelMinutes, stops]
             properties:
               id: { type: string, format: uuid }
               caregiverId: { type: string, format: uuid }
@@ -4359,7 +4384,15 @@ components:
                 type: array
                 items:
                   type: object
-                  required: [dependantId, dependantName, scheduledStart, scheduledEnd, travelMinutes, distanceMeters]
+                  required:
+                    [
+                      dependantId,
+                      dependantName,
+                      scheduledStart,
+                      scheduledEnd,
+                      travelMinutes,
+                      distanceMeters,
+                    ]
                   properties:
                     dependantId: { type: string, format: uuid }
                     dependantName: { type: string }
