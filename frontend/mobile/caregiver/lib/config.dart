@@ -6,7 +6,7 @@ class AppConfig {
   static const String userPoolId = 'eu-west-1_bBLdq7eZm';
 
   // infra/lib/auth.ts's CaregiverAppUserPoolClient, CfnOutput CaregiverUserPoolClientId.
-  static const String caregiverUserPoolClientId = '1n6b6jgotbhkr7gg1ljp2aa26a';
+  static const String caregiverUserPoolClientId = 'o8sd25e5rgfegqpli7p6aohua';
 
   // Points at the real deployed API Gateway, not localhost - this app is tested on a physical
   // phone, where "localhost" would resolve to the phone itself, not the dev machine. Not used by
@@ -22,5 +22,5 @@ class AppConfig {
   );
 
   static const String apiBaseUrl =
-      'https://1cxsfh5mqj.execute-api.eu-west-1.amazonaws.com/prod';
+      'https://tufk7s369e.execute-api.eu-west-1.amazonaws.com/prod';
 }
