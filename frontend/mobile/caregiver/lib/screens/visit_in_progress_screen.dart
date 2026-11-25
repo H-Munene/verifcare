@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../api/visit_schedules_api.dart';
 import '../app_ui.dart';
-import '../widgets/visit_audio_recorder.dart';
 import 'checkout_screen.dart';
 
-/// The checked-in visit: the care-plan checklist plus the visit recording. Everything shown here is
-/// re-read from the server (ticks) or disk (audio) on open, so this same screen is what the
-/// ongoing-visit banner and notification reopen after the app was closed.
+/// The checked-in visit: the care-plan checklist. The ticks are re-read from the server on open, so
+/// this same screen is what the ongoing-visit banner and notification reopen after the app was
+/// closed. The dependant's voice is recorded at check-out (CheckoutScreen), since 2026-11-24.
 class VisitInProgressScreen extends StatefulWidget {
   final VisitSchedule visit;
   final VisitSchedulesApi visitSchedulesApi;
@@ -27,36 +26,11 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
   List<VisitTask>? _tasks;
   String? _error;
   final _checked = <String>{};
-  // Per recording role ('caregiver', 'dependant').
-  final _hasRecording = {for (final role in recordingRoles) role: false};
-  // Assumed needed until the server says otherwise, so a slow or failed lookup can't hide a
-  // recorder from a visit that needs it. The server has the last word at check-out anyway.
-  final _audioRequired = {for (final role in recordingRoles) role: true};
-  final _alreadyUploaded = {for (final role in recordingRoles) role: false};
 
   @override
   void initState() {
     super.initState();
     _loadTasks();
-    _loadAudioRequirement();
-  }
-
-  Future<void> _loadAudioRequirement() async {
-    try {
-      final result = await widget.visitSchedulesApi.audioRequirement(
-        widget.visit.id,
-      );
-      if (mounted) {
-        setState(() {
-          for (final MapEntry(key: role, value: r) in result.entries) {
-            _audioRequired[role] = r.required;
-            _alreadyUploaded[role] = r.recorded;
-          }
-        });
-      }
-    } catch (_) {
-      // Keep the safe assumption above.
-    }
   }
 
   Future<void> _loadTasks() async {
@@ -112,9 +86,6 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
           visitSchedulesApi: widget.visitSchedulesApi,
           tasks: tasks,
           checkedTaskIds: Set.of(_checked),
-          hasRecording: Map.of(_hasRecording),
-          audioRequired: Map.of(_audioRequired),
-          alreadyUploaded: Map.of(_alreadyUploaded),
         ),
       ),
     );
@@ -141,79 +112,14 @@ class _VisitInProgressScreenState extends State<VisitInProgressScreen> {
           ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final checklist = [
-            const _SectionTitle('Checklist'),
-            _buildChecklist(),
-          ];
-          final audio = [
-            for (final role in recordingRoles)
-              if (_audioRequired[role]!) ...[
-                _SectionTitle(_recordingTitles[role]!),
-                VisitAudioRecorder(
-                  key: _recorderKeys[role],
-                  storageKey: visitRecordingKey(widget.visit.id, role),
-                  label: _recordingTitles[role]!,
-                  hint: _recordingHints[role]!,
-                  onRecordingChanged: (has) =>
-                      setState(() => _hasRecording[role] = has),
-                ),
-                const SizedBox(height: 16),
-              ],
-          ];
-          if (!_audioRequired.values.any((required) => required)) {
-            return constrainedContent(
-              ListView(padding: const EdgeInsets.all(16), children: checklist),
-            );
-          }
-          if (constraints.maxWidth < _twoColumnMinWidth) {
-            return constrainedContent(
-              ListView(
-                padding: const EdgeInsets.all(16),
-                children: [...checklist, const SizedBox(height: 24), ...audio],
-              ),
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: checklist,
-                ),
-              ),
-              SizedBox(
-                width: 400,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
-                  children: audio,
-                ),
-              ),
-            ],
-          );
-        },
+      body: constrainedContent(
+        ListView(
+          padding: const EdgeInsets.all(16),
+          children: [const _SectionTitle('Checklist'), _buildChecklist()],
+        ),
       ),
     );
   }
-
-  // Tablets / landscape get checklist and recorders side by side. The GlobalKeys keep each
-  // recorder's state (including a recording in progress) when a rotation swaps layouts.
-  static const _twoColumnMinWidth = 840.0;
-  final _recorderKeys = {for (final role in recordingRoles) role: GlobalKey()};
-
-  static const _recordingTitles = {
-    'caregiver': 'Your voice',
-    'dependant': "The dependant's voice",
-  };
-  static const _recordingHints = {
-    'caregiver':
-        'Press and hold, and say a few sentences about the visit, for at least 10 seconds.',
-    'dependant':
-        "Hold while the dependant speaks for at least 10 seconds, for example answering an open "
-        "question. The family can listen to this.",
-  };
 
   Widget _buildChecklist() {
     if (_error != null) {
