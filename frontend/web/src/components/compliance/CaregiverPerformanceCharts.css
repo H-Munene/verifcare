@@ -1,0 +1,275 @@
+.perf-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 16px;
+}
+
+.perf-charts__card {
+  border: 1px solid var(--color-border-structural);
+  border-radius: 8px;
+  padding: 16px 18px;
+  background: var(--color-page-background);
+  min-width: 0;
+}
+
+.perf-charts__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__hint {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+.perf-charts__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--color-ink-default);
+}
+
+.perf-charts__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.perf-charts__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.perf-charts__card--wide {
+  grid-column: 1 / -1;
+}
+
+.perf-charts__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.perf-charts__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.perf-charts__row--pair {
+  grid-template-columns: 130px minmax(0, 1fr);
+}
+
+.perf-charts__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__track {
+  display: flex;
+  height: 26px;
+  border-radius: 3px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.perf-charts__track--thin {
+  height: 10px;
+  flex: 1;
+}
+
+.perf-charts__segment {
+  height: 100%;
+}
+
+.perf-charts__value {
+  font-size: 12px;
+  color: var(--color-ink-default);
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-charts__pair {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.perf-charts__pair-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.perf-charts__pair-line .perf-charts__value {
+  text-align: right;
+}
+
+.perf-charts__columns {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.perf-charts__column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  text-align: center;
+}
+
+.perf-charts__column-label {
+  font-weight: 600;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__column-plot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  height: 160px;
+  border-bottom: 1px solid var(--color-border-structural);
+}
+
+.perf-charts__column-bar {
+  display: flex;
+  flex-direction: column;
+  width: min(48px, 70%);
+  min-height: 2px;
+}
+
+.perf-charts__column-segment {
+  flex-basis: 0;
+}
+
+/* Completion and punctuality as two side-by-side columns per caregiver, each 0 to 100%. */
+.perf-charts__column-plot--pair {
+  align-items: stretch;
+  gap: 6px;
+}
+
+.perf-charts__column-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  width: min(36px, 40%);
+}
+
+.perf-charts__column-value {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--color-ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-charts__column-bar--rate {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+}
+
+.perf-charts__column-count {
+  color: var(--color-ink-default);
+}
+
+.perf-charts__column-date {
+  color: var(--color-ink-subtle);
+}
+
+.perf-charts__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+}
+
+/* Each chart's numbers, for screen readers only. */
+.perf-charts__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Hover tooltips: the counts behind a bar, shown while the pointer is over its row or column. */
+.perf-charts__column {
+  position: relative;
+}
+
+.perf-charts__tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-structural);
+  border-radius: 6px;
+  background: var(--color-page-background);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 10%);
+  font-size: 12px;
+  text-align: left;
+  pointer-events: none;
+}
+
+.perf-charts__row:hover .perf-charts__tip,
+.perf-charts__column:hover .perf-charts__tip {
+  display: flex;
+}
+
+/* Above the bar, just right of the caregiver's name. */
+.perf-charts__row .perf-charts__tip {
+  left: 140px;
+  bottom: calc(100% + 4px);
+}
+
+/* Above the column. */
+.perf-charts__column .perf-charts__tip {
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -100%);
+}
+
+.perf-charts__tip-title {
+  font-weight: 600;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__tip-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-ink-default);
+}
+
+.perf-charts__tip-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-primary);
+}
+
+.perf-charts__row:hover .perf-charts__track,
+.perf-charts__column:hover .perf-charts__column-bar {
+  filter: brightness(0.95);
+}
