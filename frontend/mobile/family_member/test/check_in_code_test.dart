@@ -10,8 +10,11 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-http.Response _json(Object body, [int status = 200]) =>
-    http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json'});
+http.Response _json(Object body, [int status = 200]) => http.Response(
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 final _visit = VisitSchedule(
   id: 'v1',
@@ -23,19 +26,12 @@ final _visit = VisitSchedule(
   status: 'scheduled',
 );
 
-Future<DevicePosition> _atHome() async =>
-    (lat: -1.28, lng: 36.81, accuracyMeters: 8.0, isMocked: false);
-
-Future<void> _pumpCode(
-  WidgetTester tester, {
-  Future<DevicePosition> Function() locate = _atHome,
-}) async {
+Future<void> _pumpCode(WidgetTester tester) async {
   await tester.pumpWidget(
     MaterialApp(
       home: CheckInCodeScreen(
         visit: _visit,
         visitSchedulesApi: VisitSchedulesApi(ApiClient(() async => null)),
-        locate: locate,
       ),
     ),
   );
@@ -43,75 +39,78 @@ Future<void> _pumpCode(
   await tester.pump();
 }
 
-Future<void> _pumpCard(WidgetTester tester, VerificationAudit audit) => tester.pumpWidget(
-  MaterialApp(
-    home: Scaffold(
-      body: VisitRecordingCard(
-        visitScheduleId: 'v1',
-        audit: audit,
-        visitSchedulesApi: VisitSchedulesApi(ApiClient(() async => null)),
+Future<void> _pumpCard(WidgetTester tester, VerificationAudit audit) =>
+    tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VisitRecordingCard(
+            visitScheduleId: 'v1',
+            audit: audit,
+            visitSchedulesApi: VisitSchedulesApi(ApiClient(() async => null)),
+          ),
+        ),
       ),
-    ),
-  ),
-);
+    );
 
 void main() {
   group('CheckInCodeScreen', () {
-    testWidgets("shows the code and who it is for, sending the phone's position", (tester) async {
-      Map<String, dynamic>? sent;
-      final backend = MockClient((request) async {
-        sent = jsonDecode(request.body) as Map<String, dynamic>;
-        return _json({
-          'token': 'opaque-token',
-          'expiresAt': '2026-11-09T09:01:00Z',
-          'caregiverDisplayName': 'Grace Wanjiru',
-        }, 201);
-      });
-      await http.runWithClient(() async {
-        await _pumpCode(tester);
+    testWidgets(
+      'shows the QR code with its 6 digits underneath, sending no location',
+      (tester) async {
+        Map<String, dynamic>? sent;
+        final backend = MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return _json({
+            'token': 'opaque-token',
+            'code': '482913',
+            'expiresAt': '2026-11-09T09:01:00Z',
+            'caregiverDisplayName': 'Grace Wanjiru',
+          }, 201);
+        });
+        await http.runWithClient(() async {
+          await _pumpCode(tester);
 
-        expect(find.byType(QrImageView), findsOneWidget);
-        expect(find.text('Is Grace Wanjiru with you?'), findsOneWidget);
-        expect(sent, containsPair('isMockLocation', false));
-        expect(sent, containsPair('gpsLat', -1.28));
-        await tester.pumpWidget(const SizedBox());
-      }, () => backend);
-    });
+          expect(find.byType(QrImageView), findsOneWidget);
+          expect(find.text('482 913'), findsOneWidget);
+          expect(find.text('Is Grace Wanjiru with you?'), findsOneWidget);
+          expect(find.textContaining('refreshes'), findsNothing);
+          expect(sent, isEmpty);
+          await tester.pumpWidget(const SizedBox());
+        }, () => backend);
+      },
+    );
 
-    testWidgets("explains a refusal when the phone isn't at the home", (tester) async {
+    testWidgets('explains a refusal and offers to try again', (tester) async {
       final backend = MockClient(
         (_) async => _json({
-          'title': 'Unprocessable Entity',
-          'status': 422,
-          'detail': "The device is outside the dependant's registered geofence.",
-        }, 422),
+          'title': 'Forbidden',
+          'status': 403,
+          'detail':
+              'The family member who showed the check-in code confirms this check-out.',
+        }, 403),
       );
       await http.runWithClient(() async {
         await _pumpCode(tester);
 
         expect(find.byType(QrImageView), findsNothing);
-        expect(find.textContaining('outside the dependant'), findsOneWidget);
+        expect(
+          find.textContaining('who showed the check-in code'),
+          findsOneWidget,
+        );
         expect(find.text('Try again'), findsOneWidget);
         await tester.pumpWidget(const SizedBox());
       }, () => backend);
     });
 
-    testWidgets('explains when location cannot be read', (tester) async {
-      final backend = MockClient((_) async => _json({}));
-      await http.runWithClient(() async {
-        await _pumpCode(
-          tester,
-          locate: () async => throw const LocationUnavailable('Turn on location.'),
-        );
-
-        expect(find.text('Turn on location.'), findsOneWidget);
-        await tester.pumpWidget(const SizedBox());
-      }, () => backend);
-    });
-
-    testWidgets('reports the visit as started once the code has been used', (tester) async {
+    testWidgets('reports the visit as started once the code has been used', (
+      tester,
+    ) async {
       final backend = MockClient(
-        (_) async => _json({'title': 'Conflict', 'status': 409, 'detail': 'Not waiting.'}, 409),
+        (_) async => _json({
+          'title': 'Conflict',
+          'status': 409,
+          'detail': 'Not waiting.',
+        }, 409),
       );
       await http.runWithClient(() async {
         await _pumpCode(tester);
@@ -122,7 +121,9 @@ void main() {
   });
 
   group('VisitRecordingCard', () {
-    testWidgets('offers the recording without fetching it until asked', (tester) async {
+    testWidgets('offers the recording without fetching it until asked', (
+      tester,
+    ) async {
       var requests = 0;
       final backend = MockClient((_) async {
         requests++;
@@ -131,7 +132,10 @@ void main() {
       await http.runWithClient(() async {
         await _pumpCard(
           tester,
-          VerificationAudit(audioRecordedAt: DateTime.now(), audioDurationSeconds: 30),
+          VerificationAudit(
+            audioRecordedAt: DateTime.now(),
+            audioDurationSeconds: 30,
+          ),
         );
 
         expect(find.text('Listen to the visit'), findsOneWidget);
@@ -154,15 +158,24 @@ void main() {
     });
 
     testWidgets('gives the reason when there is no recording', (tester) async {
-      await _pumpCard(tester, VerificationAudit(audioSkipReason: 'dependant_declined'));
+      await _pumpCard(
+        tester,
+        VerificationAudit(audioSkipReason: 'dependant_declined'),
+      );
 
-      expect(find.textContaining('preferred not to be recorded'), findsOneWidget);
+      expect(
+        find.textContaining('preferred not to be recorded'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('adds the note for an "other" reason', (tester) async {
       await _pumpCard(
         tester,
-        VerificationAudit(audioSkipReason: 'other', audioSkipNote: 'Fire alarm'),
+        VerificationAudit(
+          audioSkipReason: 'other',
+          audioSkipNote: 'Fire alarm',
+        ),
       );
 
       expect(find.textContaining('Fire alarm'), findsOneWidget);

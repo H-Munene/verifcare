@@ -150,7 +150,6 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       '/visit-schedules',
       createCheckinCodeRouter({
         requireAuth,
-        geofenceAccuracyThresholdMeters: dependencies.geofenceAccuracyThresholdMeters ?? 20,
         qrTokenTtlSeconds: dependencies.checkinQrTokenTtlSeconds ?? 60,
       }),
     );

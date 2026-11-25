@@ -79,7 +79,6 @@ describe.skipIf(!hasTestDb)('check-out (real Postgres)', () => {
       '/visit-schedules',
       createCheckinCodeRouter({
         requireAuth,
-        geofenceAccuracyThresholdMeters: 20,
         qrTokenTtlSeconds: 60,
       }),
     );
@@ -286,11 +285,10 @@ describe.skipIf(!hasTestDb)('check-out (real Postgres)', () => {
       expect(response.status).toBe(201);
     });
 
-    it("needs the family member's phone at the home", async () => {
+    it("is shown wherever the family member's phone is", async () => {
       await requestCheckout();
 
-      expect((await issueCode(family, { ...familyAtHome, ...away })).status).toBe(422);
-      expect((await issueCode(family, { ...familyAtHome, isMockLocation: true })).status).toBe(422);
+      expect((await issueCode(family, { ...familyAtHome, ...away })).status).toBe(201);
     });
   });
 

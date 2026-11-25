@@ -62,13 +62,16 @@ export const caregiverOccupationEnum = pgEnum('caregiver_occupation', [
 ]);
 // How a check-in is proved (migration 0017): the caregiver's geofence fix, the family member's phone
 // being at the home when it issues a code, and the caregiver scanning that code.
-// checkout_qr and checkout_code (0019) are the caregiver's tries at the family's check-out code.
+// checkout_qr and checkout_code (0019) are the caregiver's tries at the family's check-out code,
+// checkin_code (0020) at typing the check-in code's 6 digits. family_location is no longer written
+// since 0020, when family phones stopped having to be at the home to show a code.
 export const verificationAttemptTypeEnum = pgEnum('verification_attempt_type', [
   'geofence',
   'family_location',
   'qr_scan',
   'checkout_qr',
   'checkout_code',
+  'checkin_code',
 ]);
 // location_verification: both phones' positions are checked against the home at check-in.
 // visit_audio: the visit's recordings are made and the dependant's family can listen to them.
@@ -502,9 +505,10 @@ export const visitTaskCompletions = pgTable(
 // verification_events
 // ============================================================================
 
-// How a visit was checked in (migration 0017). 'qr' is the normal route; 'supervisor_override' is
-// the exception used when no family member was at the home, and never counts as fully verified.
-export const CHECKIN_METHODS = ['qr', 'supervisor_override'] as const;
+// How a visit was checked in (migration 0017). 'qr' is the normal route, and 'code' (0020) the same
+// code's 6 digits typed in; 'supervisor_override' is the exception used when no family member could
+// give a code, and never counts as fully verified.
+export const CHECKIN_METHODS = ['qr', 'code', 'supervisor_override'] as const;
 export type CheckinMethod = (typeof CHECKIN_METHODS)[number];
 
 // Why a caregiver checked out without a recording. A dependant is never made to speak, so the
@@ -576,7 +580,7 @@ export const verificationEvents = pgTable(
   (table) => [
     check(
       'chk_verification_events_checkin_method',
-      sql`${table.checkinMethod} IS NULL OR ${table.checkinMethod} IN ('qr', 'supervisor_override')`,
+      sql`${table.checkinMethod} IS NULL OR ${table.checkinMethod} IN ('qr', 'code', 'supervisor_override')`,
     ),
     check(
       'chk_verification_events_audio_skip_reason',
@@ -649,12 +653,13 @@ export const checkinQrTokens = pgTable(
       .notNull()
       .references(() => users.id),
     tokenHash: text().notNull().unique('uq_checkin_qr_tokens_token_hash'),
-    distanceFromGeofenceMeters: doublePrecision().notNull(),
+    // Null since 0020: the family phone's position is no longer asked for.
+    distanceFromGeofenceMeters: doublePrecision(),
     issuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp({ withTimezone: true }).notNull(),
     consumedAt: timestamp({ withTimezone: true }),
-    // 0019: check-out codes use the same table. A check-out code also has a 6-digit code to type,
-    // stored as an HMAC bound to the visit.
+    // 0019: check-out codes use the same table. Every code also has 6 digits to type (check-out
+    // codes since 0019, check-in codes since 0020), stored hashed and bound to the visit.
     purpose: text().$type<'checkin' | 'checkout'>().notNull().default('checkin'),
     codeHash: text(),
   },
