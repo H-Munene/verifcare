@@ -37,6 +37,7 @@ const ATTEMPT_LABELS: Record<VerificationAttemptType, string> = {
   geofence: 'location',
   family_location: 'family phone location',
   qr_scan: 'code scan',
+  checkin_code: 'code entry',
   checkout_qr: 'check-out code scan',
   checkout_code: 'check-out code entry',
 };
@@ -138,7 +139,9 @@ export function VisitDetails({ visit }: { visit: VisitSchedule }) {
   const steps: TimelineStep[] = [
     attemptStep('Arrived at the home', attempts, 'geofence'),
     {
-      ...attemptStep('Family code scanned', attempts, 'qr_scan'),
+      ...(event?.checkinMethod === 'code'
+        ? attemptStep('Family code typed in', attempts, 'checkin_code')
+        : attemptStep('Family code scanned', attempts, 'qr_scan')),
       ...(event?.checkinMethod === 'supervisor_override'
         ? { label: 'Started by a supervisor', timestamp: event.checkinAt }
         : {}),

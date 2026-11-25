@@ -218,24 +218,15 @@ class VisitSchedulesApi {
         await _client.get('/visit-schedules/$visitScheduleId'),
       );
 
-  /// Asks for a code to show the caregiver. The server refuses (422) if this phone isn't at the
-  /// home, and answers 409 once the visit is no longer waiting for check-in.
+  /// Asks for a code to show the caregiver, from wherever this phone is. The server answers 409
+  /// once the visit is no longer waiting for check-in.
   /// [purpose] is 'checkin' or 'checkout'. A check-out code is only issued once the caregiver has
   /// asked to check out, and only to the family member who showed the check-in code.
   Future<CheckinCode> issueCheckinCode(
     String visitScheduleId, {
     String purpose = 'checkin',
-    required double gpsLat,
-    required double gpsLng,
-    required double accuracyMeters,
-    required bool isMockLocation,
   }) async => CheckinCode.fromJson(
-    await _client.post('/visit-schedules/$visitScheduleId/$purpose/qr', {
-      'gpsLat': gpsLat,
-      'gpsLng': gpsLng,
-      'accuracyMeters': accuracyMeters,
-      'isMockLocation': isMockLocation,
-    }),
+    await _client.post('/visit-schedules/$visitScheduleId/$purpose/qr', {}),
   );
 
   /// A short-lived link to the visit's recording. Each call is logged as someone listening.

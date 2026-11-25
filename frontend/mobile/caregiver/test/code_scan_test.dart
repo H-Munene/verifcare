@@ -37,7 +37,10 @@ class _Backend {
   http.Response Function() onScan = () =>
       _json({'status': 'in_progress', 'checkinAt': '2026-11-09T09:05:00Z'});
   http.Response Function() onLatest = () => _problem(404, 'None');
+  http.Response Function() onCode = () =>
+      _json({'status': 'in_progress', 'checkinAt': '2026-11-09T09:05:00Z'});
   final scanned = <String>[];
+  final typed = <String>[];
   final sessionTokens = <String?>[];
   final overrides = <Map<String, dynamic>>[];
 
@@ -47,6 +50,11 @@ class _Backend {
       sessionTokens.add(request.headers['X-Checkin-Session-Token']);
       scanned.add((jsonDecode(request.body) as Map)['token'] as String);
       return onScan();
+    }
+    if (path.endsWith('/checkin/code')) {
+      sessionTokens.add(request.headers['X-Checkin-Session-Token']);
+      typed.add((jsonDecode(request.body) as Map)['code'] as String);
+      return onCode();
     }
     if (path.endsWith('/checkin/override')) {
       if (request.method == 'GET') return onLatest();
@@ -144,13 +152,63 @@ void main() {
     },
   );
 
+  testWidgets('"Use code instead" starts the visit with the 6 digits', (
+    tester,
+  ) async {
+    final backend = _Backend();
+    await http.runWithClient(() async {
+      await _pump(tester);
+      await tester.tap(find.text('Use code instead'));
+      await tester.pumpAndSettle();
+
+      ElevatedButton start() =>
+          tester.widget(find.widgetWithText(ElevatedButton, 'Start visit'));
+      await tester.enterText(find.byType(TextField), '12345');
+      await tester.pump();
+      expect(start().onPressed, isNull);
+
+      await tester.enterText(find.byType(TextField), '123456');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Start visit'));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(backend.typed, ['123456']);
+      expect(backend.sessionTokens, ['session']);
+      expect(find.text('Visit started'), findsOneWidget);
+    }, () => backend.client);
+  });
+
+  testWidgets('a wrong typed code says why and can be corrected', (
+    tester,
+  ) async {
+    final backend = _Backend()
+      ..onCode = () => _problem(422, "That code isn't right. 4 tries left.");
+    await http.runWithClient(() async {
+      await _pump(tester);
+      await tester.tap(find.text('Use code instead'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '000000');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Start visit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text("That code isn't right. 4 tries left."), findsOneWidget);
+      expect(
+        find.widgetWithText(ElevatedButton, 'Start visit'),
+        findsOneWidget,
+      );
+    }, () => backend.client);
+  });
+
   testWidgets('an override needs a reason, and "other" needs details', (
     tester,
   ) async {
     final backend = _Backend();
     await http.runWithClient(() async {
       await _pump(tester);
-      await tester.tap(find.text('No family member can show a code?'));
+      await tester.tap(find.text('No family member can give a code?'));
       await tester.pumpAndSettle();
 
       ElevatedButton send() =>

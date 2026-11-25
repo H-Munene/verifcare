@@ -88,8 +88,8 @@ export type ExceptionKind =
 export interface VisitAssessment {
   outcome: TrendOutcome;
   /**
-   * Every check passed: checked in by scanning a family member's code (both phones were inside the
-   * geofence, or no code could have been issued or scanned), and checked out inside the radius. A
+   * Every check passed: checked in with a family member's code, scanned or typed, after the
+   * caregiver's phone passed the geofence, and checked out inside the radius. A
    * supervisor override never counts, nor does a check-out override. Visits checked out before
    * checkout location was recorded (migration 0015) can't show the last part, so they don't count.
    */
@@ -113,7 +113,7 @@ export function assessVisit(visit: VisitRecord, now: Date): VisitAssessment {
   const fullyVerified =
     visit.checkinAt !== null &&
     visit.checkoutAt !== null &&
-    visit.checkinMethod === 'qr' &&
+    (visit.checkinMethod === 'qr' || visit.checkinMethod === 'code') &&
     visit.checkoutMethod !== 'override' &&
     visit.checkoutDistanceFromGeofenceMeters !== null &&
     visit.checkoutDistanceFromGeofenceMeters <= visit.geofenceRadiusMeters;
